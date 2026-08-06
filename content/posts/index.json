@@ -1,0 +1,37 @@
+{
+  "posts": [
+    {
+      "id": "daily-bot-nodejs",
+      "file": "daily-bot-nodejs.md",
+      "title": "用 Node.js + GitHub Actions 打造每日定时推送机器人",
+      "date": "2026-08-05",
+      "tag": "自动化",
+      "summary": "记录 daily-bot 项目的实现思路：定时任务、消息推送与零成本托管。"
+    },
+    {
+      "id": "cloudflare-pages-static",
+      "file": "cloudflare-pages-static.md",
+      "title": "把静态网站托管到 Cloudflare Pages 的几种姿势",
+      "date": "2026-07-28",
+      "tag": "部署",
+      "summary": "从 Git 自动部署到 CLI 上传，聊聊 Cloudflare Pages 的便利与坑。"
+    },
+    {
+      "id": "reading-notes-deep-work",
+      "file": "reading-notes-deep-work.md",
+      "title": "读书笔记：《深度工作》里最击中我的一句话",
+      "date": "2026-07-15",
+      "tag": "读书",
+      "summary": "注意力是这个时代最稀缺的资源，而我们把太多给了浅层事务。"
+    },
+    {
+      "id": "js-closure-again",
+      "file": "js-closure-again.md",
+      "title": "再聊 JavaScript 闭包：不只是面试题",
+      "date": "2026-06-30",
+      "tag": "前端",
+      "summary": "从一次真实的内存泄漏排查，重新理解闭包的生命周期。"
+    }
+  ],
+  "generatedAt": "2026-08-06T10:10:48.944Z"
+}

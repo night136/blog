@@ -1,14 +1,7 @@
-// ===== 博客交互逻辑（Markdown 驱动）=====
+// ===== 博客交互逻辑（index.json + Markdown 驱动）=====
 (function () {
-  // 文章清单：部署前由构建脚本或手动维护（列出 content/posts 下的 md 文件）
-  const POST_FILES = [
-    "daily-bot-nodejs.md",
-    "cloudflare-pages-static.md",
-    "reading-notes-deep-work.md",
-    "js-closure-again.md",
-  ];
-
   const BASE = "content/posts/";
+
   const postList = document.getElementById("postList");
   const archiveList = document.getElementById("archiveList");
   const postDetail = document.getElementById("postDetail");
@@ -22,25 +15,16 @@
   };
 
   let posts = [];
+  let postCache = {}; // 缓存已加载的文章正文
 
-  // 极简 frontmatter 解析
-  function parseFrontmatter(raw) {
+  // 解析 frontmatter（仅用于从全文 md 提取正文）
+  function splitFrontmatter(raw) {
     const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-    if (!m) return { meta: {}, body: raw };
-    const meta = {};
-    m[1].split("\n").forEach((line) => {
-      const i = line.indexOf(":");
-      if (i > -1) {
-        const k = line.slice(0, i).trim();
-        let v = line.slice(i + 1).trim();
-        v = v.replace(/^["']|["']$/g, "");
-        meta[k] = v;
-      }
-    });
-    return { meta, body: m[2] };
+    if (!m) return { body: raw };
+    return { body: m[2] };
   }
 
-  // 轻量 Markdown -> HTML（标题/段落/列表/代码块/行内 code）
+  // 极简 Markdown -> HTML
   function mdToHtml(md) {
     const esc = (s) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -112,16 +96,27 @@
     });
   }
 
-  function openPost(id) {
+  async function openPost(id) {
     const p = posts.find((x) => x.id === id);
     if (!p) return;
+    let html = postCache[id];
+    if (!html) {
+      try {
+        const res = await fetch(BASE + p.file);
+        const raw = res.ok ? await res.text() : "";
+        html = mdToHtml(splitFrontmatter(raw).body);
+        postCache[id] = html;
+      } catch (e) {
+        html = "<p>文章加载失败，请稍后重试。</p>";
+      }
+    }
     postDetail.innerHTML = `
       <div class="post-meta">
         <span class="tag">${p.tag}</span>
         <span>${formatDate(p.date)}</span>
       </div>
       <h2>${p.title}</h2>
-      ${p.html}
+      ${html}
     `;
     showView("post");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -135,28 +130,18 @@
     );
   }
 
-  async function loadPosts() {
-    const loaded = await Promise.all(
-      POST_FILES.map(async (f) => {
-        const res = await fetch(BASE + f);
-        if (!res.ok) return null;
-        const raw = await res.text();
-        const { meta, body } = parseFrontmatter(raw);
-        return {
-          id: f.replace(/\.md$/, ""),
-          title: meta.title || f,
-          date: meta.date || "1970-01-01",
-          tag: meta.tag || "未分类",
-          summary: meta.summary || "",
-          html: mdToHtml(body),
-        };
-      })
-    );
-    posts = loaded
-      .filter(Boolean)
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    renderHome();
-    renderArchive();
+  async function loadIndex() {
+    try {
+      const res = await fetch(BASE + "index.json");
+      if (!res.ok) throw new Error("index.json not found");
+      const data = await res.json();
+      posts = (data.posts || []).sort((a, b) => (a.date < b.date ? 1 : -1));
+      renderHome();
+      renderArchive();
+    } catch (e) {
+      console.error("加载文章索引失败:", e);
+      postList.innerHTML = `<p style="color:#9a9ab0">暂时无法加载文章列表，请检查 content/posts/index.json 是否存在。</p>`;
+    }
   }
 
   navLinks.forEach((link) => {
@@ -168,5 +153,5 @@
   });
   backBtn.addEventListener("click", () => showView("home"));
 
-  loadPosts();
+  loadIndex();
 })();

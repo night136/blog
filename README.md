@@ -28,6 +28,12 @@ python3 -m http.server 8080
 
 > 注意：必须用 HTTP 服务器打开，不能直接双击 `index.html`（`fetch` 会被浏览器拦）。
 
+如果改了文章，要重新生成索引：
+
+```bash
+node scripts/build-index.js
+```
+
 ## 部署到 Cloudflare Pages
 
 1. 登录 Cloudflare 控制台 → **Workers & Pages** → **Create** → **Pages** → **连接到 Git**
@@ -40,19 +46,18 @@ python3 -m http.server 8080
 
 ## 配置 GitHub OAuth（让 CMS 能登录写文章）
 
-Decap CMS 用 GitHub 账号登录，需要一个 OAuth App：
+完整图文步骤见 **`CMS-OAUTH.md`**。这里简述关键点：
 
 1. GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
    - **Homepage URL**: 你的站点域名，如 `https://blog.example.com`
    - **Authorization callback URL**: `https://blog.example.com/admin/`
 2. 拿到 **Client ID** 和 **Client Secret**
-3. 因为 Cloudflare Pages 是纯静态，没有后端处理 OAuth 回调，官方推荐用 [Netlify](https://www.netlify.com/) 的 **Implicit Grant**（无需 Secret）或自托一个轻量 OAuth 回调。
-   最简方案（无需自建服务）：
-   - 把 `admin/config.yml` 的 `backend` 改成用 Netlify Identity（需部署到 Netlify），**或**
-   - 用一个现成的 OAuth 中继，例如 [`decap-cms-oauth-proxy`](https://github.com/vencax/netlify-cms-oauth-provider) 部署到任意 Node 环境，把回调地址填进 GitHub OAuth App。
+3. 因为 Cloudflare Pages 是纯静态，没有后端处理 OAuth 回调，推荐方案：
+   - **最简单**：把站点部署到 Netlify 并用 Git Gateway（详细步骤见 CMS-OAUTH.md 方案 A）
+   - **保留 Cloudflare Pages**：用一个 Cloudflare Worker 做 OAuth 中继（详细步骤 + Worker 代码见 CMS-OAUTH.md 方案 B）
 4. 改 `admin/config.yml` 顶部的 `site_url` / `display_url` 为你的真实域名。
 
-> 如果只是想本地写、Git 提交文章，不强制登录 CMS：直接往 `content/posts/` 丢 `.md` 文件，commit 后 Cloudflare 自动重新部署即可。新增文件后记得在 `assets/app.js` 的 `POST_FILES` 数组里加上文件名。
+> 如果只是想本地写、Git 提交文章，不强制登录 CMS：直接往 `content/posts/` 丢 `.md` 文件，然后运行 `node scripts/build-index.js` 更新 `index.json`，再 commit/push，Cloudflare 会自动重新部署。
 
 ## 新增一篇文章的格式
 
