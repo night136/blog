@@ -5,15 +5,18 @@ backend:
   name: github
   repo: night136/blog
   branch: main
+  # OAuth 中继地址：填你部署的 oauth-worker 的 Worker 地址（见 oauth-worker/README.md）
+  # 注意：必须是 https，且不要结尾的斜杠
+  auth_endpoint: https://blog-oauth-provider.<你的子域>.workers.dev
 
-# 站点地址（CMS 预览与回调用，部署后改成你的真实域名）
-site_url: https://example.com
-display_url: https://example.com
+# 站点地址（CMS 预览与回调用，改成你的博客真实域名）
+site_url: https://blog.zhongfangxin682.workers.dev
+display_url: https://blog.zhongfangxin682.workers.dev
 
 # 编辑工作流：保存文章为草稿，审核后再发布
 publish_mode: editorial_workflow
 
-# 文件搜索/图片上传
+# 文件搜索/图片上传（路径相对仓库根目录）
 media_folder: "blog-site/assets/uploads"
 public_folder: "/assets/uploads"
 
