@@ -2,6 +2,7 @@
 title: 用 Node.js + GitHub Actions 打造每日定时推送机器人
 date: 2026-08-05
 tag: 自动化
+author: 昉昕
 summary: 记录 daily-bot 项目的实现思路：定时任务、消息推送与零成本托管。
 ---
 

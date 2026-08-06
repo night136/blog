@@ -35,6 +35,7 @@ const posts = files.map((file) => {
     title: meta.title || file.replace(/\.md$/, ''),
     date: meta.date || '1970-01-01',
     tag: meta.tag || '未分类',
+    author: meta.author || '昉昕',
     summary: meta.summary || '',
   };
 });

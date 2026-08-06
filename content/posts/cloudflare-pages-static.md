@@ -2,6 +2,7 @@
 title: 把静态网站托管到 Cloudflare Pages 的几种姿势
 date: 2026-07-28
 tag: 部署
+author: 昉昕
 summary: 从 Git 自动部署到 CLI 上传，聊聊 Cloudflare Pages 的便利与坑。
 ---
 

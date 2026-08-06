@@ -2,6 +2,7 @@
 title: 再聊 JavaScript 闭包：不只是面试题
 date: 2026-06-30
 tag: 前端
+author: 昉昕
 summary: 从一次真实的内存泄漏排查，重新理解闭包的生命周期。
 ---
 

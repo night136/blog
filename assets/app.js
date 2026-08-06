@@ -70,6 +70,7 @@
           <div class="post-meta">
             <span class="tag">${p.tag}</span>
             <span>${formatDate(p.date)}</span>
+            <span class="author">✍ ${p.author}</span>
           </div>
           <h3>${p.title}</h3>
           <p>${p.summary}</p>
@@ -114,6 +115,7 @@
       <div class="post-meta">
         <span class="tag">${p.tag}</span>
         <span>${formatDate(p.date)}</span>
+        <span class="author">✍ ${p.author}</span>
       </div>
       <h2>${p.title}</h2>
       ${html}
