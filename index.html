@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>昉昕的博客 · 记录与思考</title>
+  <meta name="description" content="昉昕的个人博客，记录技术实践、读书笔记与生活思考。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="avatar">昉</div>
+        <div class="brand-text">
+          <h1>昉昕</h1>
+          <p>开发者 · 写作者</p>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="#" class="nav-link active" data-view="home">首页</a>
+        <a href="#" class="nav-link" data-view="archive">归档</a>
+        <a href="#" class="nav-link" data-view="about">关于</a>
+        <a href="admin/" class="nav-link" target="_blank" rel="noopener">✍️ 写文章</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="dot"></span> 正在写字…
+      </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="content">
+      <!-- 首页视图 -->
+      <section class="view view-home active">
+        <header class="hero">
+          <h2>记录与思考</h2>
+          <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
+        </header>
+        <div class="post-list" id="postList"><!-- JS 注入 --></div>
+      </section>
+
+      <!-- 归档视图 -->
+      <section class="view view-archive">
+        <header class="page-head">
+          <h2>归档</h2>
+          <p>所有文章按时间排列。</p>
+        </header>
+        <div class="archive-list" id="archiveList"><!-- JS 注入 --></div>
+      </section>
+
+      <!-- 关于视图 -->
+      <section class="view view-about">
+        <header class="page-head">
+          <h2>关于</h2>
+        </header>
+        <div class="prose">
+          <p>你好，我是 <strong>昉昕</strong>，一个常驻江西的开发者。</p>
+          <p>日常工作是开发与维护，节奏里夹着一些自动化的小机器人项目。这个博客用来沉淀我踩过的坑、读过的书，以及偶尔冒出来的想法。</p>
+          <p>如果某篇文章帮到了你，那便是它最好的归宿。</p>
+        </div>
+      </section>
+
+      <!-- 文章详情视图 -->
+      <section class="view view-post">
+        <button class="back-btn" id="backBtn">← 返回</button>
+        <article class="post-detail" id="postDetail"><!-- JS 注入 --></article>
+      </section>
+    </main>
+  </div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

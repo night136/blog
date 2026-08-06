@@ -1,0 +1,31 @@
+# Decap CMS 配置 —— 指向 GitHub 仓库 night136/blog
+# 文档: https://decapcms.org/docs/configuration-options/
+backend:
+  name: github
+  repo: night136/blog
+  branch: main
+  # 登录授权用 GitHub OAuth App。
+  # 回调地址需设为: https://<你的站点域名>/admin/
+  # 详见 README 中的「配置 GitHub OAuth」一节。
+
+# 站点地址（CMS 预览与回调用，部署后改成你的真实域名）
+site_url: https://example.com
+display_url: https://example.com
+
+media_folder: "assets/uploads"   # 图片等媒体存放路径（相对于仓库根）
+public_folder: "/assets/uploads"
+
+collections:
+  - name: "posts"
+    label: "文章"
+    folder: "content/posts"
+    slug: "{{slug}}"
+    create: true
+    delete: true
+    fields:
+      - { name: title, label: "标题", widget: string }
+      - { name: date, label: "日期", widget: datetime, format: "YYYY-MM-DD", date_format: "YYYY-MM-DD", time_format: false }
+      - { name: tag, label: "分类标签", widget: string }
+      - { name: summary, label: "摘要", widget: text }
+      - { name: body, label: "正文", widget: markdown }
+    summary: "{{title}}"
