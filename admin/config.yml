@@ -36,5 +36,6 @@ collections:
       - { name: tag, label: "分类标签", widget: string }
       - { name: author, label: "作者", widget: string, default: "昉昕" }
       - { name: summary, label: "摘要", widget: text }
+      - { name: cover, label: "封面图", widget: image, required: false }
       - { name: body, label: "正文", widget: markdown, buttons: [bold, italic, code, link, heading-two, heading-three, quote, bulleted-list, numbered-list] }
     summary: "{{title}}"

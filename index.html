@@ -35,13 +35,30 @@
       <!-- 首页视图 -->
       <section class="view view-home active">
         <header class="hero">
-          <h2>记录与思考</h2>
-          <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
-          <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>
-          <a href="admin/" target="_blank" rel="noopener" class="btn-write">✍️ 写文章 / 登录后台</a>
-          <p class="write-hint">GitHub 登录请使用 Chrome 无痕模式（Ctrl+Shift+N），避免扩展拦截授权弹窗。</p>
+          <div class="hero-text">
+            <h2>记录与思考</h2>
+            <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
+            <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>
+          </div>
+          <div class="hero-actions">
+            <a href="admin/" target="_blank" rel="noopener" class="btn-write">✍️ 写文章 / 登录后台</a>
+            <p class="write-hint">GitHub 登录请使用 Chrome 无痕模式（Ctrl+Shift+N），避免扩展拦截授权弹窗。</p>
+          </div>
         </header>
-        <div class="post-list" id="postList"><!-- JS 注入 --></div>
+
+        <!-- 特色文章轮播 -->
+        <section class="slider" id="slider" aria-label="精选文章">
+          <div class="slides" id="slides"><!-- JS 注入 --></div>
+          <button class="slider-arrow prev" id="slidePrev" aria-label="上一篇">‹</button>
+          <button class="slider-arrow next" id="slideNext" aria-label="下一篇">›</button>
+          <div class="slider-dots" id="slideDots"></div>
+        </section>
+
+        <!-- 分类筛选 -->
+        <div class="filter-bar" id="filterBar"><!-- JS 注入 --></div>
+
+        <!-- 卡片网格 -->
+        <div class="card-grid" id="cardGrid"><!-- JS 注入 --></div>
       </section>
 
       <!-- 归档视图 -->
@@ -72,6 +89,8 @@
       </section>
     </main>
   </div>
+
+  <button class="back-top" id="backTop" aria-label="返回顶部">↑</button>
 
   <script src="assets/vendor/lunar.js"></script>
   <script src="assets/app.js"></script>
