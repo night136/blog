@@ -7,7 +7,7 @@ backend:
   branch: main
   # OAuth 中继地址：填你部署的 oauth-worker 的 Worker 地址（见 oauth-worker/README.md）
   # 注意：必须是 https，且不要结尾的斜杠
-  auth_endpoint: https://blog-oauth-provider.<你的子域>.workers.dev
+  auth_endpoint: https://blog-oauth-provider.zhongfangxin682.workers.dev
 
 # 站点地址（CMS 预览与回调用，改成你的博客真实域名）
 site_url: https://blog.zhongfangxin682.workers.dev
