@@ -56,43 +56,65 @@ export default {
         );
       }
 
-      // Decap CMS 的双向握手协议：
-      // ① 先发 "authorizing:github" 告诉 CMS 要授权了
-      // ② CMS 回复确认后，再发 token（字符串格式：authorization:github:success:{JSON}）
-      // ③ 如果 3 秒没收到回复，兜底发送（默认 origin 为 *）
+      // Decap CMS 完整握手协议（多重保险）：
+      // ① 发 "authorizing:github" 告知 CMS
+      // ② 监听 CMS 回复
+      // ③ 同时 100ms/1s/3s 三次兜底，发送 token（多重格式）
+      // ④ 30 秒后才关闭（不急）
       const html = `<!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>Authorizing…</title></head>
+  <head><meta charset="utf-8"><title>Authorizing…</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; text-align: center; padding: 40px; background: #f5f5f7; }
+    .ok { color: #2c7; font-size: 18px; margin: 20px 0; }
+    .sub { color: #666; font-size: 13px; }
+    button { padding: 10px 24px; background: #d52b5b; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 20px; }
+  </style>
+  </head>
   <body>
-    <p style="text-align:center;font-family:sans-serif;margin-top:40px;">
-      授权成功，正在返回博客后台…
-    </p>
+    <p class="ok">✓ 授权成功！</p>
+    <p class="sub">正在返回博客后台… 如果页面没自动跳转，请点击下方按钮手动关闭。</p>
+    <button onclick="window.close()">关闭此窗口</button>
     <script>
       var tokenData = ${JSON.stringify({ provider: 'github', token: token })};
-      var responded = false;
+      var sent = false;
 
-      // 发送 token 到指定 origin
       function sendToken(targetOrigin) {
-        if (responded) return;
-        responded = true;
-        window.opener.postMessage(
-          'authorization:github:success:' + JSON.stringify(tokenData),
-          targetOrigin
-        );
-        setTimeout(function() { window.close(); }, 200);
+        if (sent) return;
+        sent = true;
+        try {
+          // 格式 1: 字符串格式（Decap CMS 期望的标准）
+          window.opener.postMessage(
+            'authorization:github:success:' + JSON.stringify(tokenData),
+            targetOrigin
+          );
+          // 格式 2: 对象格式（一些 Decap 版本/其他 CMS 可能用）
+          window.opener.postMessage(
+            { type: 'authorization:github:success', provider: 'github', token: tokenData.token },
+            targetOrigin
+          );
+        } catch (e) {
+          console.error('postMessage failed:', e);
+        }
       }
 
-      // 兜底：3 秒后强制发送
-      var fallback = setTimeout(function() { sendToken('*'); }, 3000);
+      // 100ms 后立刻发（不等 CMS 回复，最大兼容）
+      setTimeout(function() { sendToken('*'); }, 100);
 
-      // ② 等待 CMS 回复确认
-      window.addEventListener('message', function receiveMessage(e) {
-        clearTimeout(fallback);
+      // 同时监听 CMS 回复（如果 CMS 用新的握手协议）
+      window.addEventListener('message', function(e) {
         sendToken(e.origin);
       });
 
-      // ① 告诉 CMS "我要开始授权了"
-      window.opener.postMessage('authorizing:github', '*');
+      // ① 发起握手
+      try {
+        window.opener.postMessage('authorizing:github', '*');
+      } catch (e) {
+        console.error('handshake failed:', e);
+      }
+
+      // 30 秒后自动关闭（防止长时间挂着）
+      setTimeout(function() { window.close(); }, 30000);
     </script>
   </body>
 </html>`;
