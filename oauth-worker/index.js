@@ -1,5 +1,7 @@
 // Cloudflare Worker —— 作为 Decap CMS 的 GitHub OAuth 中继
-// 部署后，把本 Worker 的地址填到 admin/config.yml 的 backend.auth_endpoint。
+// 部署后，把本 Worker 的地址填到 admin/config.yml：
+//   backend.base_url: https://<本Worker域名>
+//   backend.auth_endpoint: /oauth/authorize
 // GitHub OAuth App 的「Authorization callback URL」必须填： https://<本Worker域名>/oauth/callback
 //
 // 环境变量（在 Worker 设置里配置）：
@@ -12,7 +14,7 @@ export default {
     const path = url.pathname;
 
     // ── 第 1 步：把用户导向 GitHub 授权页 ──
-    if (path === "/oauth/authorize" || path === "/") {
+    if (path === "/oauth/authorize" || path === "/auth" || path === "/") {
       const clientId = env.GITHUB_CLIENT_ID;
       const scope = "repo"; // Decap 需要写仓库权限
       const redirectUri = `${url.origin}/oauth/callback`;

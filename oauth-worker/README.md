@@ -54,6 +54,16 @@ https://blog-oauth-provider.<你的子域>.workers.dev/oauth/callback
 
 ## 然后
 
-把 `admin/config.yml` 的 `backend.auth_endpoint` 改成这个 Worker 地址，
+把 `admin/config.yml` 改成：
+
+```yaml
+backend:
+  name: github
+  repo: night136/blog
+  branch: main
+  base_url: https://blog-oauth-provider.<你的子域>.workers.dev
+  auth_endpoint: /oauth/authorize
+```
+
 把 `site_url` / `display_url` 改成你的博客域名，重新部署即可。
 详见根目录 `CMS-OAUTH.md`。

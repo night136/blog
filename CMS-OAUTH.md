@@ -10,7 +10,7 @@
 
 1. 在 GitHub 建一个 **OAuth App**，拿到 Client ID / Client Secret
 2. 把 `oauth-worker/index.js` 部署成一个 **Cloudflare Worker**（OAuth 中继）
-3. 把 Worker 地址填进 `admin/config.yml` 的 `auth_endpoint`
+3. 把 Worker 地址填进 `admin/config.yml` 的 `base_url` 和 `auth_endpoint`
 4. 重新部署博客到 Cloudflare Pages
 5. 打开 `/admin/` 登录，写文章
 
@@ -90,7 +90,8 @@ backend:
   name: github
   repo: night136/blog
   branch: main
-  auth_endpoint: https://blog-oauth-provider.<你的子域>.workers.dev   # ← 改成你的 Worker 地址
+  base_url: https://blog-oauth-provider.<你的子域>.workers.dev       # ← 改成你的 Worker 地址
+  auth_endpoint: /oauth/authorize
 
 site_url: https://blog.zhongfangxin682.workers.dev   # ← 改成你的博客域名
 display_url: https://blog.zhongfangxin682.workers.dev
@@ -127,12 +128,13 @@ display_url: https://blog.zhongfangxin682.workers.dev
 ## 常见问题
 
 ### 登录后白屏 / 报 `Unable to parse`
-- GitHub OAuth App 的 **callback URL** 和 `auth_endpoint` 不一致，或末尾多了 `/`
+- GitHub OAuth App 的 **callback URL** 和 Worker 地址不一致，或末尾多了 `/`
 - 确认回调是 `https://<Worker>/oauth/callback`
 
 ### 点 Login 没反应 / 弹窗被挡
 - 浏览器拦截了弹窗，允许该站点的弹窗后重试
-- 确认 `auth_endpoint` 是 `https` 且能从公网访问
+- 确认 `backend.base_url` 是 `https` 且能从公网访问
+- 确认 `backend.auth_endpoint` 填的是 `/oauth/authorize`
 
 ### 发布后网站没更新
 - 去 GitHub 仓库看 `main` 分支有没有新 commit / 新 PR

@@ -5,9 +5,9 @@ backend:
   name: github
   repo: night136/blog
   branch: main
-  # OAuth 中继地址：填你部署的 oauth-worker 的 Worker 地址（见 oauth-worker/README.md）
-  # 注意：必须是 https，且不要结尾的斜杠
-  auth_endpoint: https://blog-oauth-provider.zhongfangxin682.workers.dev
+  # OAuth 中继：base_url 是你的 Worker 根地址；auth_endpoint 是相对路径
+  base_url: https://blog-oauth-provider.zhongfangxin682.workers.dev
+  auth_endpoint: /oauth/authorize
 
 # 站点地址（CMS 预览与回调用，改成你的博客真实域名）
 site_url: https://blog.zhongfangxin682.workers.dev
