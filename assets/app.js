@@ -250,5 +250,42 @@
   });
   backBtn.addEventListener("click", () => showView("home"));
 
+  // ===== 农历 + 时辰显示 =====
+  const DI_ZHI = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"];
+  const SHICHEN_RANGE = [
+    "23:00–01:00", "01:00–03:00", "03:00–05:00", "05:00–07:00",
+    "07:00–09:00", "09:00–11:00", "11:00–13:00", "13:00–15:00",
+    "15:00–17:00", "17:00–19:00", "19:00–21:00", "21:00–23:00",
+  ];
+
+  function updateLunar() {
+    const el = document.getElementById("lunarClock");
+    if (!el) return;
+    if (typeof Lunar === "undefined") {
+      el.textContent = "农历组件加载中…";
+      return;
+    }
+    const now = new Date();
+    const lunar = Lunar.fromDate(now);
+    const ganZhi = lunar.getYearInGanZhi();   // 丙午
+    const shengXiao = lunar.getYearShengXiao(); // 马
+    const month = lunar.getMonthInChinese();   // 六月 / 闰六月
+    const day = lunar.getDayInChinese();        // 十五
+    const idx = Math.floor(((now.getHours() + 1) % 24) / 2);
+    const shichen = DI_ZHI[idx];
+
+    const pad = (n) => String(n).padStart(2, "0");
+    const hm = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    el.innerHTML =
+      `🗓 ${ganZhi}年（${shengXiao}）${month}${day} · ` +
+      `<strong>${shichen}时</strong> ` +
+      `<span class="lunar-time">${hm}</span>`;
+    el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[idx]}）`;
+  }
+
+  updateLunar();
+  setInterval(updateLunar, 1000);
+
   loadPosts();
 })();

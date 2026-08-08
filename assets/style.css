@@ -107,6 +107,23 @@ img { max-width: 100%; height: auto; border-radius: 8px; display: block; }
 .btn-write:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(91, 91, 214, 0.34); }
 .write-hint { margin-top: 12px; font-size: 13px; color: var(--text-faint); }
 
+.lunar-clock {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--text-soft);
+  box-shadow: var(--shadow);
+  font-variant-numeric: tabular-nums;
+}
+.lunar-clock strong { color: var(--accent); font-weight: 700; }
+.lunar-clock .lunar-time { color: var(--text-faint); font-size: 12px; letter-spacing: .5px; }
+
 .page-head { margin-bottom: 28px; }
 .page-head h2 { font-size: 26px; font-weight: 800; }
 .page-head p { color: var(--text-soft); margin-top: 6px; }
