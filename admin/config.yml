@@ -17,14 +17,14 @@ display_url: https://blog.zhongfangxin682.workers.dev
 publish_mode: editorial_workflow
 
 # 文件搜索/图片上传（路径相对仓库根目录）
-media_folder: "blog-site/assets/uploads"
+media_folder: "assets/uploads"
 public_folder: "/assets/uploads"
 
 # 文章集合
 collections:
   - name: "posts"
     label: "文章"
-    folder: "blog-site/content/posts"
+    folder: "content/posts"
     slug: "{{year}}-{{month}}-{{day}}-{{slug}}"
     create: true
     delete: true

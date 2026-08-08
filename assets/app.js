@@ -46,6 +46,17 @@
   function mdToHtml(md) {
     const esc = (s) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // 解析行内 Markdown：链接、图片、加粗、斜体、行内代码
+    function inlineHtml(text) {
+      return esc(text)
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+    }
+
     const lines = md.split("\n");
     let html = "", i = 0;
     while (i < lines.length) {
@@ -58,18 +69,17 @@
         html += `<pre><code>${esc(code.join("\n"))}</code></pre>`;
         continue;
       }
-      if (line.startsWith("### ")) { html += `<h3>${esc(line.slice(4))}</h3>`; i++; continue; }
-      if (line.startsWith("## ")) { html += `<h3>${esc(line.slice(3))}</h3>`; i++; continue; }
-      if (line.startsWith("# ")) { html += `<h2>${esc(line.slice(2))}</h2>`; i++; continue; }
+      if (line.startsWith("### ")) { html += `<h3>${inlineHtml(line.slice(4))}</h3>`; i++; continue; }
+      if (line.startsWith("## ")) { html += `<h3>${inlineHtml(line.slice(3))}</h3>`; i++; continue; }
+      if (line.startsWith("# ")) { html += `<h2>${inlineHtml(line.slice(2))}</h2>`; i++; continue; }
       if (/^[-*] /.test(line)) {
         const items = [];
-        while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(`<li>${esc(lines[i].slice(2))}</li>`); i++; }
+        while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(`<li>${inlineHtml(lines[i].slice(2))}</li>`); i++; }
         html += `<ul>${items.join("")}</ul>`;
         continue;
       }
       if (line.trim() === "") { i++; continue; }
-      const txt = esc(line).replace(/`([^`]+)`/g, "<code>$1</code>");
-      html += `<p>${txt}</p>`;
+      html += `<p>${inlineHtml(line)}</p>`;
       i++;
     }
     return html;
