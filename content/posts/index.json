@@ -1,6 +1,15 @@
 {
   "posts": [
     {
+      "id": "2026-08-07-戴姆勒组长",
+      "file": "2026-08-07-戴姆勒组长.md",
+      "title": "戴姆勒组长",
+      "date": "2026-08-08",
+      "tag": "。",
+      "author": "昉昕",
+      "summary": "。。。"
+    },
+    {
       "id": "daily-bot-nodejs",
       "file": "daily-bot-nodejs.md",
       "title": "用 Node.js + GitHub Actions 打造每日定时推送机器人",
@@ -37,5 +46,5 @@
       "summary": "从一次真实的内存泄漏排查，重新理解闭包的生命周期。"
     }
   ],
-  "generatedAt": "2026-08-06T11:17:54.133Z"
+  "generatedAt": "2026-08-08T07:24:58.739Z"
 }
