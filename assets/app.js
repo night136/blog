@@ -395,7 +395,7 @@
     const hm = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
     el.innerHTML =
-      `🗓 ${ganZhi}年（${shengXiao}）${month}${day} · ` +
+      `🗓 ${ganZhi}年（${shengXiao}）${month}月${day} · ` +
       `<strong>${shichen}时</strong> ` +
       `<span class="lunar-time">${hm}</span>`;
     el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[idx]}）`;
