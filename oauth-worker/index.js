@@ -56,20 +56,43 @@ export default {
         );
       }
 
-      // Decap CMS 的弹窗会监听 'authorization:github:success:' 消息
+      // Decap CMS 的双向握手协议：
+      // ① 先发 "authorizing:github" 告诉 CMS 要授权了
+      // ② CMS 回复确认后，再发 token（字符串格式：authorization:github:success:{JSON}）
+      // ③ 如果 3 秒没收到回复，兜底发送（默认 origin 为 *）
       const html = `<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>Authorizing…</title></head>
   <body>
+    <p style="text-align:center;font-family:sans-serif;margin-top:40px;">
+      授权成功，正在返回博客后台…
+    </p>
     <script>
-      window.opener.postMessage(
-        'authorization:github:success:' + JSON.stringify({
-          provider: 'github',
-          token: '${token}'
-        }),
-        '*'
-      );
-      window.close();
+      var tokenData = ${JSON.stringify({ provider: 'github', token: token })};
+      var responded = false;
+
+      // 发送 token 到指定 origin
+      function sendToken(targetOrigin) {
+        if (responded) return;
+        responded = true;
+        window.opener.postMessage(
+          'authorization:github:success:' + JSON.stringify(tokenData),
+          targetOrigin
+        );
+        setTimeout(function() { window.close(); }, 200);
+      }
+
+      // 兜底：3 秒后强制发送
+      var fallback = setTimeout(function() { sendToken('*'); }, 3000);
+
+      // ② 等待 CMS 回复确认
+      window.addEventListener('message', function receiveMessage(e) {
+        clearTimeout(fallback);
+        sendToken(e.origin);
+      });
+
+      // ① 告诉 CMS "我要开始授权了"
+      window.opener.postMessage('authorizing:github', '*');
     </script>
   </body>
 </html>`;
