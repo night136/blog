@@ -1,6 +1,12 @@
-// ===== 博客交互逻辑（index.json + Markdown 驱动）=====
+// ===== 博客交互逻辑（直接读取 GitHub 仓库 Markdown，无需 index.json 维护）=====
 (function () {
   const BASE = "content/posts/";
+
+  // 仓库信息：通过 GitHub 公开 API 列出文章，再读取原始 Markdown
+  const REPO = "night136/blog";
+  const BRANCH = "main";
+  const POSTS_API = `https://api.github.com/repos/${REPO}/contents/content/posts`;
+  const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/content/posts`;
 
   const postList = document.getElementById("postList");
   const archiveList = document.getElementById("archiveList");
@@ -15,13 +21,25 @@
   };
 
   let posts = [];
-  let postCache = {}; // 缓存已加载的文章正文
+  let postCache = {}; // 缓存已加载的文章正文 HTML
 
-  // 解析 frontmatter（仅用于从全文 md 提取正文）
-  function splitFrontmatter(raw) {
+  // 解析 frontmatter，返回 { meta, body }
+  function parseFrontmatter(raw) {
     const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-    if (!m) return { body: raw };
-    return { body: m[2] };
+    if (!m) return { meta: {}, body: raw };
+    const meta = {};
+    m[1].split("\n").forEach((line) => {
+      const i = line.indexOf(":");
+      if (i > -1) {
+        const k = line.slice(0, i).trim();
+        const v = line
+          .slice(i + 1)
+          .trim()
+          .replace(/^["']|["']$/g, "");
+        meta[k] = v;
+      }
+    });
+    return { meta, body: m[2] || "" };
   }
 
   // 极简 Markdown -> HTML
@@ -60,6 +78,47 @@
   function formatDate(d) {
     const [y, m, day] = d.split("-");
     return `${y}年${Number(m)}月${Number(day)}日`;
+  }
+
+  // 从 GitHub API 列出 content/posts 下的 .md 文件名；失败则回退 index.json
+  async function fetchPostIds() {
+    try {
+      const res = await fetch(POSTS_API, {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (res.ok) {
+        const items = await res.json();
+        const ids = items
+          .filter(
+            (it) =>
+              it.type === "file" &&
+              it.name.endsWith(".md") &&
+              it.name !== "index.json"
+          )
+          .map((it) => it.name.replace(/\.md$/, ""));
+        if (ids.length) return ids;
+      }
+    } catch (e) {
+      /* 走到兜底 */
+    }
+    // 兜底：读取已有的 index.json
+    try {
+      const res = await fetch(BASE + "index.json");
+      if (res.ok) {
+        const data = await res.json();
+        return (data.posts || [])
+          .map((p) => p.id || (p.file || "").replace(/\.md$/, ""))
+          .filter(Boolean);
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  // 读取单篇文章原始 Markdown（带缓存破坏参数，确保发新文章后能立即看到）
+  async function fetchPostBody(id) {
+    const res = await fetch(`${RAW_BASE}/${id}.md?t=${Date.now()}`);
+    if (!res.ok) throw new Error("fetch failed");
+    return await res.text();
   }
 
   function renderHome() {
@@ -103,9 +162,8 @@
     let html = postCache[id];
     if (!html) {
       try {
-        const res = await fetch(BASE + p.file);
-        const raw = res.ok ? await res.text() : "";
-        html = mdToHtml(splitFrontmatter(raw).body);
+        const raw = await fetchPostBody(id);
+        html = mdToHtml(parseFrontmatter(raw).body);
         postCache[id] = html;
       } catch (e) {
         html = "<p>文章加载失败，请稍后重试。</p>";
@@ -132,18 +190,45 @@
     );
   }
 
-  async function loadIndex() {
-    try {
-      const res = await fetch(BASE + "index.json");
-      if (!res.ok) throw new Error("index.json not found");
-      const data = await res.json();
-      posts = (data.posts || []).sort((a, b) => (a.date < b.date ? 1 : -1));
-      renderHome();
-      renderArchive();
-    } catch (e) {
-      console.error("加载文章索引失败:", e);
-      postList.innerHTML = `<p style="color:#9a9ab0">暂时无法加载文章列表，请检查 content/posts/index.json 是否存在。</p>`;
+  // 加载全部文章：列出 -> 逐篇读取 frontmatter -> 渲染
+  async function loadPosts() {
+    postList.innerHTML = `<p style="color:#9a9ab0">正在加载文章…</p>`;
+    const ids = await fetchPostIds();
+    if (!ids.length) {
+      postList.innerHTML = `<p style="color:#9a9ab0">暂时没有文章。在 Decap CMS（/admin/）发布后会自动出现在这里。</p>`;
+      return;
     }
+    const loaded = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const raw = await fetchPostBody(id);
+          const { meta, body } = parseFrontmatter(raw);
+          postCache[id] = mdToHtml(body);
+          return {
+            id,
+            file: id + ".md",
+            title: meta.title || id,
+            date: meta.date || "1970-01-01",
+            tag: meta.tag || "未分类",
+            author: meta.author || "昉昕",
+            summary:
+              meta.summary ||
+              body.replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim(),
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    posts = loaded
+      .filter(Boolean)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    if (!posts.length) {
+      postList.innerHTML = `<p style="color:#9a9ab0">文章加载失败，请稍后重试。</p>`;
+      return;
+    }
+    renderHome();
+    renderArchive();
   }
 
   navLinks.forEach((link) => {
@@ -155,5 +240,5 @@
   });
   backBtn.addEventListener("click", () => showView("home"));
 
-  loadIndex();
+  loadPosts();
 })();
