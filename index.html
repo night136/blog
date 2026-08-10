@@ -110,7 +110,19 @@
             </div>
           </div>
           <div class="compose-panels">
-            <textarea id="composeBody" placeholder="支持 Markdown 语法…&#10;&#10;# 标题&#10;正文内容……"></textarea>
+            <div class="compose-editor">
+              <div class="editor-toolbar">
+                <button type="button" data-md="## " title="标题">H</button>
+                <button type="button" data-md='**' data-md-end='**' title="加粗">B</button>
+                <button type="button" data-md='*' data-md-end='*' title="斜体">I</button>
+                <button type="button" data-md='`' data-md-end='`' title="行内代码">{}</button>
+                <button type="button" data-md='> ' title="引用">❝</button>
+                <button type="button" data-md='- ' title="列表">≡</button>
+                <button type="button" data-md='![图片描述](https://)' data-md-pick="url" data-md-pick-start="13" data-md-pick-end="21" title="插入图片">🖼</button>
+                <button type="button" data-md='[链接文字](https://)' data-md-pick="url" data-md-pick-start="6" data-md-pick-end="16" title="插入链接">🔗</button>
+              </div>
+              <textarea id="composeBody" placeholder="支持 Markdown 语法…&#10;&#10;# 标题&#10;正文内容……&#10;&#10;图片：![描述](https://example.com/img.jpg)"></textarea>
+            </div>
             <div class="compose-preview prose" id="composePreview"></div>
           </div>
           <div class="compose-actions">

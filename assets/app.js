@@ -386,6 +386,38 @@
   // ===== 全屏写作页 =====
   function openCompose() { showView("compose"); if (composeTitle) composeTitle.value = ""; if (composeTag) composeTag.value = ""; if (composeSummary) composeSummary.value = ""; if (composeCover) composeCover.value = ""; if (composeBody) composeBody.value = ""; if (composePreview) composePreview.innerHTML = "<p style='color:var(--text-faint)'>实时预览…</p>"; if (composeMsg) composeMsg.textContent = ""; }
 
+  // 编辑器工具栏（快捷插入 Markdown 语法）
+  document.querySelectorAll(".editor-toolbar button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const ta = composeBody; if (!ta) return;
+      const prefix = btn.dataset.md || "";
+      const suffix = btn.dataset.mdEnd || "";
+      const pickMode = btn.dataset.mdPick; // "url" = popup prompt
+
+      if (pickMode === "url") {
+        const startPos = parseInt(btn.dataset.mdPickStart) || 0;
+        const endPos = parseInt(btn.dataset.mdPickEnd) || 0;
+        const placeholder = prefix.slice(startPos, endPos) || "https://";
+        const url = prompt("请输入图片或链接地址：", placeholder);
+        if (url) {
+          const md = prefix.slice(0, startPos) + url + prefix.slice(endPos);
+          insertAtCursor(ta, md + suffix);
+        }
+      } else {
+        const sel = ta.value.substring(ta.selectionStart, ta.selectionEnd) || "文字";
+        insertAtCursor(ta, prefix + sel + suffix + (suffix ? "" : ""));
+      }
+      ta.focus();
+      ta.dispatchEvent(new Event("input"));
+    });
+  });
+
+  function insertAtCursor(textarea, text) {
+    const s = textarea.selectionStart, e = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, s) + text + textarea.value.slice(e);
+    textarea.selectionStart = textarea.selectionEnd = s + text.length;
+  }
+
   // 实时预览
   if (composeBody) composeBody.addEventListener("input", () => { if (composePreview) composePreview.innerHTML = mdToHtml(composeBody.value || "") || "<p style='color:var(--text-faint)'>实时预览…</p>"; });
 
