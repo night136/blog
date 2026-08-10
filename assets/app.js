@@ -116,8 +116,19 @@
     return Math.max(1, Math.round(words / 350));
   }
 
-  // 从 GitHub API 列出 content/posts 下的 .md 文件名；失败则回退 index.json
+  // 从本地 index.json 读取文章 id 列表（Cloudflare 部署自带，无限流）；
+  // 失败再回退到 GitHub API 列目录（匿名，可能限流）
   async function fetchPostIds() {
+    try {
+      const res = await fetch("content/posts/index.json");
+      if (res.ok) {
+        const data = await res.json();
+        const ids = (data.posts || [])
+          .map((p) => p.id || (p.file || "").replace(/\.md$/, ""))
+          .filter(Boolean);
+        if (ids.length) return ids;
+      }
+    } catch (e) {}
     try {
       const res = await fetch(POSTS_API, {
         headers: { Accept: "application/vnd.github+json" },
@@ -135,20 +146,11 @@
         if (ids.length) return ids;
       }
     } catch (e) {}
-    try {
-      const res = await fetch("content/posts/index.json");
-      if (res.ok) {
-        const data = await res.json();
-        return (data.posts || [])
-          .map((p) => p.id || (p.file || "").replace(/\.md$/, ""))
-          .filter(Boolean);
-      }
-    } catch (e) {}
     return [];
   }
 
   async function fetchPostBody(id) {
-    const res = await fetch(`${RAW_BASE}/${id}.md?t=${Date.now()}`);
+    const res = await fetch(`${RAW_BASE}/${encodeURIComponent(id)}.md?t=${Date.now()}`);
     if (!res.ok) throw new Error("fetch failed");
     return await res.text();
   }
