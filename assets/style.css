@@ -18,6 +18,9 @@
   --quote-bg: #f4f2ff;
 }
 
+/* 强制 [hidden] 属性始终生效（覆盖 .btn-auth 等 display: inline-flex 的 CSS） */
+[hidden] { display: none !important; }
+
 /* ===== 暗色主题 ===== */
 [data-theme="dark"] {
   --bg: #0f0f1a;
