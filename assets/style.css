@@ -1,47 +1,67 @@
-/* ===== 设计变量：亮色主题 ===== */
+/* ===== 设计变量：亮色主题（毛玻璃半透明）===== */
 :root {
-  --bg: #fbfbfd;
-  --surface: #ffffff;
-  --surface-2: #f4f4f7;
+  --bg: #f5f0ff;
+  --surface: rgba(255, 255, 255, 0.65);
+  --surface-2: rgba(244, 244, 255, 0.45);
   --text: #1a1a2e;
   --text-soft: #5b5b70;
   --text-faint: #9a9ab0;
   --accent: #5b5bd6;
-  --accent-soft: #eceaff;
-  --border: #ececf2;
-  --radius: 16px;
-  --shadow: 0 1px 3px rgba(20,20,50,.04), 0 8px 24px rgba(20,20,50,.05);
+  --accent-soft: rgba(91, 91, 214, 0.12);
+  --border: rgba(180, 175, 210, 0.3);
+  --radius: 18px;
+  --shadow: 0 2px 6px rgba(20,20,50,.04), 0 8px 32px rgba(20,20,50,.06);
   --maxw: 1180px;
-  --pre-bg: #1a1a2e;
+  --pre-bg: rgba(26, 26, 46, 0.88);
   --pre-fg: #e4e4f0;
   --quote-border: #5b5bd6;
-  --quote-bg: #f4f2ff;
+  --quote-bg: rgba(91, 91, 214, 0.06);
+  --glass-blur: 14px;
 }
 
-/* 强制 [hidden] 属性始终生效（覆盖 .btn-auth 等 display: inline-flex 的 CSS） */
+/* 强制 [hidden] 属性始终生效 */
 [hidden] { display: none !important; }
 
 /* ===== 暗色主题 ===== */
 [data-theme="dark"] {
-  --bg: #0f0f1a;
-  --surface: #1a1a2e;
-  --surface-2: #242440;
+  --bg: #0d0d18;
+  --surface: rgba(26, 26, 46, 0.62);
+  --surface-2: rgba(36, 36, 64, 0.42);
   --text: #e4e4f0;
   --text-soft: #a0a0c0;
   --text-faint: #6b6b88;
   --accent: #8f8fff;
-  --accent-soft: #2a2a50;
-  --border: #2a2a50;
-  --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.45);
-  --pre-bg: #0d0d1a;
+  --accent-soft: rgba(143, 143, 255, 0.12);
+  --border: rgba(80, 75, 110, 0.3);
+  --shadow: 0 2px 6px rgba(0,0,0,.3), 0 8px 32px rgba(0,0,0,.45);
+  --pre-bg: rgba(13, 13, 26, 0.9);
   --pre-fg: #d4d4e0;
   --quote-border: #8f8fff;
-  --quote-bg: #1e1e3a;
+  --quote-bg: rgba(143, 143, 255, 0.06);
+}
 }
 [data-theme="dark"] .btn-submit, [data-theme="dark"] .btn-publish, [data-theme="dark"] .back-top { color: #fff; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
+
+/* 背景渐变（供毛玻璃模糊穿透） */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(91, 91, 214, 0.08), transparent),
+    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(255, 122, 77, 0.06), transparent),
+    radial-gradient(ellipse 50% 40% at 60% 30%, rgba(255, 214, 77, 0.05), transparent),
+    linear-gradient(180deg, #f8f5ff 0%, #f3f0fb 40%, #f7f4f9 100%);
+}
+[data-theme="dark"] body::before {
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 20%, rgba(143, 143, 255, 0.06), transparent),
+    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(255, 122, 77, 0.04), transparent),
+    radial-gradient(ellipse 50% 40% at 60% 30%, rgba(255, 214, 77, 0.03), transparent),
+    linear-gradient(180deg, #0d0d18 0%, #101020 40%, #0e0e1a 100%);
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   background: var(--bg); color: var(--text); line-height: 1.7;
@@ -49,6 +69,14 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
+
+/* ===== 毛玻璃通用效果 ===== */
+.sidebar, .card, .modal, .lunar-clock, .user-chip, .btn-auth, .chip,
+.back-btn, .search-box input, .compose-meta input, .compose-panels textarea,
+.compose-preview, .compose-panels input, .perk, .archive-item {
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
 
 /* ===== 布局 ===== */
 .layout { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; max-width: var(--maxw); margin: 0 auto; }
