@@ -3,8 +3,8 @@ import { hashPassword, json, sessionCookie, signJWT } from "./_lib/auth.js";
 
 export async function onRequestPost({ request, env }) {
   try {
-    if (!env.BLOG_USERS) {
-      return json({ error: "服务端未配置用户存储（BLOG_USERS KV），请联系站长。" }, 500);
+    if (!env.BLOG_DB) {
+      return json({ error: "服务端未配置数据库（BLOG_DB），请联系站长。" }, 500);
     }
     const body = await request.json();
     const username = (body.username || "").trim();
@@ -15,19 +15,18 @@ export async function onRequestPost({ request, env }) {
     if (username.length < 2 || username.length > 32) return json({ error: "用户名长度需 2–32 位" }, 400);
     if (password.length < 6) return json({ error: "密码至少 6 位" }, 400);
 
-    const existing = await env.BLOG_USERS.get("user:" + username);
+    // 检查用户名是否已存在
+    const existing = await env.BLOG_DB.prepare(
+      "SELECT id FROM users WHERE username = ?"
+    ).bind(username).first();
     if (existing) return json({ error: "该用户名已被注册" }, 409);
 
     const salt = crypto.randomUUID();
     const pwHash = await hashPassword(password, salt);
-    const user = {
-      username,
-      email,
-      pw: salt + ":" + pwHash,
-      createdAt: new Date().toISOString(),
-    };
-    await env.BLOG_USERS.put("user:" + username, JSON.stringify(user));
-    if (email) await env.BLOG_USERS.put("email:" + email.toLowerCase(), username);
+
+    await env.BLOG_DB.prepare(
+      "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
+    ).bind(username, email || null, salt + ":" + pwHash).run();
 
     const secret = env.JWT_SECRET || "dev-secret-change-me";
     const token = await signJWT(

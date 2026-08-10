@@ -1,6 +1,10 @@
 # 昉昕的博客
 
-一个简洁现代风格的静态博客，支持 **Decap CMS 在线写文章**，可一键部署到 **Cloudflare Pages**（或 Netlify / Vercel）。
+简洁现代的静态博客 + 会员系统，统一部署到 Cloudflare Pages。
+
+- **前台**：轮播、卡片、分类筛选、农历时辰、骨架屏、响应式
+- **会员**：访客账号密码注册/登录，会员可在站内**直接发表文章**
+- **数据**：文章与会员资料均存储在 Cloudflare **D1 SQLite**（数据库随 Cloudflare 账户走，无需第三方）
 
 ## 目录结构
 
@@ -9,12 +13,23 @@ blog-site/
 ├── index.html              # 博客前台（单页应用）
 ├── assets/
 │   ├── style.css           # 样式
-│   └── app.js              # 前端逻辑：fetch Markdown 并渲染
-├── content/posts/          # 文章（Markdown + frontmatter）
-│   └── *.md
-├── admin/                  # Decap CMS 后台
-│   ├── index.html
-│   └── config.yml
+│   ├── app.js              # 前端逻辑：fetch /api/posts
+│   └── vendor/lunar.js     # 农历计算库
+├── content/posts/          # 文章源 md（迁移前的内容备份，可留可删）
+│   ├── *.md
+│   └── index.json
+├── functions/api/          # Cloudflare Pages Functions
+│   ├── _lib/auth.js        # PBKDF2 密码 + HS256 JWT + Cookie
+│   ├── register.js         # POST 注册
+│   ├── login.js            # POST 登录
+│   ├── logout.js           # POST 登出
+│   ├── me.js               # GET 当前会话
+│   ├── posts.js            # GET 列表 / POST 创建
+│   └── posts/[slug].js     # GET 单篇 / DELETE 删除
+├── scripts/
+│   ├── schema.sql          # D1 表结构
+│   ├── migrate-to-d1.mjs   # 把现有 md 转换为 INSERT 语句
+│   └── migrate-data.sql    # 上述脚本生成的 SQL（可直接贴 D1 控制台执行）
 └── README.md
 ```
 
@@ -26,48 +41,33 @@ python3 -m http.server 8080
 # 打开 http://localhost:8080
 ```
 
-> 注意：必须用 HTTP 服务器打开，不能直接双击 `index.html`（`fetch` 会被浏览器拦）。
-
-如果改了文章，要重新生成索引：
-
-```bash
-node scripts/build-index.js
-```
+注意：本地预览时 `/api/posts` 等接口不会响应，因为 Functions 仅在 Cloudflare Pages 上运行。
 
 ## 部署到 Cloudflare Pages
 
-1. 登录 Cloudflare 控制台 → **Workers & Pages** → **Create** → **Pages** → **连接到 Git**
-2. 选择仓库 `night136/blog`
-3. 构建设置：
-   - **Framework preset**: `None`
-   - **Build command**: 留空
-   - **Build output directory**: `blog-site`
-4. 部署完成后，在 **Custom domains** 里绑定你的域名（如 `blog.example.com`）
+1. **建 D1 数据库**：左侧 Workers & Pages → **D1 SQL Database** → **Create** → 命名如 `blog-data`
+2. **删旧 Worker 项目**（如果存在）：Worker 项目不能跑 Functions，只能 Pages 能
+3. **新建 Pages 项目**：Workers & Pages → **Create** → **Pages** → **Connect to Git**
+   - 仓库：`night136/blog`
+   - **Build command**：留空（纯静态）
+   - **Build output directory**：`/`（项目根）
+4. **绑定 D1**：Pages 项目 → Settings → **Functions** → **D1 SQL Database bindings** → Add binding
+   - Variable name: `BLOG_DB`（一字不差）
+   - D1 database: 选刚才的 `blog-data`
+5. **加 secret**：Settings → **Environment variables** → Add variable
+   - `JWT_SECRET` = 一段随机字符（用于 JWT 签名）
+6. **建表 + 迁移数据**：
+   - 左侧 Workers & Pages → D1 → 你的数据库 → **Console** 标签
+   - 粘贴 `scripts/schema.sql` 内容 → 点 **Execute**
+   - 粘贴 `scripts/migrate-data.sql` 内容 → 点 **Execute**（导入现有 5 篇文章）
+7. **重新部署**：Pages 项目 → Deployments → Retry deployment
 
-## 配置 GitHub OAuth（让 CMS 能登录写文章）
+## 日常使用
 
-完整图文步骤见 **`CMS-OAUTH.md`**。这里简述关键点：
+- **访客发文章**：登录会员 → 首页点 ✍️ 发文章 → 填标题正文 → 发布 → 立即可见
+- **作者登录**：账号密码登录即可（已注册的账号）
 
-1. GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**
-   - **Homepage URL**: 你的站点域名，如 `https://blog.example.com`
-   - **Authorization callback URL**: `https://blog.example.com/admin/`
-2. 拿到 **Client ID** 和 **Client Secret**
-3. 因为 Cloudflare Pages 是纯静态，没有后端处理 OAuth 回调，推荐方案：
-   - **最简单**：把站点部署到 Netlify 并用 Git Gateway（详细步骤见 CMS-OAUTH.md 方案 A）
-   - **保留 Cloudflare Pages**：用一个 Cloudflare Worker 做 OAuth 中继（详细步骤 + Worker 代码见 CMS-OAUTH.md 方案 B）
-4. 改 `admin/config.yml` 顶部的 `site_url` / `display_url` 为你的真实域名。
+## 安全提醒
 
-> 如果只是想本地写、Git 提交文章，不强制登录 CMS：直接往 `content/posts/` 丢 `.md` 文件，然后运行 `node scripts/build-index.js` 更新 `index.json`，再 commit/push，Cloudflare 会自动重新部署。
-
-## 新增一篇文章的格式
-
-```markdown
----
-title: 文章标题
-date: 2026-08-06
-tag: 分类
-summary: 一句话摘要
----
-
-正文支持 Markdown：**粗体**、*斜体*、`代码`、列表、代码块等。
-```
+- `JWT_SECRET` 必须设置长随机串（不能用默认 dev-secret）
+- 删除不再使用的 GitHub OAuth Worker 与 Decap CMS 相关代码（已清理）

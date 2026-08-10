@@ -3,25 +3,22 @@ import { verifyPassword, json, sessionCookie, signJWT } from "./_lib/auth.js";
 
 export async function onRequestPost({ request, env }) {
   try {
-    if (!env.BLOG_USERS) {
-      return json({ error: "服务端未配置用户存储（BLOG_USERS KV），请联系站长。" }, 500);
+    if (!env.BLOG_DB) {
+      return json({ error: "服务端未配置数据库（BLOG_DB），请联系站长。" }, 500);
     }
     const body = await request.json();
-    const username = (body.username || "").trim();
+    const id = (body.username || "").trim();
     const password = body.password || "";
-    if (!username || !password) return json({ error: "请输入用户名和密码" }, 400);
+    if (!id || !password) return json({ error: "请输入用户名和密码" }, 400);
 
-    // 支持用邮箱或用户名登录
-    let key = "user:" + username;
-    if (username.includes("@")) {
-      const mapped = await env.BLOG_USERS.get("email:" + username.toLowerCase());
-      if (mapped) key = "user:" + mapped;
-    }
-    const raw = await env.BLOG_USERS.get(key);
-    if (!raw) return json({ error: "用户不存在" }, 401);
+    // 同时支持用户名或邮箱登录
+    const user = await env.BLOG_DB.prepare(
+      "SELECT username, email, password_hash FROM users WHERE username = ? OR email = ?"
+    ).bind(id, id.toLowerCase()).first();
 
-    const user = JSON.parse(raw);
-    const ok = await verifyPassword(password, user.pw);
+    if (!user) return json({ error: "用户不存在" }, 401);
+
+    const ok = await verifyPassword(password, user.password_hash);
     if (!ok) return json({ error: "密码错误" }, 401);
 
     const secret = env.JWT_SECRET || "dev-secret-change-me";

@@ -1,8 +1,0 @@
-name = "blog-oauth-provider"
-main = "index.js"
-compatibility_date = "2024-09-23"
-
-# 说明：
-# GITHUB_CLIENT_ID 用普通变量即可（不算机密）。
-# GITHUB_CLIENT_SECRET 必须用 secret（wrangler secret put），不要写进本文件。
-# 部署：在 oauth-worker 目录下执行  wrangler deploy
