@@ -22,6 +22,7 @@
       <nav class="nav">
         <a href="#" class="nav-link active" data-view="home">首页</a>
         <a href="#" class="nav-link" data-view="archive">归档</a>
+        <a href="#" class="nav-link" data-view="member">👥 会员专区</a>
         <a href="#" class="nav-link" data-view="about">关于</a>
         <a href="admin/" class="nav-link" target="_blank" rel="noopener">✍️ 写文章</a>
       </nav>
@@ -42,6 +43,12 @@
           </div>
           <div class="hero-actions">
             <a href="admin/" target="_blank" rel="noopener" class="btn-write">✍️ 写文章 / 登录后台</a>
+            <button id="authBtn" class="btn-auth" type="button">🔐 登录 / 注册</button>
+            <span id="userChip" class="user-chip" hidden>
+              <span class="user-avatar" id="userAvatar">👤</span>
+              <span id="userName">访客</span>
+              <button id="logoutBtn" class="link-btn" type="button">退出</button>
+            </span>
             <p class="write-hint">GitHub 登录请使用 Chrome 无痕模式（Ctrl+Shift+N），避免扩展拦截授权弹窗。</p>
           </div>
         </header>
@@ -82,6 +89,15 @@
         </div>
       </section>
 
+      <!-- 会员专区视图 -->
+      <section class="view view-member">
+        <header class="page-head">
+          <h2>👥 会员专区</h2>
+          <p>登录后可查看会员内容、参与专属讨论。</p>
+        </header>
+        <div id="memberArea"><!-- JS 注入 --></div>
+      </section>
+
       <!-- 文章详情视图 -->
       <section class="view view-post">
         <button class="back-btn" id="backBtn">← 返回</button>
@@ -91,6 +107,42 @@
   </div>
 
   <button class="back-top" id="backTop" aria-label="返回顶部">↑</button>
+
+  <!-- 登录/注册弹窗 -->
+  <div class="modal-mask" id="authModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="登录或注册">
+      <button class="modal-close" id="authClose" type="button" aria-label="关闭">×</button>
+      <div class="tabs">
+        <button class="tab active" data-tab="login" type="button">登录</button>
+        <button class="tab" data-tab="register" type="button">注册</button>
+      </div>
+
+      <form id="loginForm" class="auth-form active" autocomplete="off">
+        <label>用户名 / 邮箱
+          <input name="username" type="text" placeholder="用户名或邮箱" required />
+        </label>
+        <label>密码
+          <input name="password" type="password" placeholder="请输入密码" required />
+        </label>
+        <button type="submit" class="btn-submit">登录</button>
+        <p class="form-msg" id="loginMsg"></p>
+      </form>
+
+      <form id="registerForm" class="auth-form" autocomplete="off">
+        <label>用户名
+          <input name="username" type="text" placeholder="2–32 位，登录用" required />
+        </label>
+        <label>邮箱（可选）
+          <input name="email" type="email" placeholder="用于找回账号" />
+        </label>
+        <label>密码
+          <input name="password" type="password" placeholder="至少 6 位" required />
+        </label>
+        <button type="submit" class="btn-submit">注册并登录</button>
+        <p class="form-msg" id="registerMsg"></p>
+      </form>
+    </div>
+  </div>
 
   <script src="assets/vendor/lunar.js"></script>
   <script src="assets/app.js"></script>

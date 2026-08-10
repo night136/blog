@@ -13,6 +13,7 @@
     home: document.querySelector(".view-home"),
     archive: document.querySelector(".view-archive"),
     about: document.querySelector(".view-about"),
+    member: document.querySelector(".view-member"),
     post: document.querySelector(".view-post"),
   };
   const cardGrid = document.getElementById("cardGrid");
@@ -23,6 +24,20 @@
   const slideNext = document.getElementById("slideNext");
   const sliderEl = document.getElementById("slider");
   const backTop = document.getElementById("backTop");
+
+  // ===== 读者会员：登录/注册 =====
+  const authBtn = document.getElementById("authBtn");
+  const userChip = document.getElementById("userChip");
+  const userName = document.getElementById("userName");
+  const userAvatar = document.getElementById("userAvatar");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const authModal = document.getElementById("authModal");
+  const authClose = document.getElementById("authClose");
+  const loginForm = document.getElementById("loginForm");
+  const registerForm = document.getElementById("registerForm");
+  const loginMsg = document.getElementById("loginMsg");
+  const registerMsg = document.getElementById("registerMsg");
+  const memberArea = document.getElementById("memberArea");
 
   let posts = [];
   let postCache = {};
@@ -428,8 +443,181 @@
   });
   backBtn.addEventListener("click", () => showView("home"));
 
+  // ===== 读者会员：会话与界面 =====
+  function setAuthUI(user) {
+    if (user && user.username) {
+      if (authBtn) authBtn.hidden = true;
+      if (userChip) {
+        userChip.hidden = false;
+        userName.textContent = user.username;
+        userAvatar.textContent = user.username.slice(0, 1).toUpperCase() || "👤";
+      }
+    } else {
+      if (authBtn) authBtn.hidden = false;
+      if (userChip) userChip.hidden = true;
+    }
+  }
+
+  async function checkSession() {
+    try {
+      const res = await fetch("/api/me", { credentials: "same-origin" });
+      const data = await res.json();
+      setAuthUI(data.user);
+      return data.user;
+    } catch (e) {
+      setAuthUI(null);
+      return null;
+    }
+  }
+
+  function openAuth(tab) {
+    if (!authModal) return;
+    authModal.hidden = false;
+    switchTab(tab || "login");
+  }
+  function closeAuth() {
+    if (authModal) authModal.hidden = true;
+    if (loginMsg) loginMsg.textContent = "";
+    if (registerMsg) registerMsg.textContent = "";
+  }
+  function switchTab(tab) {
+    document.querySelectorAll(".tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.tab === tab)
+    );
+    loginForm.classList.toggle("active", tab === "login");
+    registerForm.classList.toggle("active", tab === "register");
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const fd = new FormData(loginForm);
+    loginMsg.textContent = "登录中…";
+    loginMsg.className = "form-msg";
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: fd.get("username"),
+          password: fd.get("password"),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        loginMsg.textContent = data.error || "登录失败";
+        loginMsg.className = "form-msg err";
+        return;
+      }
+      setAuthUI(data.user);
+      closeAuth();
+      if (currentViewIsMember()) renderMember(data.user);
+    } catch (err) {
+      loginMsg.textContent = "网络错误，请重试";
+      loginMsg.className = "form-msg err";
+    }
+  }
+
+  async function handleRegister(e) {
+    e.preventDefault();
+    const fd = new FormData(registerForm);
+    registerMsg.textContent = "注册中…";
+    registerMsg.className = "form-msg";
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: fd.get("username"),
+          email: fd.get("email"),
+          password: fd.get("password"),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        registerMsg.textContent = data.error || "注册失败";
+        registerMsg.className = "form-msg err";
+        return;
+      }
+      setAuthUI(data.user);
+      closeAuth();
+      if (currentViewIsMember()) renderMember(data.user);
+    } catch (err) {
+      registerMsg.textContent = "网络错误，请重试";
+      registerMsg.className = "form-msg err";
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+    } catch (e) {}
+    setAuthUI(null);
+    if (currentViewIsMember()) renderMember(null);
+  }
+
+  function currentViewIsMember() {
+    return views.member && views.member.classList.contains("active");
+  }
+
+  async function renderMember(user) {
+    if (!memberArea) return;
+    if (!user) {
+      memberArea.innerHTML = `
+        <div class="member-gate">
+          <p>这是会员专属区域。登录后即可查看会员内容、参与讨论。</p>
+          <button class="btn-auth" type="button" id="memberLogin">🔐 登录 / 注册</button>
+        </div>`;
+      const b = document.getElementById("memberLogin");
+      if (b) b.addEventListener("click", () => openAuth("login"));
+      return;
+    }
+    memberArea.innerHTML = `
+      <div class="member-welcome">
+        <div class="member-card">
+          <div class="member-avatar">${user.username.slice(0, 1).toUpperCase()}</div>
+          <div>
+            <h3>欢迎，${user.username} 👋</h3>
+            <p class="member-sub">你已登录会员专区。</p>
+          </div>
+        </div>
+        <div class="member-perks">
+          <div class="perk">📚 会员专享读书笔记合集</div>
+          <div class="perk">💬 文章下方专属评论区</div>
+          <div class="perk">🔖 收藏你喜欢的文章</div>
+        </div>
+        <p class="member-note">更多会员功能正在陆续开放，敬请期待。</p>
+      </div>`;
+  }
+
+  if (authBtn) authBtn.addEventListener("click", () => openAuth("login"));
+  if (logoutBtn) logoutBtn.addEventListener("click", handleLogout);
+  if (authClose) authClose.addEventListener("click", closeAuth);
+  if (authModal)
+    authModal.addEventListener("click", (e) => {
+      if (e.target === authModal) closeAuth();
+    });
+  document.querySelectorAll(".tab").forEach((t) =>
+    t.addEventListener("click", () => switchTab(t.dataset.tab))
+  );
+  if (loginForm) loginForm.addEventListener("submit", handleLogin);
+  if (registerForm) registerForm.addEventListener("submit", handleRegister);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && authModal && !authModal.hidden) closeAuth();
+  });
+
+  // 会员视图打开时渲染（先查会话）
+  const memberNav = document.querySelector('.nav-link[data-view="member"]');
+  if (memberNav)
+    memberNav.addEventListener("click", async () => {
+      const user = await checkSession();
+      renderMember(user);
+    });
+
   updateLunar();
   setInterval(updateLunar, 1000);
 
+  checkSession();
   loadPosts();
 })();
