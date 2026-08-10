@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>昉昕的博客 · 记录与思考</title>
   <meta name="description" content="昉昕的个人博客，记录技术实践、读书笔记与生活思考。" />
+  <meta name="color-scheme" content="light dark" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
   <div class="layout">
     <!-- 侧边栏 -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
+      <button class="hamburger" id="hamburger" type="button" aria-label="菜单">☰</button>
       <div class="brand">
         <div class="avatar">昉</div>
         <div class="brand-text">
@@ -19,16 +21,19 @@
           <p>开发者 · 写作者</p>
         </div>
       </div>
-      <nav class="nav">
+      <nav class="nav" id="mainNav">
         <a href="#" class="nav-link active" data-view="home">首页</a>
         <a href="#" class="nav-link" data-view="archive">归档</a>
         <a href="#" class="nav-link" data-view="member">👥 会员专区</a>
         <a href="#" class="nav-link" data-view="about">关于</a>
       </nav>
       <div class="sidebar-footer">
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换暗色模式" title="切换暗色模式">🌙</button>
         <span class="dot"></span> 正在写字…
       </div>
     </aside>
+    <!-- 移动端遮罩 -->
+    <div class="sidebar-overlay" id="sidebarOverlay" hidden></div>
 
     <!-- 主内容区 -->
     <main class="content">
@@ -39,6 +44,7 @@
             <h2>记录与思考</h2>
             <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
             <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>
+            <div class="search-box"><input type="search" id="searchInput" placeholder="🔍 搜索文章…" /></div>
           </div>
           <div class="hero-actions">
             <button id="authBtn" class="btn-auth" type="button">🔐 登录 / 注册</button>
@@ -52,35 +58,26 @@
           </div>
         </header>
 
-        <!-- 特色文章轮播 -->
         <section class="slider" id="slider" aria-label="精选文章">
-          <div class="slides" id="slides"><!-- JS 注入 --></div>
+          <div class="slides" id="slides"></div>
           <button class="slider-arrow prev" id="slidePrev" aria-label="上一篇">‹</button>
           <button class="slider-arrow next" id="slideNext" aria-label="下一篇">›</button>
           <div class="slider-dots" id="slideDots"></div>
         </section>
 
-        <!-- 分类筛选 -->
-        <div class="filter-bar" id="filterBar"><!-- JS 注入 --></div>
-
-        <!-- 卡片网格 -->
-        <div class="card-grid" id="cardGrid"><!-- JS 注入 --></div>
+        <div class="filter-bar" id="filterBar"></div>
+        <div class="card-grid" id="cardGrid"></div>
       </section>
 
       <!-- 归档视图 -->
       <section class="view view-archive">
-        <header class="page-head">
-          <h2>归档</h2>
-          <p>所有文章按时间排列。</p>
-        </header>
-        <div class="archive-list" id="archiveList"><!-- JS 注入 --></div>
+        <header class="page-head"><h2>归档</h2><p>所有文章按时间排列。</p></header>
+        <div class="archive-list" id="archiveList"></div>
       </section>
 
       <!-- 关于视图 -->
       <section class="view view-about">
-        <header class="page-head">
-          <h2>关于</h2>
-        </header>
+        <header class="page-head"><h2>关于</h2></header>
         <div class="prose">
           <p>你好，我是 <strong>昉昕</strong>，一个常驻江西的开发者。</p>
           <p>日常工作是开发与维护，节奏里夹着一些自动化的小机器人项目。这个博客用来沉淀我踩过的坑、读过的书，以及偶尔冒出来的想法。</p>
@@ -90,17 +87,37 @@
 
       <!-- 会员专区视图 -->
       <section class="view view-member">
-        <header class="page-head">
-          <h2>👥 会员专区</h2>
-          <p>登录后可查看会员内容、参与专属讨论。</p>
-        </header>
-        <div id="memberArea"><!-- JS 注入 --></div>
+        <header class="page-head"><h2>👥 会员专区</h2><p>登录后可发表文章、查看会员内容。</p></header>
+        <div id="memberArea"></div>
       </section>
 
       <!-- 文章详情视图 -->
       <section class="view view-post">
         <button class="back-btn" id="backBtn">← 返回</button>
-        <article class="post-detail" id="postDetail"><!-- JS 注入 --></article>
+        <article class="post-detail" id="postDetail"></article>
+      </section>
+
+      <!-- ✍️ 全屏写作页 -->
+      <section class="view view-compose">
+        <button class="back-btn" id="composeBack">← 取消</button>
+        <div class="compose-full">
+          <div class="compose-meta">
+            <input name="composeTitle" id="composeTitle" type="text" placeholder="文章标题" maxlength="120" />
+            <div class="compose-row">
+              <input name="composeTag" id="composeTag" type="text" placeholder="标签（如：技术、读书）" maxlength="30" />
+              <input name="composeSummary" id="composeSummary" type="text" placeholder="摘要（可选）" maxlength="200" />
+              <input name="composeCover" id="composeCover" type="text" placeholder="封面图片 URL（可选）" />
+            </div>
+          </div>
+          <div class="compose-panels">
+            <textarea id="composeBody" placeholder="支持 Markdown 语法…&#10;&#10;# 标题&#10;正文内容……"></textarea>
+            <div class="compose-preview prose" id="composePreview"></div>
+          </div>
+          <div class="compose-actions">
+            <button class="btn-submit" id="composeSubmit" type="button">发布文章</button>
+            <p class="form-msg" id="composeMsg"></p>
+          </div>
+        </div>
       </section>
     </main>
   </div>
@@ -109,65 +126,26 @@
 
   <!-- 登录/注册弹窗 -->
   <div class="modal-mask" id="authModal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="登录或注册">
-      <button class="modal-close" id="authClose" type="button" aria-label="关闭">×</button>
+    <div class="modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="authClose" type="button">×</button>
       <div class="tabs">
         <button class="tab active" data-tab="login" type="button">登录</button>
         <button class="tab" data-tab="register" type="button">注册</button>
       </div>
 
       <form id="loginForm" class="auth-form active" autocomplete="off">
-        <label>用户名 / 邮箱
-          <input name="username" type="text" placeholder="用户名或邮箱" required />
-        </label>
-        <label>密码
-          <input name="password" type="password" placeholder="请输入密码" required />
-        </label>
+        <label>用户名 / 邮箱<input name="username" type="text" placeholder="用户名或邮箱" required /></label>
+        <label>密码<input name="password" type="password" placeholder="请输入密码" required /></label>
         <button type="submit" class="btn-submit">登录</button>
         <p class="form-msg" id="loginMsg"></p>
       </form>
 
       <form id="registerForm" class="auth-form" autocomplete="off">
-        <label>用户名
-          <input name="username" type="text" placeholder="2–32 位，登录用" required />
-        </label>
-        <label>邮箱（可选）
-          <input name="email" type="email" placeholder="用于找回账号" />
-        </label>
-        <label>密码
-          <input name="password" type="password" placeholder="至少 6 位" required />
-        </label>
+        <label>用户名<input name="username" type="text" placeholder="2–32 位" required /></label>
+        <label>邮箱（可选）<input name="email" type="email" placeholder="用于找回账号" /></label>
+        <label>密码<input name="password" type="password" placeholder="至少 6 位" required /></label>
         <button type="submit" class="btn-submit">注册并登录</button>
         <p class="form-msg" id="registerMsg"></p>
-      </form>
-    </div>
-  </div>
-
-  <!-- 发表文章弹窗 -->
-  <div class="modal-mask" id="composeModal" hidden>
-    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="发表文章">
-      <button class="modal-close" id="composeClose" type="button" aria-label="关闭">×</button>
-      <h3 class="compose-head">✍️ 发表文章</h3>
-      <form id="composeForm" autocomplete="off">
-        <div class="compose-grid">
-          <label>标题
-            <input name="title" type="text" placeholder="文章标题" required maxlength="120" />
-          </label>
-          <label>标签
-            <input name="tag" type="text" placeholder="如：技术、读书" maxlength="30" />
-          </label>
-        </div>
-        <label>摘要（可选）
-          <input name="summary" type="text" placeholder="简短描述，留空则自动截取正文" maxlength="200" />
-        </label>
-        <label>封面图片链接（可选）
-          <input name="cover" type="text" placeholder="https://example.com/image.jpg" />
-        </label>
-        <label>正文（Markdown）
-          <textarea name="body" rows="12" placeholder="支持 Markdown 语法…" required></textarea>
-        </label>
-        <button type="submit" class="btn-submit" id="composeSubmit">发布文章</button>
-        <p class="form-msg" id="composeMsg"></p>
       </form>
     </div>
   </div>
