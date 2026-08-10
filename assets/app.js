@@ -263,11 +263,117 @@
     }
   }
   async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); setAuthUI(d.user); return d.user; } catch (_) { setAuthUI(null); return null; } }
-  function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); }
-  function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; }
-  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); }
-  async function handleLogin(e) { e.preventDefault(); const fd = new FormData(loginForm); loginMsg.textContent = "登录中…"; loginMsg.className = "form-msg"; try { const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }) }); const d = await r.json(); if (!r.ok || !d.ok) { loginMsg.textContent = d.error || "登录失败"; loginMsg.className = "form-msg err"; return; } setAuthUI(d.user); closeAuth(); if (currentViewIsMember()) renderMember(d.user); } catch (_) { loginMsg.textContent = "网络错误"; loginMsg.className = "form-msg err"; } }
-  async function handleRegister(e) { e.preventDefault(); const fd = new FormData(registerForm); registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg"; try { const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password") }) }); const d = await r.json(); if (!r.ok || !d.ok) { registerMsg.textContent = d.error || "注册失败"; registerMsg.className = "form-msg err"; return; } setAuthUI(d.user); closeAuth(); if (currentViewIsMember()) renderMember(d.user); } catch (_) { registerMsg.textContent = "网络错误"; registerMsg.className = "form-msg err"; } }
+  function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
+  function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
+  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); }
+
+  // ===== 卡通角色互动 =====
+  let charStateTimer = null;
+  function setAuthState(state) { if (!authModal) return; authModal.setAttribute("data-state", state); }
+  function triggerState(state, holdMs = 3000) { setAuthState(state); clearTimeout(charStateTimer); charStateTimer = setTimeout(() => setAuthState("idle"), holdMs); }
+
+  function switchQuote(tab) { const q = $("charsQuote"); if (!q) return; q.textContent = tab === "register" ? "来一起写点东西吧 ✍️" : "嗨，欢迎回来 👋"; }
+
+  // 鼠标追踪：让每个角色的瞳孔跟随鼠标
+  let charRaf = null;
+  function startCharInteraction() {
+    if (!authModal) return;
+    document.addEventListener("mousemove", onCharMouseMove);
+  }
+  function stopCharInteraction() {
+    document.removeEventListener("mousemove", onCharMouseMove);
+    // 重置瞳孔到中心
+    document.querySelectorAll(".char .pupil").forEach((p) => { p.style.transform = "translate(0,0)"; });
+  }
+  function onCharMouseMove(e) {
+    if (!authModal || authModal.hidden) return;
+    cancelAnimationFrame(charRaf);
+    charRaf = requestAnimationFrame(() => {
+      const mx = e.clientX, my = e.clientY;
+      document.querySelectorAll(".char").forEach((ch) => {
+        const eyes = ch.querySelector(".eyes");
+        if (!eyes) return;
+        const rect = eyes.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = mx - cx, dy = my - cy;
+        const angle = Math.atan2(dy, dx);
+        // 限制瞳孔偏移距离为 4px
+        const dist = Math.min(4, Math.hypot(dx, dy) / 40);
+        const px = Math.cos(angle) * dist;
+        const py = Math.sin(angle) * dist;
+        ch.querySelectorAll(".pupil").forEach((p) => { p.style.transform = `translate(${px}px, ${py}px)`; });
+      });
+    });
+  }
+
+  // 输入框聚焦状态切换
+  function bindInputStates() {
+    if (loginForm) {
+      loginForm.querySelectorAll("input").forEach((inp) => {
+        inp.addEventListener("focus", () => {
+          const t = inp.type;
+          if (t === "password") setAuthState("password");
+          else if (t === "text") setAuthState("email");
+        });
+        inp.addEventListener("blur", () => {
+          // 失焦时如果当前状态是 email/password，回到 idle
+          const cur = authModal.getAttribute("data-state");
+          if (cur === "email" || cur === "password") setAuthState("idle");
+        });
+      });
+    }
+    if (registerForm) {
+      registerForm.querySelectorAll("input").forEach((inp) => {
+        inp.addEventListener("focus", () => setAuthState("email"));
+        inp.addEventListener("blur", () => { const cur = authModal.getAttribute("data-state"); if (cur === "email") setAuthState("idle"); });
+      });
+    }
+  }
+  async function handleLogin(e) {
+    e.preventDefault();
+    const fd = new FormData(loginForm);
+    loginMsg.textContent = "登录中…"; loginMsg.className = "form-msg";
+    setAuthState("loading");
+    try {
+      const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }) });
+      const d = await r.json();
+      if (!r.ok || !d.ok) {
+        loginMsg.textContent = d.error || "登录失败"; loginMsg.className = "form-msg err";
+        triggerState("error", 2500);
+        return;
+      }
+      loginMsg.textContent = "✅ 登录成功";
+      loginMsg.className = "form-msg ok";
+      triggerState("success", 1400);
+      setTimeout(() => { setAuthUI(d.user); closeAuth(); if (currentViewIsMember()) renderMember(d.user); }, 800);
+    } catch (_) {
+      loginMsg.textContent = "网络错误"; loginMsg.className = "form-msg err";
+      triggerState("error", 2500);
+    }
+  }
+  async function handleRegister(e) {
+    e.preventDefault();
+    const fd = new FormData(registerForm);
+    registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";
+    setAuthState("loading");
+    try {
+      const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password") }) });
+      const d = await r.json();
+      if (!r.ok || !d.ok) {
+        registerMsg.textContent = d.error || "注册失败"; registerMsg.className = "form-msg err";
+        triggerState("error", 2500);
+        return;
+      }
+      registerMsg.textContent = "✅ 注册成功，已登录";
+      registerMsg.className = "form-msg ok";
+      triggerState("success", 1400);
+      setTimeout(() => { setAuthUI(d.user); closeAuth(); if (currentViewIsMember()) renderMember(d.user); }, 800);
+    } catch (_) {
+      registerMsg.textContent = "网络错误"; registerMsg.className = "form-msg err";
+      triggerState("error", 2500);
+    }
+  }
   async function handleLogout() { try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (_) {} setAuthUI(null); if (currentViewIsMember()) renderMember(null); }
   function currentViewIsMember() { return views.member && views.member.classList.contains("active"); }
   async function renderMember(user) {
@@ -325,6 +431,7 @@
   // ===== 启动 =====
   updateLunar();
   setInterval(updateLunar, 1000);
+  bindInputStates();
   checkSession();
   loadPosts();
 })();

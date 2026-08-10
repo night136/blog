@@ -289,3 +289,101 @@ img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
   .compose-preview { max-height: 300px; }
   .compose-row { flex-direction: column; }
 }
+
+/* ===== 卡通角色登录框 ===== */
+.modal-auth { width: min(720px, 96vw); padding: 0; overflow: hidden; display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: 480px; }
+[data-theme="dark"] .modal-auth { background: var(--surface); }
+.auth-side { background: linear-gradient(160deg, #eceaff 0%, #d8d2ff 100%); padding: 24px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+[data-theme="dark"] .auth-side { background: linear-gradient(160deg, #2a2a50 0%, #1e1e3a 100%); }
+.auth-side .modal-close { color: var(--text); z-index: 2; }
+.chars-stage { position: relative; width: 100%; height: 280px; flex-shrink: 0; }
+.char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; }
+.char:hover { animation-play-state: paused; }
+@keyframes char-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.02); } }
+
+.char-orange { left: 6px; bottom: 20px; width: 110px; animation-delay: 0s; }
+.char-purple { left: 100px; top: 30px; width: 70px; animation-delay: .4s; }
+.char-black { left: 160px; bottom: 30px; width: 56px; animation-delay: .8s; }
+.char-yellow { right: 16px; bottom: 30px; width: 88px; animation-delay: 1.2s; }
+
+.char-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.char .eyes { transition: transform .15s; }
+.char .pupil { transition: transform .12s ease-out; }
+.char .mouth { transition: d .2s ease, opacity .2s; }
+.char .tongue { opacity: 0; transition: opacity .2s, transform .2s; transform: translateY(4px); }
+.char .cheek { transition: opacity .2s; opacity: 0; }
+
+/* 自然眨眼 */
+.char .eye-bg { transform-origin: center; animation: blink 4.5s ease-in-out infinite; }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+
+/* 状态：idle（默认） */
+.char-orange .mouth { d: path("M 38 47 Q 50 56 62 47"); }
+.char-purple .mouth { d: path("M 28 62 Q 40 70 52 62"); }
+.char-black .mouth { stroke-dasharray: 0; }
+.char-yellow .mouth { d: path("M 35 64 Q 50 72 65 64"); }
+
+/* 状态：聚焦用户名/邮箱（伸出舌头、脸红） */
+.modal-auth[data-state="email"] .char .tongue { opacity: 1; transform: translateY(0); }
+.modal-auth[data-state="email"] .char .cheek { opacity: .85; }
+.modal-auth[data-state="email"] .char-orange .mouth { d: path("M 36 48 Q 50 62 64 48"); }
+.modal-auth[data-state="email"] .char-orange { transform: translateY(-4px) scaleY(1.03); }
+.modal-auth[data-state="email"] .char-purple { transform: rotate(-3deg) translateY(-2px); }
+.modal-auth[data-state="email"] .char-yellow { transform: scale(1.05); }
+
+/* 状态：聚焦密码（惊讶，圆眼） */
+.modal-auth[data-state="password"] .char .eyes { transform: scale(1.15); }
+.modal-auth[data-state="password"] .char-orange .mouth { d: path("M 40 50 Q 50 50 60 50"); }
+.modal-auth[data-state="password"] .char-purple .mouth { d: path("M 30 64 Q 40 64 50 64"); }
+.modal-auth[data-state="password"] .char-black .mouth { d: path("M 35 70 Q 41 78 47 70"); stroke-width: 3; }
+.modal-auth[data-state="password"] .char-yellow .mouth { d: path("M 35 62 Q 50 62 65 62"); }
+.modal-auth[data-state="password"] .char-black { transform: scale(1.08); animation-duration: 1.2s; }
+
+/* 状态：登录失败（捂嘴+闭眼） */
+.modal-auth[data-state="error"] .char { animation: char-shake .4s ease-in-out 2; }
+.modal-auth[data-state="error"] .char .eye-bg { animation: none; transform: scaleY(.1); }
+.modal-auth[data-state="error"] .char-orange .mouth { d: path("M 40 48 L 60 48"); }
+.modal-auth[data-state="error"] .char-purple .mouth { d: path("M 32 60 L 48 60"); }
+.modal-auth[data-state="error"] .char-black .mouth { d: path("M 35 70 L 47 70"); }
+.modal-auth[data-state="error"] .char-yellow .mouth { d: path("M 38 60 L 62 60"); }
+@keyframes char-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+/* 状态：登录成功（兴奋跳跃+眼睁大） */
+.modal-auth[data-state="success"] .char { animation: char-jump .6s ease-in-out 2; }
+.modal-auth[data-state="success"] .char .eyes { transform: scale(1.3); }
+.modal-auth[data-state="success"] .char .cheek { opacity: .9; }
+.modal-auth[data-state="success"] .char-orange .mouth { d: path("M 36 46 Q 50 64 64 46"); }
+.modal-auth[data-state="success"] .char-purple .mouth { d: path("M 26 60 Q 40 76 54 60"); }
+.modal-auth[data-state="success"] .char-black .mouth { d: path("M 33 68 Q 41 82 49 68"); stroke-width: 3; }
+.modal-auth[data-state="success"] .char-yellow .mouth { d: path("M 33 62 Q 50 80 67 62"); }
+@keyframes char-jump { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+
+.chars-quote { margin-top: 18px; font-size: 14px; color: var(--text-soft); text-align: center; transition: opacity .3s; min-height: 20px; font-weight: 500; }
+
+/* 右侧表单 */
+.auth-content { padding: 36px 36px 28px; display: flex; flex-direction: column; gap: 14px; }
+.auth-title { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+.auth-subtitle { font-size: 14px; color: var(--text-soft); margin-top: -6px; margin-bottom: 4px; }
+.auth-content .tabs { margin-bottom: 4px; }
+.auth-form { display: none; flex-direction: column; gap: 12px; }
+.auth-form.active { display: flex; }
+.auth-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text-soft); font-weight: 500; }
+.auth-form input[type="text"], .auth-form input[type="password"], .auth-form input[type="email"] { padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; font-size: 15px; background: var(--surface-2); color: var(--text); transition: border-color .2s, box-shadow .2s; }
+.auth-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.auth-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.remember { flex-direction: row !important; align-items: center; gap: 6px !important; color: var(--text-soft) !important; font-weight: 400 !important; }
+.remember input { width: 14px; height: 14px; accent-color: var(--accent); }
+.forgot { color: var(--accent); }
+.forgot:hover { text-decoration: underline; }
+.social-row { margin-top: 6px; font-size: 13px; color: var(--text-soft); display: flex; align-items: center; gap: 10px; }
+.social-link { width: 32px; height: 32px; border-radius: 50%; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: var(--text-soft); transition: background .15s, color .15s; }
+.social-link:hover { background: var(--accent); color: #fff; }
+
+@media (max-width: 640px) {
+  .modal-auth { grid-template-columns: 1fr; min-height: auto; }
+  .auth-side { padding: 16px; min-height: 180px; }
+  .chars-stage { height: 140px; }
+  .char-orange { width: 76px; } .char-purple { width: 50px; top: 12px; left: 76px; } .char-black { width: 42px; left: 120px; } .char-yellow { width: 60px; right: 10px; }
+  .chars-quote { display: none; }
+  .auth-content { padding: 24px 20px; }
+}
