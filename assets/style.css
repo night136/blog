@@ -424,3 +424,39 @@ img { max-width: 100%; height: auto; border-radius: 8px; display: block; }
 }
 .member-note { color: var(--text-faint); font-size: 14px; }
 
+/* ===== 发表文章按钮 ===== */
+.btn-publish-sm {
+  padding: 5px 14px; border: 1px solid var(--accent); border-radius: 999px;
+  cursor: pointer; font-size: 13px; font-weight: 600; background: var(--accent-soft); color: var(--accent);
+  transition: all .18s;
+}
+.btn-publish-sm:hover { background: var(--accent); color: #fff; }
+.btn-publish {
+  align-self: flex-start; padding: 12px 28px; border: none; border-radius: 12px;
+  cursor: pointer; font-size: 16px; font-weight: 700; background: var(--accent);
+  color: #fff; transition: filter .18s;
+}
+.btn-publish:hover { filter: brightness(1.06); }
+
+/* ===== 发���编辑器弹窗 ===== */
+.modal-wide { width: min(620px, 94vw) !important; max-height: 92vh; overflow-y: auto; }
+.compose-head { font-size: 20px; margin-bottom: 18px; }
+.compose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+#composeForm { display: flex; flex-direction: column; gap: 14px; }
+#composeForm label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-soft); }
+#composeForm input, #composeForm textarea {
+  padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px;
+  font-size: 15px; background: var(--surface-2); color: var(--text);
+  font-family: inherit;
+}
+#composeForm input:focus, #composeForm textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#composeForm textarea { resize: vertical; min-height: 180px; line-height: 1.7; }
+.form-msg.ok { color: #2d8a4e; }
+.btn-submit:disabled { opacity: .6; cursor: not-allowed; }
+
+@media (max-width: 560px) {
+  .compose-grid { grid-template-columns: 1fr; }
+}
+

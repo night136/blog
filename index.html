@@ -47,6 +47,7 @@
             <span id="userChip" class="user-chip" hidden>
               <span class="user-avatar" id="userAvatar">👤</span>
               <span id="userName">访客</span>
+              <button id="publishBtnChip" class="btn-publish-sm" type="button">✍️ 发文章</button>
               <button id="logoutBtn" class="link-btn" type="button">退出</button>
             </span>
             <p class="write-hint">GitHub 登录请使用 Chrome 无痕模式（Ctrl+Shift+N），避免扩展拦截授权弹窗。</p>
@@ -140,6 +141,35 @@
         </label>
         <button type="submit" class="btn-submit">注册并登录</button>
         <p class="form-msg" id="registerMsg"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- 发表文章弹窗 -->
+  <div class="modal-mask" id="composeModal" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="发表文章">
+      <button class="modal-close" id="composeClose" type="button" aria-label="关闭">×</button>
+      <h3 class="compose-head">✍️ 发表文章</h3>
+      <form id="composeForm" autocomplete="off">
+        <div class="compose-grid">
+          <label>标题
+            <input name="title" type="text" placeholder="文章标题" required maxlength="120" />
+          </label>
+          <label>标签
+            <input name="tag" type="text" placeholder="如：技术、读书" maxlength="30" />
+          </label>
+        </div>
+        <label>摘要（可选）
+          <input name="summary" type="text" placeholder="简短描述，留空则自动截取正文" maxlength="200" />
+        </label>
+        <label>封面图片链接（可选）
+          <input name="cover" type="text" placeholder="https://example.com/image.jpg" />
+        </label>
+        <label>正文（Markdown）
+          <textarea name="body" rows="12" placeholder="支持 Markdown 语法…" required></textarea>
+        </label>
+        <button type="submit" class="btn-submit" id="composeSubmit">发布文章</button>
+        <p class="form-msg" id="composeMsg"></p>
       </form>
     </div>
   </div>

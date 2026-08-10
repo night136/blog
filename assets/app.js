@@ -31,12 +31,18 @@
   const userName = document.getElementById("userName");
   const userAvatar = document.getElementById("userAvatar");
   const logoutBtn = document.getElementById("logoutBtn");
+  const publishBtnChip = document.getElementById("publishBtnChip");
   const authModal = document.getElementById("authModal");
   const authClose = document.getElementById("authClose");
   const loginForm = document.getElementById("loginForm");
   const registerForm = document.getElementById("registerForm");
   const loginMsg = document.getElementById("loginMsg");
   const registerMsg = document.getElementById("registerMsg");
+  const composeModal = document.getElementById("composeModal");
+  const composeClose = document.getElementById("composeClose");
+  const composeForm = document.getElementById("composeForm");
+  const composeMsg = document.getElementById("composeMsg");
+  const composeSubmit = document.getElementById("composeSubmit");
   const memberArea = document.getElementById("memberArea");
 
   let posts = [];
@@ -452,9 +458,11 @@
         userName.textContent = user.username;
         userAvatar.textContent = user.username.slice(0, 1).toUpperCase() || "👤";
       }
+      if (publishBtnChip) publishBtnChip.hidden = false;
     } else {
       if (authBtn) authBtn.hidden = false;
       if (userChip) userChip.hidden = true;
+      if (publishBtnChip) publishBtnChip.hidden = true;
     }
   }
 
@@ -566,7 +574,7 @@
     if (!user) {
       memberArea.innerHTML = `
         <div class="member-gate">
-          <p>这是会员专属区域。登录后即可查看会员内容、参与讨论。</p>
+          <p>这是会员专属区域。登录后即可发表文章、查看会员内容。</p>
           <button class="btn-auth" type="button" id="memberLogin">🔐 登录 / 注册</button>
         </div>`;
       const b = document.getElementById("memberLogin");
@@ -583,12 +591,16 @@
           </div>
         </div>
         <div class="member-perks">
+          <div class="perk">✍️ 撰写并发布文章</div>
           <div class="perk">📚 会员专享读书笔记合集</div>
           <div class="perk">💬 文章下方专属评论区</div>
           <div class="perk">🔖 收藏你喜欢的文章</div>
         </div>
+        <button class="btn-publish" type="button" id="memberPublish">✍️ 现在写一篇文章</button>
         <p class="member-note">更多会员功能正在陆续开放，敬请期待。</p>
       </div>`;
+    const pb = document.getElementById("memberPublish");
+    if (pb) pb.addEventListener("click", openCompose);
   }
 
   if (authBtn) authBtn.addEventListener("click", () => openAuth("login"));
@@ -605,6 +617,77 @@
   if (registerForm) registerForm.addEventListener("submit", handleRegister);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && authModal && !authModal.hidden) closeAuth();
+  });
+
+  // ===== 发表文章（会员） =====
+  function openCompose() {
+    if (!composeModal) return;
+    composeModal.hidden = false;
+    if (composeMsg) composeMsg.textContent = "";
+    if (composeForm) composeForm.reset();
+  }
+  function closeCompose() {
+    if (composeModal) composeModal.hidden = true;
+    if (composeMsg) composeMsg.textContent = "";
+  }
+
+  async function handlePublish(e) {
+    e.preventDefault();
+    const fd = new FormData(composeForm);
+    const title = (fd.get("title") || "").trim();
+    const body = (fd.get("body") || "").trim();
+    if (!title || !body) {
+      composeMsg.textContent = "标题和正文不能为空";
+      composeMsg.className = "form-msg err";
+      return;
+    }
+    composeMsg.textContent = "发布中，请稍候…";
+    composeMsg.className = "form-msg";
+    if (composeSubmit) composeSubmit.disabled = true;
+    try {
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          tag: (fd.get("tag") || "").trim(),
+          summary: (fd.get("summary") || "").trim(),
+          cover: (fd.get("cover") || "").trim(),
+          body,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        composeMsg.textContent = data.error || "发布失败";
+        composeMsg.className = "form-msg err";
+        return;
+      }
+      composeMsg.innerHTML = `✅ ${data.message}`;
+      composeMsg.className = "form-msg ok";
+      composeForm.reset();
+      // 2 秒后关弹窗并刷新文章列表
+      setTimeout(() => {
+        closeCompose();
+        loadPosts();
+      }, 2500);
+    } catch (err) {
+      composeMsg.textContent = "网络错误，请重试";
+      composeMsg.className = "form-msg err";
+    } finally {
+      if (composeSubmit) composeSubmit.disabled = false;
+    }
+  }
+
+  if (publishBtnChip) publishBtnChip.addEventListener("click", openCompose);
+  if (composeClose) composeClose.addEventListener("click", closeCompose);
+  if (composeModal)
+    composeModal.addEventListener("click", (e) => {
+      if (e.target === composeModal) closeCompose();
+    });
+  if (composeForm) composeForm.addEventListener("submit", handlePublish);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && composeModal && !composeModal.hidden) closeCompose();
   });
 
   // 会员视图打开时渲染（先查会话）
