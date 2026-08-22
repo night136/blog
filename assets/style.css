@@ -458,3 +458,18 @@ img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
 .comment-like .like-count { font-variant-numeric: tabular-nums; font-weight: 700; }
 .comment-del { padding: 4px 12px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-faint); font-size: 13px; cursor: pointer; transition: all .18s; }
 .comment-del:hover { color: #d9534f; background: rgba(217, 83, 79, .12); }
+
+/* 评论排序切换 + 楼中楼 + 回复 */
+.comments-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.comments-title { margin-bottom: 0; }
+.comment-sort { display: inline-flex; gap: 6px; }
+.sort-btn { padding: 5px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-soft); font-size: 13px; cursor: pointer; transition: all .18s; }
+.sort-btn:hover { border-color: var(--accent); color: var(--accent); }
+.sort-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.comment-reply { padding: 4px 12px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-soft); font-size: 13px; cursor: pointer; transition: all .18s; }
+.comment-reply:hover { color: var(--accent); background: var(--accent-soft); }
+.comment-replies { margin: 12px 0 2px 34px; padding-left: 16px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 12px; }
+.reply-hint { display: flex; align-items: center; gap: 8px; margin: -6px 0 10px; padding: 8px 14px; border: 1px dashed var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text-soft); font-size: 13px; }
+.reply-hint b { color: var(--accent); }
+.reply-cancel { margin-left: auto; border: none; background: transparent; color: var(--text-faint); font-size: 14px; cursor: pointer; line-height: 1; }
+.reply-cancel:hover { color: #d9534f; }

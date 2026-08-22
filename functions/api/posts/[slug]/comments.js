@@ -21,7 +21,7 @@ export async function onRequestGet({ env, params }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
   try {
     const { results } = await env.BLOG_DB.prepare(
-      "SELECT id, name, content, created_at, COALESCE(likes,0) AS likes FROM comments WHERE post_slug = ? ORDER BY created_at ASC, id ASC"
+      "SELECT id, name, content, created_at, parent_id, COALESCE(likes,0) AS likes FROM comments WHERE post_slug = ? ORDER BY created_at ASC, id ASC"
     ).bind(params.slug).all();
     return json({ ok: true, comments: results });
   } catch (e) {
@@ -63,22 +63,28 @@ export async function onRequestPost({ request, env, params }) {
       ).bind(id, params.slug).all();
       if (!results.length) return json({ ok: false, error: "评论不存在" }, 404);
       if (results[0].author !== username) return json({ ok: false, error: "只有楼主可以删除评论" }, 403);
-      await env.BLOG_DB.prepare("DELETE FROM comments WHERE id = ? AND post_slug = ?").bind(id, params.slug).run();
+      await env.BLOG_DB.prepare("DELETE FROM comments WHERE (id = ? OR parent_id = ?) AND post_slug = ?").bind(id, id, params.slug).run();
       return json({ ok: true });
     } catch (e) { return json({ ok: false, error: "删除失败：" + (e && e.message ? e.message : e) }, 500); }
   }
 
-  // ---- 发表评论 ----
+  // ---- 发表评论（支持楼中楼 parent_id） ----
   const name = (body.name || "").trim().slice(0, MAX_NAME) || "匿名";
   const content = (body.content || "").trim();
   if (!content) return json({ ok: false, error: "评论内容不能为空" }, 400);
   if (content.length > MAX_CONTENT) return json({ ok: false, error: "评论过长（最多 2000 字）" }, 400);
 
+  let parent_id = Number(body.parent_id) || 0;
+  if (parent_id) {
+    const { results: pr } = await env.BLOG_DB.prepare("SELECT id FROM comments WHERE id = ? AND post_slug = ?").bind(parent_id, params.slug).all();
+    if (!pr.length) return json({ ok: false, error: "回复的评论不存在" }, 400);
+  }
+
   const created_at = new Date().toISOString().slice(0, 19).replace("T", " ");
   try {
     const { meta } = await env.BLOG_DB.prepare(
-      "INSERT INTO comments (post_slug, name, content, created_at, likes) VALUES (?, ?, ?, ?, 0)"
-    ).bind(params.slug, name, content, created_at).run();
-    return json({ ok: true, comment: { id: meta && meta.last_row_id, name, content, created_at, likes: 0 } });
+      "INSERT INTO comments (post_slug, name, content, created_at, parent_id, likes) VALUES (?, ?, ?, ?, ?, 0)"
+    ).bind(params.slug, name, content, created_at, parent_id).run();
+    return json({ ok: true, comment: { id: meta && meta.last_row_id, name, content, created_at, parent_id, likes: 0 } });
   } catch (e) { return json({ ok: false, error: "评论失败：" + (e && e.message ? e.message : e) }, 500); }
 }

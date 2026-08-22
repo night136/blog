@@ -188,14 +188,23 @@
       currentSlug = slug;
       currentPostAuthor = post.author;
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${mdToHtml(post.body || "")}<section class="comments" id="comments"><h3 class="comments-title">💬 评论</h3><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${mdToHtml(post.body || "")}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
+      prefillCommentName();
       loadComments(slug);
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
 
   // ===== 评论 =====
   function escapeHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  // 单条评论的 HTML（顶层与回复复用）
+  function renderCommentItem(c, isOwner) {
+    const liked = localStorage.getItem("liked:" + c.id) ? " liked" : "";
+    const del = isOwner ? `<button class="comment-del" data-del="${c.id}" title="删除评论">删除</button>` : "";
+    const replyBtn = `<button class="comment-reply" data-reply="${c.id}" data-name="${escapeHtml(c.name)}" type="button">回复</button>`;
+    return `<div class="comment-item" data-id="${c.id}"><div class="comment-head"><span class="comment-author">${escapeHtml(c.name)}</span><span class="comment-time">${escapeHtml(c.created_at)}</span></div><p class="comment-text">${escapeHtml(c.content)}</p><div class="comment-foot"><button class="comment-like${liked}" data-like="${c.id}">👍 <span class="like-count">${c.likes || 0}</span></button>${replyBtn}${del}</div></div>`;
+  }
 
   async function loadComments(slug) {
     const list = $("commentList"); if (!list) return;
@@ -206,10 +215,25 @@
       const cs = data.comments || [];
       if (!cs.length) { list.innerHTML = `<p class="comments-empty">还没有评论，来抢沙发～</p>`; return; }
       const isOwner = !!(currentUser && currentUser.username && currentPostAuthor === currentUser.username);
-      list.innerHTML = cs.map((c) => {
-        const liked = localStorage.getItem("liked:" + c.id) ? " liked" : "";
-        const del = isOwner ? `<button class="comment-del" data-del="${c.id}" title="删除评论">删除</button>` : "";
-        return `<div class="comment-item"><div class="comment-head"><span class="comment-author">${escapeHtml(c.name)}</span><span class="comment-time">${escapeHtml(c.created_at)}</span></div><p class="comment-text">${escapeHtml(c.content)}</p><div class="comment-foot"><button class="comment-like${liked}" data-like="${c.id}">👍 <span class="like-count">${c.likes || 0}</span></button>${del}</div></div>`;
+      // 分组：顶层评论 parent_id 为空，回复挂到对应父评论
+      const tops = cs.filter((c) => !c.parent_id).map((c) => ({ ...c, replies: [] }));
+      const topMap = new Map(); tops.forEach((t) => topMap.set(t.id, t));
+      cs.filter((c) => c.parent_id).forEach((c) => {
+        const p = topMap.get(c.parent_id);
+        if (p) p.replies.push(c);
+        else tops.push({ ...c, replies: [] }); // 孤儿回复兜底（父被删但本应级联删）
+      });
+      // 排序：最新=created_at 倒序；最热=likes 倒序（并列按时间正序）
+      const cmpTop = commentSort === "hot"
+        ? (a, b) => ((b.likes || 0) - (a.likes || 0)) || (a.created_at < b.created_at ? -1 : 1)
+        : (a, b) => (a.created_at > b.created_at ? -1 : 1);
+      tops.sort(cmpTop);
+      tops.forEach((t) => t.replies.sort((a, b) => (a.created_at > b.created_at ? 1 : -1))); // 回复恒按时间正序
+      list.innerHTML = tops.map((t) => {
+        const repliesHtml = t.replies.length
+          ? `<div class="comment-replies">${t.replies.map((r) => renderCommentItem(r, isOwner)).join("")}</div>`
+          : "";
+        return renderCommentItem(t, isOwner) + repliesHtml;
       }).join("");
     } catch (_) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; }
   }
@@ -225,11 +249,12 @@
       if (msg) { msg.textContent = "发表中…"; msg.className = "comment-msg"; }
       const btn = form.querySelector("button"); if (btn) btn.disabled = true;
       try {
-        const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content }) });
+        const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content, parent_id: replyTo }) });
         const data = await res.json();
         if (!res.ok || !data.ok) { if (msg) { msg.textContent = data.error || "发表失败"; msg.className = "comment-msg err"; } return; }
         if (msg) { msg.textContent = "✅ 已发表"; msg.className = "comment-msg ok"; }
         const input = $("commentInput"); if (input) input.value = "";
+        resetReply(); // 退出回复模式（隐藏提示条）
         loadComments(slug);
       } catch (_) { if (msg) { msg.textContent = "网络错误"; msg.className = "comment-msg err"; } }
       finally { if (btn) btn.disabled = false; }
@@ -242,6 +267,19 @@
     if (likeBtn) { e.preventDefault(); await handleLike(likeBtn); return; }
     const delBtn = e.target.closest(".comment-del");
     if (delBtn) { e.preventDefault(); await handleDelete(delBtn); return; }
+    const replyBtn = e.target.closest(".comment-reply");
+    if (replyBtn) { e.preventDefault(); handleReply(replyBtn); return; }
+    const sortBtn = e.target.closest(".sort-btn");
+    if (sortBtn) {
+      e.preventDefault();
+      if (commentSort === (sortBtn.dataset.sort || "new")) return;
+      commentSort = sortBtn.dataset.sort || "new";
+      document.querySelectorAll(".sort-btn").forEach((b) => b.classList.toggle("active", b === sortBtn));
+      loadComments(currentSlug);
+      return;
+    }
+    const replyCancel = e.target.closest("#replyCancel");
+    if (replyCancel) { e.preventDefault(); resetReply(); return; }
   });
   async function handleLike(btn) {
     const id = btn.dataset.like;
@@ -262,6 +300,33 @@
       if (data.ok) loadComments(currentSlug);
       else alert(data.error || "删除失败");
     } catch (_) { alert("网络错误"); }
+  }
+
+  // 登录用户发评自动带入昵称（仅 prefill，可改）
+  function prefillCommentName() {
+    const input = $("commentName");
+    if (!input) return;
+    if (currentUser && currentUser.username) input.value = currentUser.username;
+  }
+
+  // 进入回复模式：记录父评论 id，显示提示条并聚焦输入框
+  function handleReply(btn) {
+    const id = Number(btn.dataset.reply);
+    if (!id) return;
+    replyTo = id;
+    const hint = $("replyHint");
+    const rn = $("replyName");
+    if (hint) hint.hidden = false;
+    if (rn) rn.textContent = "@" + (btn.dataset.name || "该用户");
+    const input = $("commentInput");
+    if (input) input.focus();
+  }
+
+  // 退出回复模式
+  function resetReply() {
+    replyTo = 0;
+    const hint = $("replyHint");
+    if (hint) hint.hidden = true;
   }
 
   function showView(name) {
@@ -337,6 +402,8 @@
   let currentUser = null;        // 当前登录用户（含 username），用于判断楼主
   let currentPostAuthor = "";    // 当前打开文章的作者
   let currentSlug = "";          // 当前打开文章的 slug
+  let commentSort = "new";       // 评论排序：new 最新 / hot 最热
+  let replyTo = 0;               // 正在回复的父评论 id（0 = 顶层新评）
   function setAuthUI(user) {
     if (user && user.username) {
       if (authBtn) authBtn.hidden = true;
