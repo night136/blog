@@ -4,6 +4,8 @@
 //   DELETE: 会员删除自己写的文章
 import { verifyJWT, getCookie, json } from "../_lib/auth.js";
 
+function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
+
 function publicPost(row) {
   return {
     id: row.id,
@@ -24,7 +26,7 @@ function unauthorized() {
 
 export async function onRequestGet({ env, params }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
-  const slug = params.slug;
+  const slug = decodeSlug(params.slug);
   try {
     const row = await env.BLOG_DB.prepare(
       "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE slug = ?"
@@ -46,12 +48,13 @@ export async function onRequestDelete({ env, params, request }) {
   if (!username) return unauthorized();
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
 
+  const slug = decodeSlug(params.slug);
   const row = await env.BLOG_DB.prepare(
     "SELECT author_username FROM posts WHERE slug = ?"
-  ).bind(params.slug).first();
+  ).bind(slug).first();
   if (!row) return json({ error: "文章不存在" }, 404);
   if (row.author_username !== username) return json({ error: "只能删除自己写的文章" }, 403);
 
-  await env.BLOG_DB.prepare("DELETE FROM posts WHERE slug = ?").bind(params.slug).run();
+  await env.BLOG_DB.prepare("DELETE FROM posts WHERE slug = ?").bind(slug).run();
   return json({ ok: true });
 }

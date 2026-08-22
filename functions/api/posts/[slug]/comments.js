@@ -3,6 +3,8 @@
 //   POST : action=create 发表 / action=like 点赞 / action=delete 删除（仅楼主）
 import { json, getCookie, verifyJWT } from "../../_lib/auth.js";
 
+function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
+
 const MAX_NAME = 40;
 const MAX_CONTENT = 2000;
 
@@ -19,10 +21,11 @@ async function currentUsername(request, env) {
 
 export async function onRequestGet({ env, params }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
+  const slug = decodeSlug(params.slug);
   try {
     const { results } = await env.BLOG_DB.prepare(
       "SELECT id, name, content, created_at, parent_id, COALESCE(likes,0) AS likes FROM comments WHERE post_slug = ? ORDER BY created_at ASC, id ASC"
-    ).bind(params.slug).all();
+    ).bind(slug).all();
     return json({ ok: true, comments: results });
   } catch (e) {
     return json({ error: "读取评论失败：" + (e && e.message ? e.message : e) }, 500);
@@ -31,6 +34,7 @@ export async function onRequestGet({ env, params }) {
 
 export async function onRequestPost({ request, env, params }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
+  const slug = decodeSlug(params.slug);
   let body;
   try { body = await request.json(); } catch (e) { return json({ ok: false, error: "请求格式错误" }, 400); }
 
@@ -43,7 +47,7 @@ export async function onRequestPost({ request, env, params }) {
     try {
       const { meta } = await env.BLOG_DB.prepare(
         "UPDATE comments SET likes = COALESCE(likes,0) + 1 WHERE id = ? AND post_slug = ?"
-      ).bind(id, params.slug).run();
+      ).bind(id, slug).run();
       if (!meta || meta.changes === 0) return json({ ok: false, error: "评论不存在" }, 404);
       const { results } = await env.BLOG_DB.prepare("SELECT COALESCE(likes,0) AS likes FROM comments WHERE id = ?").bind(id).all();
       const likes = results[0] ? results[0].likes : 0;
@@ -60,10 +64,10 @@ export async function onRequestPost({ request, env, params }) {
     try {
       const { results } = await env.BLOG_DB.prepare(
         "SELECT p.author_username AS author FROM comments c JOIN posts p ON p.slug = c.post_slug WHERE c.id = ? AND c.post_slug = ?"
-      ).bind(id, params.slug).all();
+      ).bind(id, slug).all();
       if (!results.length) return json({ ok: false, error: "评论不存在" }, 404);
       if (results[0].author !== username) return json({ ok: false, error: "只有楼主可以删除评论" }, 403);
-      await env.BLOG_DB.prepare("DELETE FROM comments WHERE (id = ? OR parent_id = ?) AND post_slug = ?").bind(id, id, params.slug).run();
+      await env.BLOG_DB.prepare("DELETE FROM comments WHERE (id = ? OR parent_id = ?) AND post_slug = ?").bind(id, id, slug).run();
       return json({ ok: true });
     } catch (e) { return json({ ok: false, error: "删除失败：" + (e && e.message ? e.message : e) }, 500); }
   }
@@ -76,7 +80,7 @@ export async function onRequestPost({ request, env, params }) {
 
   let parent_id = Number(body.parent_id) || 0;
   if (parent_id) {
-    const { results: pr } = await env.BLOG_DB.prepare("SELECT id FROM comments WHERE id = ? AND post_slug = ?").bind(parent_id, params.slug).all();
+    const { results: pr } = await env.BLOG_DB.prepare("SELECT id FROM comments WHERE id = ? AND post_slug = ?").bind(parent_id, slug).all();
     if (!pr.length) return json({ ok: false, error: "回复的评论不存在" }, 400);
   }
 
@@ -84,7 +88,7 @@ export async function onRequestPost({ request, env, params }) {
   try {
     const { meta } = await env.BLOG_DB.prepare(
       "INSERT INTO comments (post_slug, name, content, created_at, parent_id, likes) VALUES (?, ?, ?, ?, ?, 0)"
-    ).bind(params.slug, name, content, created_at, parent_id).run();
+    ).bind(slug, name, content, created_at, parent_id).run();
     return json({ ok: true, comment: { id: meta && meta.last_row_id, name, content, created_at, parent_id, likes: 0 } });
   } catch (e) { return json({ ok: false, error: "评论失败：" + (e && e.message ? e.message : e) }, 500); }
 }
