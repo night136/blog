@@ -184,8 +184,48 @@
       const data = await res.json();
       if (!data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败</p>`; return; }
       const post = data.post;
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div><h2>${post.title}</h2>${mdToHtml(post.body || "")}`;
+      const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${mdToHtml(post.body || "")}<section class="comments" id="comments"><h3 class="comments-title">💬 评论</h3><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      bindCommentForm(slug);
+      loadComments(slug);
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
+  }
+
+  // ===== 评论 =====
+  function escapeHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  async function loadComments(slug) {
+    const list = $("commentList"); if (!list) return;
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; return; }
+      const cs = data.comments || [];
+      if (!cs.length) { list.innerHTML = `<p class="comments-empty">还没有评论，来抢沙发～</p>`; return; }
+      list.innerHTML = cs.map((c) => `<div class="comment-item"><div class="comment-head"><span class="comment-author">${escapeHtml(c.name)}</span><span class="comment-time">${escapeHtml(c.created_at)}</span></div><p class="comment-text">${escapeHtml(c.content)}</p></div>`).join("");
+    } catch (_) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; }
+  }
+
+  function bindCommentForm(slug) {
+    const form = $("commentForm"); if (!form) return;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = ($("commentName")?.value || "").trim();
+      const content = ($("commentInput")?.value || "").trim();
+      const msg = $("commentMsg");
+      if (!content) { if (msg) { msg.textContent = "评论内容不能为空"; msg.className = "comment-msg err"; } return; }
+      if (msg) { msg.textContent = "发表中…"; msg.className = "comment-msg"; }
+      const btn = form.querySelector("button"); if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content }) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { if (msg) { msg.textContent = data.error || "发表失败"; msg.className = "comment-msg err"; } return; }
+        if (msg) { msg.textContent = "✅ 已发表"; msg.className = "comment-msg ok"; }
+        const input = $("commentInput"); if (input) input.value = "";
+        loadComments(slug);
+      } catch (_) { if (msg) { msg.textContent = "网络错误"; msg.className = "comment-msg err"; } }
+      finally { if (btn) btn.disabled = false; }
+    });
   }
 
   function showView(name) {

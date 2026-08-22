@@ -8,7 +8,8 @@ const MAX_TITLE = 120;
 const MAX_BODY = 1900000;
 const MAX_TAG = 30;
 const MAX_SUMMARY = 200;
-const MAX_COVER = 500;
+// 封面可能是 base64 长串（正文首图自动当封面），放宽上限；单行总上限 2MB 由 D1 兜底
+const MAX_COVER = 1900000;
 
 function safeSlug(title) {
   return (
@@ -75,13 +76,20 @@ export async function onRequestPost({ request, env }) {
   const title = (body.title || "").trim();
   const tag = (body.tag || "未分类").trim().slice(0, MAX_TAG) || "未分类";
   const summary = (body.summary || "").trim().slice(0, MAX_SUMMARY);
-  const cover = (body.cover || "").trim().slice(0, MAX_COVER);
+  const coverInput = (body.cover || "").trim().slice(0, MAX_COVER);
   const mdBody = (body.body || "").trim();
 
   if (!title) return json({ ok: false, error: "标题不能为空" }, 400);
   if (title.length > MAX_TITLE) return json({ ok: false, error: "标题过长（最多 120 字）" }, 400);
   if (!mdBody) return json({ ok: false, error: "正文不能为空" }, 400);
-  if (mdBody.length > MAX_BODY) return json({ ok: false, error: "正文过长（最多 50000 字）" }, 400);
+  if (mdBody.length > MAX_BODY) return json({ ok: false, error: "正文过长（图片较多时请减少，单篇上限约 1.9MB）" }, 400);
+
+  // 未手动填封面 → 从正文抽第一张图当封面（支持 data: 与 http(s) 链接）
+  let cover = coverInput;
+  if (!cover) {
+    const m = mdBody.match(/!\[[^\]]*\]\(([^)\s]+)\)/);
+    if (m) cover = m[1].slice(0, MAX_COVER);
+  }
 
   // 3. 生成 slug（日期 - 标题 - 短哈希防重名）
   const date = todayStr();

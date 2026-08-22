@@ -428,3 +428,26 @@ img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
   .chars-quote { display: none; }
   .auth-content { padding: 24px 20px; }
 }
+
+/* ===== 文章封面大图 ===== */
+.post-cover { width: 100%; max-height: 420px; object-fit: cover; border-radius: var(--radius); margin: 6px 0 18px; box-shadow: var(--shadow); }
+
+/* ===== 评论区 ===== */
+.comments { margin-top: 40px; padding-top: 26px; border-top: 1px solid var(--border); }
+.comments-title { font-size: 19px; font-weight: 800; margin-bottom: 16px; }
+.comment-list { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+.comments-loading, .comments-empty { color: var(--text-faint); font-size: 14px; }
+.comment-item { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 13px 16px; backdrop-filter: blur(var(--glass-blur)); }
+.comment-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.comment-author { font-weight: 700; color: var(--accent); font-size: 14px; }
+.comment-time { font-size: 12px; color: var(--text-faint); }
+.comment-text { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.65; color: var(--text); }
+.comment-form { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; backdrop-filter: blur(var(--glass-blur)); }
+.comment-name, .comment-input { padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; background: var(--surface-2); color: var(--text); font-family: inherit; transition: border-color .2s, box-shadow .2s; }
+.comment-input { min-height: 72px; resize: vertical; }
+.comment-name:focus, .comment-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.comment-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.comment-msg { font-size: 13px; color: var(--text-soft); }
+.comment-msg.err { color: #d9534f; }
+.comment-msg.ok { color: #2e9e5b; }
+.comment-form .btn-submit { padding: 9px 20px; font-size: 14px; }
