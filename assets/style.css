@@ -451,3 +451,10 @@ img { max-width: 100%; height: auto; border-radius: 10px; display: block; }
 .comment-msg.err { color: #d9534f; }
 .comment-msg.ok { color: #2e9e5b; }
 .comment-form .btn-submit { padding: 9px 20px; font-size: 14px; }
+.comment-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 10px; }
+.comment-like { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-soft); font-size: 13px; cursor: pointer; transition: all .18s; }
+.comment-like:hover { border-color: var(--accent); color: var(--accent); }
+.comment-like.liked { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); cursor: default; }
+.comment-like .like-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+.comment-del { padding: 4px 12px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-faint); font-size: 13px; cursor: pointer; transition: all .18s; }
+.comment-del:hover { color: #d9534f; background: rgba(217, 83, 79, .12); }

@@ -184,6 +184,9 @@
       const data = await res.json();
       if (!data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败</p>`; return; }
       const post = data.post;
+      currentUser = await checkSession();
+      currentSlug = slug;
+      currentPostAuthor = post.author;
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${mdToHtml(post.body || "")}<section class="comments" id="comments"><h3 class="comments-title">💬 评论</h3><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
@@ -202,7 +205,12 @@
       if (!data.ok) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; return; }
       const cs = data.comments || [];
       if (!cs.length) { list.innerHTML = `<p class="comments-empty">还没有评论，来抢沙发～</p>`; return; }
-      list.innerHTML = cs.map((c) => `<div class="comment-item"><div class="comment-head"><span class="comment-author">${escapeHtml(c.name)}</span><span class="comment-time">${escapeHtml(c.created_at)}</span></div><p class="comment-text">${escapeHtml(c.content)}</p></div>`).join("");
+      const isOwner = !!(currentUser && currentUser.username && currentPostAuthor === currentUser.username);
+      list.innerHTML = cs.map((c) => {
+        const liked = localStorage.getItem("liked:" + c.id) ? " liked" : "";
+        const del = isOwner ? `<button class="comment-del" data-del="${c.id}" title="删除评论">删除</button>` : "";
+        return `<div class="comment-item"><div class="comment-head"><span class="comment-author">${escapeHtml(c.name)}</span><span class="comment-time">${escapeHtml(c.created_at)}</span></div><p class="comment-text">${escapeHtml(c.content)}</p><div class="comment-foot"><button class="comment-like${liked}" data-like="${c.id}">👍 <span class="like-count">${c.likes || 0}</span></button>${del}</div></div>`;
+      }).join("");
     } catch (_) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; }
   }
 
@@ -226,6 +234,34 @@
       } catch (_) { if (msg) { msg.textContent = "网络错误"; msg.className = "comment-msg err"; } }
       finally { if (btn) btn.disabled = false; }
     });
+  }
+
+  // 评论区全局点击委托（列表容器会被重建，绑 document 更稳定）
+  document.addEventListener("click", async (e) => {
+    const likeBtn = e.target.closest(".comment-like");
+    if (likeBtn) { e.preventDefault(); await handleLike(likeBtn); return; }
+    const delBtn = e.target.closest(".comment-del");
+    if (delBtn) { e.preventDefault(); await handleDelete(delBtn); return; }
+  });
+  async function handleLike(btn) {
+    const id = btn.dataset.like;
+    if (!id || localStorage.getItem("liked:" + id)) { btn.classList.add("liked"); return; }
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(currentSlug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "like", id: Number(id) }) });
+      const data = await res.json();
+      if (data.ok) { localStorage.setItem("liked:" + id, "1"); btn.classList.add("liked"); const span = btn.querySelector(".like-count"); if (span) span.textContent = data.likes; }
+    } catch (_) {}
+  }
+  async function handleDelete(btn) {
+    const id = btn.dataset.del;
+    if (!id) return;
+    if (!confirm("确定删除这条评论吗？")) return;
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(currentSlug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id: Number(id) }) });
+      const data = await res.json();
+      if (data.ok) loadComments(currentSlug);
+      else alert(data.error || "删除失败");
+    } catch (_) { alert("网络错误"); }
   }
 
   function showView(name) {
@@ -298,6 +334,9 @@
   if (composeBack) composeBack.addEventListener("click", () => showView("home"));
 
   // ===== 会员会话 =====
+  let currentUser = null;        // 当前登录用户（含 username），用于判断楼主
+  let currentPostAuthor = "";    // 当前打开文章的作者
+  let currentSlug = "";          // 当前打开文章的 slug
   function setAuthUI(user) {
     if (user && user.username) {
       if (authBtn) authBtn.hidden = true;
@@ -309,7 +348,7 @@
       if (publishBtnChip) publishBtnChip.hidden = true;
     }
   }
-  async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); setAuthUI(d.user); return d.user; } catch (_) { setAuthUI(null); return null; } }
+  async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
   function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
   function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
   function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); }
