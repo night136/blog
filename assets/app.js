@@ -164,7 +164,7 @@
         <div class="card-body">
           <div class="card-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span>✍ ${p.author}</span></div>
           <h3>${p.title}</h3><p>${p.summary || ""}</p>
-          <div class="card-foot"><span>约 ${readingTime(p.body)} 分钟</span><span class="card-go">阅读 →</span></div>
+          <div class="card-foot"><span>约 ${readingTime(p.summary || p.title)} 分钟</span><span class="card-go">阅读 →</span></div>
         </div></article>`).join("");
     cardGrid.querySelectorAll(".card").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
   }
@@ -174,11 +174,18 @@
     archiveList.querySelectorAll(".archive-item").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
   }
 
-  function openPost(slug) {
+  async function openPost(slug) {
+    // 列表不含 body（避免 base64 图片拖慢首页），详情按需拉取单篇
     const p = posts.find((x) => x.slug === slug);
-    if (!p) return;
-    postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h2>${p.title}</h2>${mdToHtml(p.body || "")}`;
+    if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h2>${p.title}</h2><p style="color:var(--text-faint)">加载中…</p>`;
     showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
+    try {
+      const res = await fetch(`/api/posts/${encodeURIComponent(slug)}`, { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败</p>`; return; }
+      const post = data.post;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div><h2>${post.title}</h2>${mdToHtml(post.body || "")}`;
+    } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
 
   function showView(name) {
@@ -195,7 +202,7 @@
     cardGrid.innerHTML = Array.from({ length: 4 }).map(() => '<div class="sk-card"><div class="sk-cover skeleton"></div><div class="sk-line skeleton"></div><div class="sk-line short skeleton"></div></div>').join("");
     if (sliderEl) sliderEl.style.display = "block";
     try {
-      posts = (await fetchAllPosts()).map((p) => ({ ...p, summary: p.summary || (p.body || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
+      posts = (await fetchAllPosts()).map((p) => ({ ...p, summary: p.summary || (p.title || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
     } catch (e) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${e.message}</p>`; if (sliderEl) sliderEl.style.display = "none"; return; }
     if (!posts.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">暂无文章。</p>`; return; }
     renderSlider(); renderFilters(); renderCards(); renderArchive();
@@ -411,6 +418,58 @@
       ta.dispatchEvent(new Event("input"));
     });
   });
+
+  // 本地图片上传：前端压缩为 base64 直接写入正文（随文章一起存进 D1，无需 R2）
+  const composeImgBtn = $("composeImgUpload");
+  const composeFileInput = $("composeFile");
+  if (composeImgBtn && composeFileInput) {
+    composeImgBtn.addEventListener("click", () => composeFileInput.click());
+    composeFileInput.addEventListener("change", async () => {
+      const ta = composeBody; if (!ta) return;
+      const files = Array.from(composeFileInput.files || []);
+      composeFileInput.value = "";
+      if (!files.length) return;
+      if (composeMsg) { composeMsg.textContent = `正在压缩 ${files.length} 张图片…`; composeMsg.className = "form-msg"; }
+      let inserted = 0;
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) { if (composeMsg) composeMsg.textContent = `已跳过非图片文件：${file.name}`; continue; }
+        try {
+          const dataUrl = await compressImage(file, 1280, 0.82);
+          const name = (file.name || "image").replace(/\.[^.]+$/, "");
+          insertAtCursor(ta, `\n![${name}](${dataUrl})\n`);
+          inserted++;
+        } catch (e) {
+          if (composeMsg) { composeMsg.textContent = `「${file.name}」处理失败，可能文件过大`; composeMsg.className = "form-msg err"; }
+        }
+      }
+      ta.focus();
+      ta.dispatchEvent(new Event("input"));
+      if (inserted && composeMsg) { composeMsg.textContent = `✅ 已插入 ${inserted} 张图片（已压缩存入正文）`; composeMsg.className = "form-msg ok"; }
+    });
+  }
+
+  // 压缩图片：缩放到 maxW 宽、quality 质量的 JPEG，返回 data: URL（控制单图体积，避免撑爆 D1 2MB 行上限）
+  function compressImage(file, maxW, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxW) { height = Math.round(height * maxW / width); width = maxW; }
+          const canvas = document.createElement("canvas");
+          canvas.width = width; canvas.height = height;
+          canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+          try { resolve(canvas.toDataURL("image/jpeg", quality)); }
+          catch (e) { reject(e); }
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
   function insertAtCursor(textarea, text) {
     const s = textarea.selectionStart, e = textarea.selectionEnd;

@@ -4,7 +4,8 @@
 import { verifyJWT, getCookie, json } from "./_lib/auth.js";
 
 const MAX_TITLE = 120;
-const MAX_BODY = 50000;
+// 正文允许嵌 base64 图片：D1 单行上限 2,000,000 字节，正文留 1.9MB 余量（其他列也占空间）
+const MAX_BODY = 1900000;
 const MAX_TAG = 30;
 const MAX_SUMMARY = 200;
 const MAX_COVER = 500;
@@ -26,6 +27,7 @@ function todayStr() {
 }
 
 function publicPost(row) {
+  // 列表接口不返回 body：避免首页把每篇文章的 base64 图片一并搬运，保证加载速度
   return {
     id: row.id,
     slug: row.slug,
@@ -35,7 +37,6 @@ function publicPost(row) {
     summary: row.summary || "",
     cover: row.cover || "",
     author: row.author_username || "昉昕",
-    body: row.body,
   };
 }
 
@@ -43,7 +44,7 @@ export async function onRequestGet({ env }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
   try {
     const { results } = await env.BLOG_DB.prepare(
-      "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts ORDER BY date DESC, id DESC"
+      "SELECT id, slug, title, date, tag, summary, cover, author_username FROM posts ORDER BY date DESC, id DESC"
     ).all();
     return json({ ok: true, posts: results.map(publicPost) });
   } catch (e) {
