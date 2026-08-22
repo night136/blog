@@ -1,7 +1,7 @@
 // /api/posts/[slug]/comments
 //   GET  : 取某篇文章的评论列表（按时间升序，含 likes）
 //   POST : action=create 发表 / action=like 点赞 / action=delete 删除（仅楼主）
-import { json, getCookie, verifyJWT } from "../_lib/auth.js";
+import { json, getCookie, verifyJWT } from "../../_lib/auth.js";
 
 const MAX_NAME = 40;
 const MAX_CONTENT = 2000;

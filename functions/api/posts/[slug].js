@@ -2,7 +2,7 @@
 //   GET : 取单篇文章（含 body），供前台文章详情页使用
 //   PUT : 会员更新自己写的文章（author 必须 = 当前用户）
 //   DELETE: 会员删除自己写的文章
-import { verifyJWT, getCookie, json } from "../_lib/auth.js";
+import { verifyJWT, getCookie, json } from "../../_lib/auth.js";
 
 function publicPost(row) {
   return {
