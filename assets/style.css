@@ -575,3 +575,84 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .reply-hint b { color: var(--accent-dark); }
 .reply-cancel { margin-left: auto; border: none; background: transparent; color: var(--text-faint); font-size: 14px; cursor: pointer; line-height: 1; }
 .reply-cancel:hover { color: #D1665A; }
+
+/* 衬线字体变量（标题/品牌/时钟统一使用） */
+:root { --serif: "Noto Serif SC", "Songti SC", serif; }
+
+/* ===== 顶部玻璃态导航栏 ===== */
+.topbar { grid-column: 1 / -1; position: sticky; top: 0; z-index: 80; margin: 0 -24px; padding: 0 24px; }
+.topbar-inner { display: flex; align-items: center; gap: 16px; height: 60px; background: var(--surface); -webkit-backdrop-filter: blur(var(--glass-blur)); backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); box-shadow: var(--shadow-sm); padding: 0 18px; }
+.topbar-brand { font-family: var(--serif); font-weight: 800; font-size: 20px; color: var(--text); letter-spacing: .5px; text-decoration: none; white-space: nowrap; }
+.topbar-brand span { color: var(--accent); font-size: 13px; margin-left: 4px; font-weight: 600; }
+.topbar-nav { display: flex; gap: 6px; margin-left: 6px; flex: 1; }
+.topbar-nav .nav-link { padding: 8px 14px; border-radius: 999px; color: var(--text-soft); font-size: 14px; text-decoration: none; transition: all .18s; }
+.topbar-nav .nav-link:hover { color: var(--accent-dark); background: var(--accent-soft); }
+.topbar-nav .nav-link.active { color: var(--accent-text); background: var(--accent); }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar .hamburger { display: none; }
+.theme-toggle { width: 38px; height: 38px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-solid); color: var(--text); font-size: 16px; cursor: pointer; transition: all .18s; display: inline-flex; align-items: center; justify-content: center; }
+.theme-toggle:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 桌面端：侧边栏专注品牌 + 小部件，导航移到顶栏 */
+.sidebar .nav { display: none; }
+
+/* ===== 侧边栏 Bento 小部件 ===== */
+.widgets { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.widget { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px 16px 18px; box-shadow: var(--shadow-sm); }
+.widget-title { font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.widget-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.widget-list a { color: var(--text-soft); font-size: 14px; text-decoration: none; line-height: 1.4; transition: color .18s; }
+.widget-list a:hover { color: var(--accent-dark); }
+.widget-list .w-date { font-size: 11px; color: var(--text-faint); }
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+.w-tag { padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-solid); color: var(--text-soft); font-size: 13px; cursor: pointer; transition: all .18s; }
+.w-tag:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.widget-clock { color: var(--text); }
+.widget-clock strong { font-family: var(--serif); font-size: 22px; font-weight: 700; letter-spacing: 1px; color: var(--accent-dark); }
+.widget-clock .w-date { display: block; margin-top: 4px; font-size: 12px; color: var(--text-faint); }
+
+/* ===== Hero 头像 ===== */
+.hero-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; font-family: var(--serif); font-weight: 800; font-size: 30px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); margin-bottom: 14px; }
+
+/* ===== 首页错落 Bento 网格（首篇头条大卡） ===== */
+.card.feature { grid-column: span 2; }
+.card.feature .card-cover { height: 320px; }
+.card.feature h3 { font-size: 22px; }
+
+/* ===== 文章阅读页精致排版 ===== */
+.post-body { font-size: 16px; line-height: 1.9; color: var(--text); }
+.post-body h2 { font-family: var(--serif); font-size: 23px; font-weight: 700; margin: 32px 0 14px; padding-left: 14px; border-left: 4px solid var(--accent); }
+.post-body h3 { font-family: var(--serif); font-size: 19px; font-weight: 700; margin: 24px 0 10px; }
+.post-body p { margin: 14px 0; }
+.post-body strong { color: var(--accent-dark); }
+.post-body a { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
+.post-body blockquote { margin: 18px 0; padding: 14px 20px; border-left: 4px solid var(--accent); background: var(--quote-bg); border-radius: 0 var(--radius-xs) var(--radius-xs) 0; color: var(--text-soft); }
+.post-body blockquote p { margin: 0; }
+.post-body ul { margin: 14px 0; padding-left: 22px; }
+.post-body li { margin: 6px 0; }
+.post-body pre { margin: 18px 0; padding: 18px; background: var(--pre-bg); color: var(--pre-fg); border-radius: var(--radius-sm); overflow-x: auto; font-size: 14px; line-height: 1.6; }
+.post-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+.post-body :not(pre) > code { background: var(--accent-soft); color: var(--accent-dark); padding: 2px 6px; border-radius: 6px; }
+.post-body img { max-width: 100%; border-radius: var(--radius-sm); margin: 16px 0; box-shadow: var(--shadow-sm); }
+.post-body > p:first-of-type::first-letter { font-family: var(--serif); font-size: 3.1em; font-weight: 800; float: left; line-height: .82; padding: 8px 12px 0 0; color: var(--accent); }
+
+/* ===== 目录 TOC ===== */
+.toc { margin: 18px 0 24px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+.toc-title { font-family: var(--serif); font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 10px; }
+.toc-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.toc-list a { color: var(--text-soft); font-size: 14px; text-decoration: none; transition: color .18s; }
+.toc-list a:hover { color: var(--accent-dark); }
+.toc-l3 { padding-left: 18px; font-size: 13px; }
+
+/* ===== 卡片微动效 ===== */
+.card { transition: transform .25s cubic-bezier(.2,.7,.2,1), box-shadow .25s, border-color .25s; }
+
+/* ===== 移动端布局补充 ===== */
+@media (max-width: 980px) {
+  .topbar-nav { display: none; }
+  .topbar .hamburger { display: inline-flex; }
+  .sidebar .nav { display: flex; }
+  .card.feature { grid-column: span 1; }
+  .card.feature .card-cover { height: 200px; }
+  .content { padding-top: 72px; }
+}

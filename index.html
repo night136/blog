@@ -13,6 +13,22 @@
 </head>
 <body>
   <div class="layout">
+    <!-- 顶部玻璃态导航栏 -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-inner">
+        <a href="#" class="topbar-brand nav-link active" data-view="home">昉昕<span>的博客</span></a>
+        <nav class="topbar-nav">
+          <a href="#" class="nav-link" data-view="home">首页</a>
+          <a href="#" class="nav-link" data-view="archive">归档</a>
+          <a href="#" class="nav-link" data-view="member">会员</a>
+          <a href="#" class="nav-link" data-view="about">关于</a>
+        </nav>
+        <div class="topbar-actions">
+          <button class="theme-toggle" id="themeToggleTop" type="button" aria-label="切换暗色模式" title="切换暗色模式">🌙</button>
+          <button class="hamburger" id="hamburgerTop" type="button" aria-label="菜单">☰</button>
+        </div>
+      </div>
+    </header>
     <!-- 侧边栏 -->
     <aside class="sidebar" id="sidebar">
       <button class="hamburger" id="hamburger" type="button" aria-label="菜单">☰</button>
@@ -29,6 +45,20 @@
         <a href="#" class="nav-link" data-view="member">👥 会员专区</a>
         <a href="#" class="nav-link" data-view="about">关于</a>
       </nav>
+      <div class="widgets" id="widgets">
+        <section class="widget">
+          <h4 class="widget-title">📌 最近文章</h4>
+          <ul class="widget-list" id="recentList"></ul>
+        </section>
+        <section class="widget">
+          <h4 class="widget-title">🏷️ 标签</h4>
+          <div class="tag-cloud" id="tagCloud"></div>
+        </section>
+        <section class="widget">
+          <h4 class="widget-title">🕐 此刻</h4>
+          <div class="widget-clock" id="sideClock">—</div>
+        </section>
+      </div>
       <div class="sidebar-footer">
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换暗色模式" title="切换暗色模式">🌙</button>
         <span class="dot"></span> 正在写字…
@@ -43,6 +73,7 @@
       <section class="view view-home active">
         <header class="hero">
           <div class="hero-text">
+            <div class="hero-avatar">昉</div>
             <h2>记录与思考</h2>
             <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
             <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>

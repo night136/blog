@@ -80,7 +80,7 @@
         .replace(/^&gt; (.+)$/gm, "<blockquote><p>$1</p></blockquote>");
     }
     const lines = md.split("\n");
-    let html = "", i = 0;
+    let html = "", i = 0, hCount = 0;
     while (i < lines.length) {
       let line = lines[i];
       if (line.startsWith("```")) {
@@ -92,9 +92,9 @@
         const q = []; while (i < lines.length && /^> /.test(lines[i])) { q.push(lines[i].slice(2)); i++; }
         html += `<blockquote>${q.map((ln) => `<p>${inline(ln)}</p>`).join("")}</blockquote>`; continue;
       }
-      if (line.startsWith("### ")) { html += `<h3>${inline(line.slice(4))}</h3>`; i++; continue; }
-      if (line.startsWith("## ")) { html += `<h2>${inline(line.slice(3))}</h2>`; i++; continue; }
-      if (line.startsWith("# ")) { html += `<h2>${inline(line.slice(2))}</h2>`; i++; continue; }
+      if (line.startsWith("### ")) { html += `<h3 id="sec-${++hCount}">${inline(line.slice(4))}</h3>`; i++; continue; }
+      if (line.startsWith("## ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(3))}</h2>`; i++; continue; }
+      if (line.startsWith("# ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(2))}</h2>`; i++; continue; }
       if (/^[-*] /.test(line)) {
         const items = [];
         while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(`<li>${inline(lines[i].slice(2))}</li>`); i++; }
@@ -158,8 +158,8 @@
   function renderCards() {
     const list = getFiltered();
     if (!list.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint);grid-column:1/-1;">${searchQuery ? "没有匹配「" + searchQuery + "」的文章。" : "该分类下暂无文章。"}</p>`; return; }
-    cardGrid.innerHTML = list.map((p) => `
-      <article class="card" data-slug="${p.slug}">
+    cardGrid.innerHTML = list.map((p, i) => `
+      <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${p.slug}">
         <div class="card-cover" style="${coverStyle(p)}"></div>
         <div class="card-body">
           <div class="card-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span>✍ ${p.author}</span></div>
@@ -172,6 +172,37 @@
   function renderArchive() {
     archiveList.innerHTML = posts.map((p) => `<div class="archive-item" data-slug="${p.slug}"><span class="archive-date">${p.date}</span><span class="archive-title">${p.title}</span></div>`).join("");
     archiveList.querySelectorAll(".archive-item").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
+  }
+
+  // 侧边栏小部件：最近文章 + 标签云
+  function renderWidgets() {
+    const recent = $("recentList");
+    if (recent) {
+      recent.innerHTML = posts.slice(0, 5).map((p) => `<li><a href="#" data-slug="${escapeHtml(p.slug)}">${escapeHtml(p.title)}</a><span class="w-date">${p.date}</span></li>`).join("");
+      recent.querySelectorAll("a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openPost(a.dataset.slug); }));
+    }
+    const cloud = $("tagCloud");
+    if (cloud) {
+      const tags = Array.from(new Set(posts.map((p) => p.tag).filter(Boolean)));
+      cloud.innerHTML = (tags.length ? tags : ["未分类"]).map((t) => `<button class="w-tag" type="button" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join("");
+      cloud.querySelectorAll(".w-tag").forEach((b) => b.addEventListener("click", () => { activeTag = b.dataset.tag; renderFilters(); renderCards(); showView("home"); }));
+    }
+  }
+
+  // 从正文解析目录（与 mdToHtml 标题 id 规则一致：## / ###）
+  function buildToc(md) {
+    const lines = (md || "").split("\n");
+    const toc = []; let hN = 0, inCode = false;
+    for (const line of lines) {
+      if (line.startsWith("```")) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      const m = line.match(/^(#{1,3})\s+(.+)$/);
+      if (!m) continue;
+      hN++;
+      if (m[1].length === 1) continue; // # 不列入目录
+      toc.push({ level: m[1].length, text: m[2].replace(/[*`_]/g, "").trim(), id: "sec-" + hN });
+    }
+    return toc;
   }
 
   async function openPost(slug) {
@@ -188,7 +219,9 @@
       currentSlug = slug;
       currentPostAuthor = post.author;
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${mdToHtml(post.body || "")}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      const toc = buildToc(post.body || "");
+      const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
       prefillCommentName();
       loadComments(slug);
@@ -263,6 +296,8 @@
 
   // 评论区全局点击委托（列表容器会被重建，绑 document 更稳定）
   document.addEventListener("click", async (e) => {
+    const tocLink = e.target.closest(".toc a");
+    if (tocLink) { e.preventDefault(); const id = tocLink.getAttribute("href").slice(1); const t = document.getElementById(id); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     const likeBtn = e.target.closest(".comment-like");
     if (likeBtn) { e.preventDefault(); await handleLike(likeBtn); return; }
     const delBtn = e.target.closest(".comment-del");
@@ -346,14 +381,14 @@
       posts = (await fetchAllPosts()).map((p) => ({ ...p, summary: p.summary || (p.title || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
     } catch (e) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${e.message}</p>`; if (sliderEl) sliderEl.style.display = "none"; return; }
     if (!posts.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">暂无文章。</p>`; return; }
-    renderSlider(); renderFilters(); renderCards(); renderArchive();
+    renderSlider(); renderFilters(); renderCards(); renderArchive(); renderWidgets();
   }
 
   // ===== 深色模式 =====
   function applyTheme(mode) {
     document.documentElement.setAttribute("data-theme", mode);
     try { localStorage.setItem("blog-theme", mode); } catch (_) {}
-    if (themeToggle) themeToggle.textContent = mode === "dark" ? "☀️" : "🌙";
+    document.querySelectorAll(".theme-toggle").forEach((b) => { b.textContent = mode === "dark" ? "☀️" : "🌙"; });
   }
   function toggleTheme() {
     const cur = document.documentElement.getAttribute("data-theme") || "light";
@@ -381,6 +416,16 @@
     el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[Math.floor(((now.getHours() + 1) % 24) / 2)]}）`;
   }
 
+  function updateSideClock() {
+    const el = $("sideClock"); if (!el) return;
+    const pad = (n) => String(n).padStart(2, "0");
+    const now = new Date();
+    const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
+    el.innerHTML = `<strong>${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</strong> <span class="w-date">${now.getMonth() + 1}/${now.getDate()} ${wd}</span>`;
+  }
+  updateSideClock();
+  setInterval(() => { updateLunar(); updateSideClock(); }, 1000);
+
   // ===== 全局交互 =====
   window.addEventListener("scroll", () => { if (backTop) backTop.classList.toggle("show", window.scrollY > 400); });
   if (backTop) backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
@@ -388,6 +433,10 @@
   if (slidePrev) slidePrev.addEventListener("click", () => goSlide(currentSlide - 1));
   if (slideNext) slideNext.addEventListener("click", () => goSlide(currentSlide + 1));
   if (themeToggle) themeToggle.addEventListener("click", toggleTheme);
+  const themeToggleTop = $("themeToggleTop");
+  if (themeToggleTop) themeToggleTop.addEventListener("click", toggleTheme);
+  const hamburgerTop = $("hamburgerTop");
+  if (hamburgerTop) hamburgerTop.addEventListener("click", toggleSidebar);
 
   // 搜索防抖
   let searchTimer = null;
