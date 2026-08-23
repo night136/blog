@@ -224,17 +224,102 @@
       const manageBtns = isAuthor
         ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
         : "";
+      const rt = readingTime(post.body);
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      const shareUrl = location.origin + location.pathname + "?post=" + encodeURIComponent(slug);
+      const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="native" data-url="${escapeHtml(shareUrl)}" type="button">📤 分享</button></div>`;
+      const nav = buildPostNav(slug);
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ ${rt.minutes} 分钟 · ${rt.words} 字</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
       loadComments(slug);
+      addCodeCopyButtons();
+      initReadingProgress();
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
 
-  // ===== 评论 =====
+  // ===== 工具函数 =====
   function escapeHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function readingTime(md) {
+    const text = (md || "").replace(/!\[[^\]]*\]\([^)]+\)/g, "").replace(/[#*`\[\](){}|>\-]/g, "");
+    const words = text.trim().split(/\s+/).filter((x) => x).length;
+    return { words, minutes: Math.max(1, Math.round(words / 300)) };
+  }
+  function sharePost(post) {
+    const url = location.origin + location.pathname + "?post=" + encodeURIComponent(post.slug);
+    const text = `看看这篇文章：${post.title}`;
+    if (navigator.share) {
+      navigator.share({ title: post.title, text, url }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => alert("文章链接已复制到剪贴板")).catch(() => {});
+    }
+  }
+
+  // 构建上一篇/下一篇/相关文章导航
+  function buildPostNav(currentSlug) {
+    const idx = posts.findIndex((p) => p.slug === currentSlug);
+    if (idx < 0) return "";
+    const prev = posts[idx + 1];
+    const next = posts[idx - 1];
+    const current = posts[idx];
+    const related = posts.filter((p, i) => i !== idx && p.tag === current.tag).slice(0, 3);
+    let html = '<nav class="post-nav">';
+    html += '<div class="post-nav-row">';
+    html += prev ? `<a class="post-nav-item prev" href="?post=${encodeURIComponent(prev.slug)}" data-slug="${escapeHtml(prev.slug)}"><span>← 上一篇</span><strong>${escapeHtml(prev.title)}</strong></a>` : '<span class="post-nav-item disabled"><span>← 上一篇</span><strong>没有了</strong></span>';
+    html += next ? `<a class="post-nav-item next" href="?post=${encodeURIComponent(next.slug)}" data-slug="${escapeHtml(next.slug)}"><span>下一篇 →</span><strong>${escapeHtml(next.title)}</strong></a>` : '<span class="post-nav-item disabled"><span>下一篇 →</span><strong>没有了</strong></span>';
+    html += '</div>';
+    if (related.length) {
+      html += '<div class="post-related"><div class="post-related-title">📎 相关文章</div><div class="post-related-list">';
+      html += related.map((p) => `<a class="post-related-item" href="?post=${encodeURIComponent(p.slug)}" data-slug="${escapeHtml(p.slug)}"><span class="related-tag">${escapeHtml(p.tag)}</span><strong>${escapeHtml(p.title)}</strong></a>`).join("");
+      html += '</div></div>';
+    }
+    html += '</nav>';
+    return html;
+  }
+
+  function addCodeCopyButtons() {
+    postDetail.querySelectorAll("pre").forEach((pre) => {
+      if (pre.querySelector(".code-copy")) return;
+      const btn = document.createElement("button");
+      btn.className = "code-copy";
+      btn.type = "button";
+      btn.textContent = "复制";
+      btn.addEventListener("click", async () => {
+        const code = pre.querySelector("code");
+        const text = code ? code.innerText : pre.innerText;
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.textContent = "已复制";
+          btn.classList.add("copied");
+          setTimeout(() => { btn.textContent = "复制"; btn.classList.remove("copied"); }, 1800);
+        } catch (_) { btn.textContent = "失败"; setTimeout(() => btn.textContent = "复制", 1200); }
+      });
+      pre.style.position = "relative";
+      pre.appendChild(btn);
+    });
+  }
+
+  function initReadingProgress() {
+    let bar = $("readProgress");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "readProgress";
+      bar.className = "read-progress";
+      document.body.appendChild(bar);
+    }
+    const body = postDetail.querySelector(".post-body");
+    if (!body) { bar.style.width = "0%"; return; }
+    const update = () => {
+      const rect = body.getBoundingClientRect();
+      const total = body.offsetHeight + rect.top;
+      const scrolled = Math.max(0, -rect.top);
+      const pct = Math.min(100, Math.max(0, (scrolled / total) * 100));
+      bar.style.width = pct + "%";
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+  }
 
   // 单条评论的 HTML（顶层与回复复用）
   function renderCommentItem(c, isOwner) {
@@ -340,6 +425,24 @@
     if (postDelBtn) {
       e.preventDefault();
       handleDeletePost(postDelBtn.dataset.delSlug);
+      return;
+    }
+    const shareBtn = e.target.closest(".share-btn");
+    if (shareBtn) {
+      e.preventDefault();
+      const url = shareBtn.dataset.url;
+      if (shareBtn.dataset.share === "copy" && navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => { shareBtn.textContent = "✅ 已复制"; setTimeout(() => shareBtn.textContent = "📋 复制链接", 1800); }).catch(() => {});
+      } else if (shareBtn.dataset.share === "native" && currentPost) {
+        sharePost(currentPost);
+      }
+      return;
+    }
+    const navLink = e.target.closest(".post-nav-item[data-slug], .post-related-item[data-slug]");
+    if (navLink) {
+      e.preventDefault();
+      const s = navLink.dataset.slug;
+      if (s) { history.replaceState(null, "", "?post=" + encodeURIComponent(s)); openPost(s); }
       return;
     }
   });
@@ -894,4 +997,11 @@
   bindInputStates();
   checkSession();
   loadPosts();
+
+  // 若 URL 带 ?post=slug，自动打开对应文章（分享链接可用）
+  const startParams = new URLSearchParams(location.search);
+  const startSlug = startParams.get("post");
+  if (startSlug) {
+    setTimeout(() => openPost(decodeURIComponent(startSlug)), 300);
+  }
 })();
