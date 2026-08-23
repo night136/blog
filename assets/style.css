@@ -634,7 +634,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 
 /* ===== 侧边栏 Bento 小部件 ===== */
 .widgets { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
-.widget { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px 16px 18px; box-shadow: var(--shadow-sm); }
+.widget { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px 16px 18px; box-shadow: var(--shadow-sm); min-width: 0; }
 .widget-title { font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
 .widget-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .widget-list a { color: var(--text-soft); font-size: 14px; text-decoration: none; line-height: 1.4; transition: color .18s; }
@@ -674,7 +674,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .sec-hand { width: 1.5px; height: 48px; background: var(--accent); z-index: 3; transition: none; }
 .clock-date { font-size: 12px; color: var(--text-faint); text-align: center; }
 
-/* ── 侧边栏农历挂件（月份 + 日期条 + 24节气） ── */
+/* ── 侧边栏农历挂件（月份 + 日历格子 + 24节气） ── */
 .lunar-card {
   display: flex; align-items: center; gap: 12px;
   background: linear-gradient(135deg, rgba(232,155,76,.10), rgba(240,176,110,.06));
@@ -691,22 +691,23 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .lunar-month { font-family: var(--serif); font-size: 17px; font-weight: 700; color: var(--text); }
 .lunar-jieqi { font-size: 11px; color: var(--accent-dark); font-weight: 600; }
 .lunar-calendar {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
-  margin-top: 10px; padding: 8px;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  margin-top: 10px; padding: 4px;
   background: var(--surface-solid); border: 1px solid var(--border); border-radius: var(--radius-xs);
+  min-width: 0; box-sizing: border-box;
 }
 .lunar-cal-head {
-  text-align: center; font-size: 11px; color: var(--text-faint); padding: 2px 0;
+  text-align: center; font-size: 10px; color: var(--text-faint); padding: 1px 0;
 }
 .lunar-cal-cell {
-  aspect-ratio: 1; min-height: 34px;
+  min-height: 26px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border-radius: 8px; font-size: 11px; color: var(--text-soft);
-  padding: 3px 1px; line-height: 1.2;
+  border-radius: 6px; font-size: 10px; color: var(--text-soft);
+  padding: 2px 0; line-height: 1.15;
 }
 .lunar-cal-cell.empty { background: transparent; }
-.lunar-cal-cell .cal-solar { font-family: var(--serif); font-weight: 700; font-size: 13px; color: var(--text); }
-.lunar-cal-cell .cal-lunar { font-size: 9px; opacity: .8; transform: scale(.92); }
+.lunar-cal-cell .cal-solar { font-family: var(--serif); font-weight: 700; font-size: 12px; color: var(--text); }
+.lunar-cal-cell .cal-lunar { font-size: 8px; opacity: .8; transform: scale(.9); }
 .lunar-cal-cell.today { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
 .lunar-cal-cell.today .cal-solar { color: var(--accent-dark); }
 .lunar-cal-cell.today .cal-lunar { color: var(--accent-dark); }
