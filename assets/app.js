@@ -72,7 +72,7 @@
     const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     function inline(text) {
       return esc(text)
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy">')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" decoding="async">')
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/\*([^*]+)\*/g, "<em>$1</em>")
@@ -700,12 +700,14 @@
       const files = Array.from(composeFileInput.files || []);
       composeFileInput.value = "";
       if (!files.length) return;
-      if (composeMsg) { composeMsg.textContent = `正在压缩 ${files.length} 张图片…`; composeMsg.className = "form-msg"; }
+      if (composeMsg) { composeMsg.textContent = `正在压缩 1/${files.length} 张图片…`; composeMsg.className = "form-msg"; }
       let inserted = 0;
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         if (!file.type.startsWith("image/")) { if (composeMsg) composeMsg.textContent = `已跳过非图片文件：${file.name}`; continue; }
+        if (composeMsg) composeMsg.textContent = `正在压缩 ${i + 1}/${files.length}：${file.name}`;
         try {
-          const dataUrl = await compressImage(file, 1280, 0.82);
+          const dataUrl = await compressImage(file, 960, 0.72);
           const name = (file.name || "image").replace(/\.[^.]+$/, "");
           insertAtCursor(ta, `\n![${name}](${dataUrl})\n`);
           inserted++;
@@ -715,12 +717,35 @@
       }
       ta.focus();
       ta.dispatchEvent(new Event("input"));
-      if (inserted && composeMsg) { composeMsg.textContent = `✅ 已插入 ${inserted} 张图片（已压缩存入正文）`; composeMsg.className = "form-msg ok"; }
+      if (inserted && composeMsg) { composeMsg.textContent = `✅ 已插入 ${inserted}/${files.length} 张图片（已压缩存入正文）`; composeMsg.className = "form-msg ok"; }
     });
   }
 
-  // 压缩图片：缩放到 maxW 宽、quality 质量的 JPEG，返回 data: URL（控制单图体积，避免撑爆 D1 2MB 行上限）
-  function compressImage(file, maxW, quality) {
+  // 压缩图片：缩放到 maxW 宽、quality 质量的 JPEG，返回 data: URL。
+  // 若结果仍超过单图上限，自动降低质量二次压缩，避免 4 张图把正文撑得太大、加载慢。
+  async function compressImage(file, maxW = 960, quality = 0.72) {
+    const MAX_BYTES = 320 * 1024; // 单图约 320KB，4 张图合计约 1.2MB 左右
+    let dataUrl = await compressOnce(file, maxW, quality);
+    // 估算 base64 字节数（data: 头约占 23 字节，base64 每字符 0.75 字节）
+    let bytes = estimateBase64Bytes(dataUrl);
+    if (bytes <= MAX_BYTES) return dataUrl;
+
+    if (composeMsg) composeMsg.textContent = `图片较大，正在二次压缩…`;
+    dataUrl = await compressOnce(file, Math.min(maxW, 800), 0.60);
+    bytes = estimateBase64Bytes(dataUrl);
+    if (bytes <= MAX_BYTES) return dataUrl;
+
+    dataUrl = await compressOnce(file, Math.min(maxW, 720), 0.50);
+    return dataUrl;
+  }
+
+  function estimateBase64Bytes(dataUrl) {
+    const idx = dataUrl.indexOf(",");
+    const base64 = idx > -1 ? dataUrl.slice(idx + 1) : dataUrl;
+    return Math.ceil(base64.length * 0.75);
+  }
+
+  function compressOnce(file, maxW, quality) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -730,7 +755,10 @@
           if (width > maxW) { height = Math.round(height * maxW / width); width = maxW; }
           const canvas = document.createElement("canvas");
           canvas.width = width; canvas.height = height;
-          canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
           try { resolve(canvas.toDataURL("image/jpeg", quality)); }
           catch (e) { reject(e); }
         };
