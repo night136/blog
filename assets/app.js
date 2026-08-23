@@ -220,7 +220,7 @@
       currentSlug = slug;
       currentPost = post;
       currentPostAuthor = post.author;
-      const isAuthor = !!(currentUser && currentUser.username && currentUser.username === post.author);
+      const isAuthor = !!post.isAuthor;
       const manageBtns = isAuthor
         ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
         : "";
