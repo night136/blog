@@ -691,10 +691,10 @@
   });
 
   // 本地图片上传：前端压缩为 base64 直接写入正文（随文章一起存进 D1，无需 R2）
-  const composeImgBtn = $("composeImgUpload");
+  // 上传按钮现在是 <label for="composeFile">，靠原生 label 行为触发文件选择器，
+  // 避免移动端对隐藏 file input 的 programmatic click 支持不稳定的问题。
   const composeFileInput = $("composeFile");
-  if (composeImgBtn && composeFileInput) {
-    composeImgBtn.addEventListener("click", () => composeFileInput.click());
+  if (composeFileInput) {
     composeFileInput.addEventListener("change", async () => {
       const ta = composeBody; if (!ta) return;
       const files = Array.from(composeFileInput.files || []);

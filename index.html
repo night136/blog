@@ -179,8 +179,8 @@
                 <button type="button" data-md='> ' title="引用">❝</button>
                 <button type="button" data-md='- ' title="列表">≡</button>
                 <button type="button" data-md='![图片描述](https://)' data-md-pick="url" data-md-pick-start="13" data-md-pick-end="21" title="插入图片链接">🖼</button>
-                <button type="button" id="composeImgUpload" title="插入本地电脑/手机图片（自动压缩存入文章）">📷</button>
-                <input type="file" id="composeFile" accept="image/*" multiple hidden>
+                <label class="toolbar-btn" id="composeImgUpload" for="composeFile" title="插入本地电脑/手机图片（自动压缩存入文章）">📷</label>
+                <input type="file" id="composeFile" accept="image/png,image/jpeg,image/webp,image/gif,image/*" multiple>
                 <button type="button" data-md='[链接文字](https://)' data-md-pick="url" data-md-pick-start="6" data-md-pick-end="16" title="插入链接">🔗</button>
               </div>
               <textarea id="composeBody" placeholder="支持 Markdown 语法…&#10;&#10;# 标题&#10;正文内容……&#10;&#10;图片：![描述](https://example.com/img.jpg)"></textarea>
