@@ -431,22 +431,38 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 
 /* ── 卡通角色登录框 ── */
-.modal-auth { width: min(720px, 96vw); padding: 0; overflow: hidden; display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: 480px; border-radius: var(--radius); }
+/* 用 flex 替代 grid：360/兼容模式浏览器对 grid 解析不稳定，容易导致左侧角色区撑爆 */
+.modal-auth {
+  width: min(720px, 96vw); max-width: 96vw; padding: 0; overflow: hidden;
+  display: -webkit-box; display: -webkit-flex; display: -ms-flexbox; display: flex;
+  -webkit-box-align: stretch; -webkit-align-items: stretch; -ms-flex-align: stretch; align-items: stretch;
+  min-height: 480px; border-radius: var(--radius); box-sizing: border-box;
+}
 [data-theme="dark"] .modal-auth { background: var(--surface); }
-.auth-side { background: linear-gradient(160deg, #FAF0E3 0%, #F5E6D0 100%); padding: 24px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.auth-side {
+  background: linear-gradient(160deg, #FAF0E3 0%, #F5E6D0 100%); padding: 24px; position: relative;
+  -webkit-box-flex: 0; -webkit-flex: 0 0 320px; -ms-flex: 0 0 320px; flex: 0 0 320px;
+  max-width: 320px; width: 320px; min-width: 320px;
+  display: -webkit-box; display: -webkit-flex; display: -ms-flexbox; display: flex;
+  -webkit-box-orient: vertical; -webkit-box-direction: normal; -webkit-flex-direction: column; -ms-flex-direction: column; flex-direction: column;
+  -webkit-box-align: center; -webkit-align-items: center; -ms-flex-align: center; align-items: center;
+  -webkit-box-pack: center; -webkit-justify-content: center; -ms-flex-pack: center; justify-content: center;
+  overflow: hidden; box-sizing: border-box;
+}
 [data-theme="dark"] .auth-side { background: linear-gradient(160deg, #3A3530 0%, #2E2924 100%); }
 .auth-side .modal-close { color: var(--text); z-index: 2; }
 .chars-stage { position: relative; width: 100%; height: 280px; flex-shrink: 0; }
-.char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; }
+.char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; max-width: 100%; box-sizing: border-box; }
 .char:hover { animation-play-state: paused; }
 @keyframes char-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.02); } }
 
-.char-orange { left: 6px; bottom: 20px; width: 110px; animation-delay: 0s; }
-.char-purple { left: 100px; top: 30px; width: 70px; animation-delay: .4s; }
-.char-black { left: 160px; bottom: 30px; width: 56px; animation-delay: .8s; }
-.char-yellow { right: 16px; bottom: 30px; width: 88px; animation-delay: 1.2s; }
+/* 显式死宽，防止 360 等浏览器把 SVG 撑爆 */
+.char-orange { left: 6px; bottom: 20px; width: 110px; max-width: 110px; animation-delay: 0s; }
+.char-purple { left: 100px; top: 30px; width: 70px; max-width: 70px; animation-delay: .4s; }
+.char-black { left: 160px; bottom: 30px; width: 56px; max-width: 56px; animation-delay: .8s; }
+.char-yellow { right: 16px; bottom: 30px; width: 88px; max-width: 88px; animation-delay: 1.2s; }
 
-.char-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.char-svg { width: 100%; max-width: 100%; height: auto; display: block; overflow: visible; }
 .char .eyes { transition: transform .15s; }
 .char .pupil { transition: transform .12s ease-out; }
 .char .mouth { transition: d .2s ease, opacity .2s; }
@@ -494,7 +510,13 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 
 .chars-quote { margin-top: 18px; font-size: 14px; color: var(--text-soft); text-align: center; transition: opacity .3s; min-height: 20px; font-weight: 500; }
 
-.auth-content { padding: 36px 36px 28px; display: flex; flex-direction: column; gap: 14px; }
+.auth-content {
+  padding: 36px 36px 28px; box-sizing: border-box; min-width: 0;
+  -webkit-box-flex: 1; -webkit-flex: 1 1 auto; -ms-flex: 1 1 auto; flex: 1 1 auto;
+  display: -webkit-box; display: -webkit-flex; display: -ms-flexbox; display: flex;
+  -webkit-box-orient: vertical; -webkit-box-direction: normal; -webkit-flex-direction: column; -ms-flex-direction: column; flex-direction: column;
+  gap: 14px; overflow: hidden;
+}
 .auth-title { font-size: 24px; font-weight: 900; letter-spacing: .3px; }
 .auth-subtitle { font-size: 14px; color: var(--text-soft); margin-top: -6px; margin-bottom: 4px; }
 .auth-content .tabs { margin-bottom: 4px; }
@@ -513,12 +535,12 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .social-link:hover { background: var(--accent); color: var(--accent-text); }
 
 @media (max-width: 640px) {
-  .modal-auth { grid-template-columns: 1fr; min-height: auto; }
-  .auth-side { padding: 16px; min-height: 180px; }
+  .modal-auth { -webkit-box-orient: vertical; -webkit-box-direction: normal; -webkit-flex-direction: column; -ms-flex-direction: column; flex-direction: column; min-height: auto; }
+  .auth-side { padding: 16px; min-height: 180px; width: 100%; max-width: 100%; flex: 0 0 auto; }
   .chars-stage { height: 140px; }
-  .char-orange { width: 76px; } .char-purple { width: 50px; top: 12px; left: 76px; } .char-black { width: 42px; left: 120px; } .char-yellow { width: 60px; right: 10px; }
+  .char-orange { width: 76px; max-width: 76px; } .char-purple { width: 50px; max-width: 50px; top: 12px; left: 76px; } .char-black { width: 42px; max-width: 42px; left: 120px; } .char-yellow { width: 60px; max-width: 60px; right: 10px; }
   .chars-quote { display: none; }
-  .auth-content { padding: 24px 20px; }
+  .auth-content { padding: 24px 20px; width: 100%; max-width: 100%; flex: 1 1 auto; }
 }
 
 /* ── 文章封面大图 ── */
