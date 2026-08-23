@@ -454,22 +454,37 @@
       }
     }
 
-    // 近日农历日期条（今日前后各3天）
+    // 当月农历月历格子（像日历那样显示整月）
     if (daysEl) {
       try {
-        const todaySolar = Solar.fromYmd(now.getFullYear(), now.getMonth() + 1, now.getDate());
         const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-        let html = "";
-        for (let offset = -3; offset <= 3; offset++) {
-          const s = todaySolar.next(offset);
-          const d = new Date(s.getYear(), s.getMonth() - 1, s.getDay());
-          const l = Lunar.fromYmd(s.getYear(), s.getMonth(), s.getDay());
-          const isToday = offset === 0;
-          const dayName = l.getDayInChinese();
-          const weekName = weekdays[d.getDay()];
-          html += `<div class="lunar-day ${isToday ? "today" : ""}"><span class="ld-name">${weekName}</span><span class="ld-num">${dayName}</span></div>`;
+        const lunarYear = lunar.getYear();
+        const lunarMonth = lunar.getMonth();
+        const lunarDay = lunar.getDay();
+        const month = LunarMonth.fromYm(lunarYear, lunarMonth);
+        const dayCount = month.getDayCount();
+        const firstLunar = Lunar.fromYmd(lunarYear, lunarMonth, 1);
+        const firstSolar = firstLunar.getSolar();
+        const startWeek = firstSolar.getWeek(); // 0=周日
+        const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+
+        let html = weekdays.map((w) => `<div class="lunar-cal-head">${w}</div>`).join("");
+        // 前置空白
+        for (let i = 0; i < startWeek; i++) html += `<div class="lunar-cal-cell empty"></div>`;
+        // 日期格子
+        for (let d = 1; d <= dayCount; d++) {
+          const ld = Lunar.fromYmd(lunarYear, lunarMonth, d);
+          const sd = ld.getSolar();
+          const solarYmd = `${sd.getYear()}-${sd.getMonth()}-${sd.getDay()}`;
+          const isToday = solarYmd === todayKey;
+          const lunarName = ld.getDayInChinese();
+          html += `<div class="lunar-cal-cell ${isToday ? "today" : ""}"><span class="cal-solar">${sd.getDay()}</span><span class="cal-lunar">${lunarName}</span></div>`;
         }
-        daysEl.innerHTML = html;
+        // 补齐最后一行
+        const totalCells = startWeek + dayCount;
+        const tail = (7 - (totalCells % 7)) % 7;
+        for (let i = 0; i < tail; i++) html += `<div class="lunar-cal-cell empty"></div>`;
+        daysEl.innerHTML = `<div class="lunar-calendar">${html}</div>`;
       } catch (_) { daysEl.textContent = "—"; }
     }
   }
