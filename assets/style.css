@@ -643,9 +643,36 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
 .w-tag { padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-solid); color: var(--text-soft); font-size: 13px; cursor: pointer; transition: all .18s; }
 .w-tag:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
-.widget-clock { color: var(--text); }
-.widget-clock strong { font-family: var(--serif); font-size: 22px; font-weight: 700; letter-spacing: 1px; color: var(--accent-dark); }
-.widget-clock .w-date { display: block; margin-top: 4px; font-size: 12px; color: var(--text-faint); }
+/* ── 侧边栏圆盘钟表 ── */
+.analog-clock { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.clock-face {
+  position: relative; width: 120px; height: 120px; border-radius: 50%;
+  background: var(--surface-solid); border: 2px solid var(--border);
+  box-shadow: inset 0 2px 8px rgba(61,58,54,.04), var(--shadow-sm);
+}
+.clock-face::after {
+  content: ""; position: absolute; inset: 6px; border-radius: 50%;
+  border: 1px dashed var(--border);
+}
+.clock-tick { position: absolute; background: var(--text-faint); border-radius: 1px; }
+.tick-12 { width: 3px; height: 8px; top: 8px; left: 50%; transform: translateX(-50%); }
+.tick-3  { width: 8px; height: 3px; right: 8px; top: 50%; transform: translateY(-50%); }
+.tick-6  { width: 3px; height: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); }
+.tick-9  { width: 8px; height: 3px; left: 8px; top: 50%; transform: translateY(-50%); }
+.clock-center {
+  position: absolute; top: 50%; left: 50%; width: 8px; height: 8px;
+  background: var(--accent); border-radius: 50%; transform: translate(-50%, -50%);
+  z-index: 4; box-shadow: 0 0 0 2px var(--surface-solid);
+}
+.hand {
+  position: absolute; bottom: 50%; left: 50%; transform-origin: bottom center;
+  border-radius: 999px; z-index: 2; transform: translateX(-50%) rotate(0deg);
+  transition: transform .05s cubic-bezier(.4,2.08,.55,.44);
+}
+.hour-hand { width: 4px; height: 30px; background: var(--text); }
+.min-hand { width: 3px; height: 42px; background: var(--text-soft); }
+.sec-hand { width: 1.5px; height: 48px; background: var(--accent); z-index: 3; transition: none; }
+.clock-date { font-size: 12px; color: var(--text-faint); text-align: center; }
 
 /* ===== Hero 头像 ===== */
 .hero-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; font-family: var(--serif); font-weight: 800; font-size: 30px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); margin-bottom: 14px; }

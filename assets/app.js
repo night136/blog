@@ -419,10 +419,20 @@
 
   function updateSideClock() {
     const el = $("sideClock"); if (!el) return;
-    const pad = (n) => String(n).padStart(2, "0");
     const now = new Date();
     const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
-    el.innerHTML = `<strong>${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</strong> <span class="w-date">${now.getMonth() + 1}/${now.getDate()} ${wd}</span>`;
+    const dateEl = $("clockDate");
+    if (dateEl) dateEl.textContent = `${now.getMonth() + 1}/${now.getDate()} ${wd}`;
+    const hourHand = $("clockHour");
+    const minHand = $("clockMin");
+    const secHand = $("clockSec");
+    if (!hourHand || !minHand || !secHand) return;
+    const sec = now.getSeconds() + now.getMilliseconds() / 1000;
+    const min = now.getMinutes() + sec / 60;
+    const hour = (now.getHours() % 12) + min / 60;
+    secHand.style.transform = `rotate(${sec * 6}deg)`;
+    minHand.style.transform = `rotate(${min * 6}deg)`;
+    hourHand.style.transform = `rotate(${hour * 30}deg)`;
   }
   updateSideClock();
   setInterval(() => { updateLunar(); updateSideClock(); }, 1000);

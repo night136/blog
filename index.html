@@ -56,7 +56,19 @@
         </section>
         <section class="widget">
           <h4 class="widget-title">🕐 此刻</h4>
-          <div class="widget-clock" id="sideClock">—</div>
+          <div class="widget-clock" id="sideClock">
+            <div class="analog-clock">
+              <div class="clock-face">
+                <div class="clock-tick tick-12"></div><div class="clock-tick tick-3"></div>
+                <div class="clock-tick tick-6"></div><div class="clock-tick tick-9"></div>
+                <div class="hand hour-hand" id="clockHour"></div>
+                <div class="hand min-hand" id="clockMin"></div>
+                <div class="hand sec-hand" id="clockSec"></div>
+                <div class="clock-center"></div>
+              </div>
+              <div class="clock-date" id="clockDate">—</div>
+            </div>
+          </div>
         </section>
       </div>
       <div class="sidebar-footer">
