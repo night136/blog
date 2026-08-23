@@ -408,13 +408,31 @@
   const DI_ZHI = ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
   const SHICHEN_RANGE = ["23:00–01:00","01:00–03:00","03:00–05:00","05:00–07:00","07:00–09:00","09:00–11:00","11:00–13:00","13:00–15:00","15:00–17:00","17:00–19:00","19:00–21:00","21:00–23:00"];
   function updateLunar() {
-    const el = $("lunarClock"); if (!el) return;
-    if (typeof Lunar === "undefined") { el.textContent = "农历组件加载中…"; return; }
-    const now = new Date(), lunar = Lunar.fromDate(now);
-    const shichen = DI_ZHI[Math.floor(((now.getHours() + 1) % 24) / 2)];
+    const el = $("lunarClock");
+    const now = new Date();
+    const shichenIdx = Math.floor(((now.getHours() + 1) % 24) / 2);
+    const shichen = DI_ZHI[shichenIdx];
+    if (typeof Lunar === "undefined") {
+      if (el) el.textContent = "农历组件加载中…";
+      return;
+    }
+    const lunar = Lunar.fromDate(now);
+    const gz = lunar.getYearInGanZhi();
+    const shengxiao = lunar.getYearShengXiao();
+    const month = lunar.getMonthInChinese();
+    const day = lunar.getDayInChinese();
     const pad = (n) => String(n).padStart(2, "0");
-    el.innerHTML = `🗓 ${lunar.getYearInGanZhi()}年（${lunar.getYearShengXiao()}）${lunar.getMonthInChinese()}月${lunar.getDayInChinese()} · <strong>${shichen}时</strong> <span class="lunar-time">${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</span>`;
-    el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[Math.floor(((now.getHours() + 1) % 24) / 2)]}）`;
+    if (el) {
+      el.innerHTML = `🗓 ${gz}年（${shengxiao}）${month}月${day} · <strong>${shichen}时</strong> <span class="lunar-time">${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</span>`;
+      el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[shichenIdx]}）`;
+    }
+    // 侧边栏农历挂件
+    const gzEl = $("lunarGanZhi");
+    const dateEl = $("lunarDate");
+    const scEl = $("lunarShiChen");
+    if (gzEl) gzEl.textContent = `${gz}年 · ${shengxiao}`;
+    if (dateEl) dateEl.textContent = `${month}月${day}`;
+    if (scEl) scEl.textContent = `${shichen}时 · ${SHICHEN_RANGE[shichenIdx]}`;
   }
 
   function updateSideClock() {
