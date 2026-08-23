@@ -433,9 +433,22 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   .slider { height: 240px; }
   .slide-title { font-size: 22px; }
   .slide-overlay { padding: 22px 20px; }
+  .compose-full { height: calc(100vh - 100px); min-height: auto; padding-bottom: 12px; }
   .compose-panels { grid-template-columns: 1fr; }
-  .compose-preview { max-height: 300px; }
+  .compose-preview { max-height: 260px; padding: 16px 18px; }
   .compose-row { flex-direction: column; }
+  .compose-row input { min-width: 0; width: 100%; }
+  #composeTitle { font-size: 18px; }
+  .editor-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .editor-toolbar button, .editor-toolbar .toolbar-btn { width: 32px; height: 32px; font-size: 13px; }
+  .compose-actions { flex-direction: column; align-items: stretch; gap: 10px; }
+  .compose-actions .btn-submit { width: 100%; }
+  .post-detail { padding: 0 4px; }
+  .post-detail h2 { font-size: 24px; }
+  .post-detail .post-meta { flex-wrap: wrap; gap: 8px; font-size: 12px; }
+  .post-actions { width: 100%; margin-left: 0; margin-top: 4px; }
+  .post-actions button { flex: 1; padding: 5px 8px; font-size: 11px; }
+  .post-cover { max-height: 220px; border-radius: var(--radius-sm); }
   .post-body { font-size: 15px; line-height: 1.8; }
   .post-body h2 { font-size: 20px; padding-left: 11px; }
   .post-body h3 { font-size: 17px; }
@@ -445,6 +458,8 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   .comment-form .btn-submit { width: 100%; }
   .comments-head { flex-wrap: wrap; gap: 10px; }
   .comment-input { width: 100%; box-sizing: border-box; }
+  .comment-item { padding: 14px; }
+  .back-btn { padding: 7px 12px; font-size: 13px; }
 }
 
 /* ── 卡通角色登录框 ── */
