@@ -426,13 +426,52 @@
       el.innerHTML = `🗓 ${gz}年（${shengxiao}）${month}月${day} · <strong>${shichen}时</strong> <span class="lunar-time">${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</span>`;
       el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[shichenIdx]}）`;
     }
-    // 侧边栏农历挂件
+    // 侧边栏农历挂件：月份 + 日期条 + 24节气
     const gzEl = $("lunarGanZhi");
-    const dateEl = $("lunarDate");
+    const monthEl = $("lunarMonth");
+    const jqEl = $("lunarJieQi");
+    const daysEl = $("lunarDays");
     const scEl = $("lunarShiChen");
     if (gzEl) gzEl.textContent = `${gz}年 · ${shengxiao}`;
-    if (dateEl) dateEl.textContent = `${month}月${day}`;
-    if (scEl) scEl.textContent = `${shichen}时 · ${SHICHEN_RANGE[shichenIdx]}`;
+    if (monthEl) monthEl.textContent = `农历 ${month}月 · ${day}`;
+    if (scEl) scEl.textContent = `${shichen}时（${SHICHEN_RANGE[shichenIdx]}）`;
+
+    // 24节气：今日节气 or 下一个节气倒计时
+    if (jqEl) {
+      const current = lunar.getCurrentJieQi();
+      if (current) {
+        jqEl.textContent = `今日节气 · ${current.getName()}`;
+      } else {
+        try {
+          const next = lunar.getNextJieQi(true);
+          if (next && next.getSolar) {
+            const s = next.getSolar();
+            const today = Solar.fromYmd(now.getFullYear(), now.getMonth() + 1, now.getDate());
+            const diff = Math.round((new Date(s.getYear(), s.getMonth() - 1, s.getDay()).getTime() - new Date(today.getYear(), today.getMonth() - 1, today.getDay()).getTime()) / 86400000);
+            jqEl.textContent = `下一节气 · ${next.getName()}${diff > 0 ? "（" + diff + "天后）" : ""}`;
+          } else { jqEl.textContent = ""; }
+        } catch (_) { jqEl.textContent = ""; }
+      }
+    }
+
+    // 近日农历日期条（今日前后各3天）
+    if (daysEl) {
+      try {
+        const todaySolar = Solar.fromYmd(now.getFullYear(), now.getMonth() + 1, now.getDate());
+        const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+        let html = "";
+        for (let offset = -3; offset <= 3; offset++) {
+          const s = todaySolar.next(offset);
+          const d = new Date(s.getYear(), s.getMonth() - 1, s.getDay());
+          const l = Lunar.fromYmd(s.getYear(), s.getMonth(), s.getDay());
+          const isToday = offset === 0;
+          const dayName = l.getDayInChinese();
+          const weekName = weekdays[d.getDay()];
+          html += `<div class="lunar-day ${isToday ? "today" : ""}"><span class="ld-name">${weekName}</span><span class="ld-num">${dayName}</span></div>`;
+        }
+        daysEl.innerHTML = html;
+      } catch (_) { daysEl.textContent = "—"; }
+    }
   }
 
   function updateSideClock() {
