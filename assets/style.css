@@ -248,7 +248,19 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 .back-btn:hover { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); }
 .post-detail h2 { font-size: 32px; font-weight: 900; letter-spacing: .5px; margin-bottom: 14px; }
-.post-detail .post-meta { margin-bottom: 28px; }
+.post-detail .post-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 28px; color: var(--text-faint); font-size: 13px;
+}
+.post-detail .post-meta .author { color: var(--text-soft); }
+.post-actions { margin-left: auto; display: flex; gap: 8px; }
+.post-actions button {
+  background: var(--surface-solid); border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 12px; font-size: 12px; color: var(--text-soft); cursor: pointer;
+  transition: all .15s;
+}
+.post-actions button:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
+.post-actions .post-del:hover { background: rgba(239, 68, 68, .08); border-color: rgba(239, 68, 68, .3); color: #c0392b; }
 
 .prose { font-size: 16px; line-height: 1.9; color: var(--text); }
 .prose h2 { font-size: 26px; font-weight: 800; margin: 38px 0 16px; letter-spacing: .3px; }

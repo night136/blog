@@ -218,11 +218,16 @@
       const post = data.post;
       currentUser = await checkSession();
       currentSlug = slug;
+      currentPost = post;
       currentPostAuthor = post.author;
+      const isAuthor = !!(currentUser && currentUser.username && currentUser.username === post.author);
+      const manageBtns = isAuthor
+        ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
+        : "";
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
       loadComments(slug);
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
@@ -315,6 +320,28 @@
     }
     const replyCancel = e.target.closest("#replyCancel");
     if (replyCancel) { e.preventDefault(); resetReply(); return; }
+    const editBtn = e.target.closest(".post-edit");
+    if (editBtn) {
+      e.preventDefault();
+      const s = editBtn.dataset.editSlug;
+      if (currentPost && currentPost.slug === s) {
+        openCompose(currentPost);
+      } else {
+        // 兜底：从列表项进入时可能还没完整 body，先取详情再编辑
+        try {
+          const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: s }) });
+          const data = await res.json();
+          if (data.ok && data.post) openCompose(data.post);
+        } catch (_) {}
+      }
+      return;
+    }
+    const postDelBtn = e.target.closest(".post-del");
+    if (postDelBtn) {
+      e.preventDefault();
+      handleDeletePost(postDelBtn.dataset.delSlug);
+      return;
+    }
   });
   async function handleLike(btn) {
     const id = btn.dataset.like;
@@ -521,12 +548,14 @@
   // 导航
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
-  if (composeBack) composeBack.addEventListener("click", () => showView("home"));
+  if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====
   let currentUser = null;        // 当前登录用户（含 username），用于判断楼主
   let currentPostAuthor = "";    // 当前打开文章的作者
   let currentSlug = "";          // 当前打开文章的 slug
+  let currentPost = null;        // 当前打开文章的完整数据（用于编辑）
+  let editingSlug = "";          // 非空表示正在编辑该 slug 的文章
   let commentSort = "new";       // 评论排序：new 最新 / hot 最热
   let replyTo = 0;               // 正在回复的父评论 id（0 = 顶层新评）
   function setAuthUI(user) {
@@ -662,7 +691,28 @@
   }
 
   // ===== 全屏写作页 =====
-  function openCompose() { showView("compose"); if (composeTitle) composeTitle.value = ""; if (composeTag) composeTag.value = ""; if (composeSummary) composeSummary.value = ""; if (composeCover) composeCover.value = ""; if (composeBody) composeBody.value = ""; if (composePreview) composePreview.innerHTML = "<p style='color:var(--text-faint)'>实时预览…</p>"; if (composeMsg) composeMsg.textContent = ""; }
+  function openCompose(post) {
+    showView("compose");
+    if (post && post.slug) {
+      editingSlug = post.slug;
+      if (composeTitle) composeTitle.value = post.title || "";
+      if (composeTag) composeTag.value = post.tag || "";
+      if (composeSummary) composeSummary.value = post.summary || "";
+      if (composeCover) composeCover.value = post.cover || "";
+      if (composeBody) composeBody.value = post.body || "";
+      if (composeSubmit) composeSubmit.textContent = "保存修改";
+    } else {
+      editingSlug = "";
+      if (composeTitle) composeTitle.value = "";
+      if (composeTag) composeTag.value = "";
+      if (composeSummary) composeSummary.value = "";
+      if (composeCover) composeCover.value = "";
+      if (composeBody) composeBody.value = "";
+      if (composeSubmit) composeSubmit.textContent = "发布文章";
+    }
+    if (composePreview) composePreview.innerHTML = mdToHtml((post && post.body) || "") || "<p style='color:var(--text-faint)'>实时预览…</p>";
+    if (composeMsg) composeMsg.textContent = "";
+  }
 
   // 编辑器工具栏（快捷插入 Markdown 语法）
   document.querySelectorAll(".editor-toolbar button").forEach((btn) => {
@@ -786,15 +836,35 @@
     const title = (composeTitle?.value || "").trim();
     const body = (composeBody?.value || "").trim();
     if (!title || !body) { if (composeMsg) { composeMsg.textContent = "标题和正文不能为空"; composeMsg.className = "form-msg err"; } return; }
-    if (composeMsg) { composeMsg.textContent = "发布中…"; composeMsg.className = "form-msg"; }
+    if (composeMsg) { composeMsg.textContent = editingSlug ? "保存中…" : "发布中…"; composeMsg.className = "form-msg"; }
     if (composeSubmit) composeSubmit.disabled = true;
     try {
-      const res = await fetch("/api/posts", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, tag: (composeTag?.value || "").trim(), summary: (composeSummary?.value || "").trim(), cover: (composeCover?.value || "").trim(), body }) });
-      const data = await res.json();
-      if (!res.ok || !data.ok) { if (composeMsg) { composeMsg.textContent = data.error || "发布失败"; composeMsg.className = "form-msg err"; } return; }
-      if (composeMsg) { composeMsg.innerHTML = "✅ 已发布"; composeMsg.className = "form-msg ok"; }
-      setTimeout(() => { showView("home"); loadPosts(); }, 800);
+      let res, data;
+      const payload = { title, tag: (composeTag?.value || "").trim(), summary: (composeSummary?.value || "").trim(), cover: (composeCover?.value || "").trim(), body };
+      if (editingSlug) {
+        res = await fetch("/api/posts/manage", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "update", slug: editingSlug, ...payload }) });
+      } else {
+        res = await fetch("/api/posts", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      }
+      data = await res.json();
+      if (!res.ok || !data.ok) { if (composeMsg) { composeMsg.textContent = data.error || (editingSlug ? "保存失败" : "发布失败"); composeMsg.className = "form-msg err"; } return; }
+      if (composeMsg) { composeMsg.innerHTML = editingSlug ? "✅ 已保存" : "✅ 已发布"; composeMsg.className = "form-msg ok"; }
+      const slugToOpen = editingSlug || data.slug;
+      editingSlug = "";
+      if (composeSubmit) composeSubmit.textContent = "发布文章";
+      setTimeout(() => { if (slugToOpen) openPost(slugToOpen); else { showView("home"); loadPosts(); } }, 800);
     } catch (_) { if (composeMsg) { composeMsg.textContent = "网络错误"; composeMsg.className = "form-msg err"; } } finally { if (composeSubmit) composeSubmit.disabled = false; }
+  }
+
+  async function handleDeletePost(slug) {
+    if (!slug) return;
+    if (!confirm("确定删除这篇文章吗？删除后无法恢复。")) return;
+    try {
+      const res = await fetch("/api/posts/manage", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", slug }) });
+      const data = await res.json();
+      if (!res.ok || !data.ok) { alert(data.error || "删除失败"); return; }
+      showView("home"); loadPosts();
+    } catch (_) { alert("网络错误，删除失败"); }
   }
 
   // ===== 移动端汉堡菜单 =====
