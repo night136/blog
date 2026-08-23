@@ -427,7 +427,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   .comment-actions { flex-direction: column; align-items: stretch; }
   .comment-form .btn-submit { width: 100%; }
   .comments-head { flex-wrap: wrap; gap: 10px; }
-  .comment-name, .comment-input { width: 100%; box-sizing: border-box; }
+  .comment-input { width: 100%; box-sizing: border-box; }
 }
 
 /* ── 卡通角色登录框 ── */
@@ -566,13 +566,13 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 18px; backdrop-filter: blur(var(--glass-blur));
 }
-.comment-name, .comment-input {
+.comment-input {
   padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-xs);
   font-size: 14px; background: var(--surface-solid); color: var(--text); font-family: inherit;
   transition: border-color .2s, box-shadow .2s;
+  min-height: 80px; resize: vertical;
 }
-.comment-input { min-height: 80px; resize: vertical; }
-.comment-name:focus, .comment-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.comment-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .comment-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .comment-msg { font-size: 13px; color: var(--text-soft); }
 .comment-msg.err { color: #D1665A; }

@@ -222,9 +222,8 @@
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><input class="comment-name" id="commentName" type="text" placeholder="昵称（可不填）" maxlength="40"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span></div>${hero}<h2>${post.title}</h2>${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div><section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
-      prefillCommentName();
       loadComments(slug);
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
@@ -276,7 +275,7 @@
     const form = $("commentForm"); if (!form) return;
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const name = ($("commentName")?.value || "").trim();
+      const name = (currentUser && currentUser.username ? currentUser.username : "匿名").trim();
       const content = ($("commentInput")?.value || "").trim();
       const msg = $("commentMsg");
       if (!content) { if (msg) { msg.textContent = "评论内容不能为空"; msg.className = "comment-msg err"; } return; }
@@ -336,13 +335,6 @@
       if (data.ok) loadComments(currentSlug);
       else alert((data && data.error) || "删除失败");
     } catch (_) { alert("网络错误"); }
-  }
-
-  // 登录用户发评自动带入昵称（仅 prefill，可改）
-  function prefillCommentName() {
-    const input = $("commentName");
-    if (!input) return;
-    if (currentUser && currentUser.username) input.value = currentUser.username;
   }
 
   // 进入回复模式：记录父评论 id，显示提示条并聚焦输入框
