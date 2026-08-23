@@ -211,9 +211,10 @@
     if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h2>${p.title}</h2><p style="color:var(--text-faint)">加载中…</p>`;
     showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
     try {
-      const res = await fetch(`/api/posts/${encodeURIComponent(slug)}`, { credentials: "same-origin" });
+      // slug 放 body，避免部分国产浏览器（小米等）fetch 对中文 slug 的 % 编码损坏
+      const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
       const data = await res.json();
-      if (!data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败</p>`; return; }
+      if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
       const post = data.post;
       currentUser = await checkSession();
       currentSlug = slug;
@@ -242,9 +243,9 @@
   async function loadComments(slug) {
     const list = $("commentList"); if (!list) return;
     try {
-      const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { credentials: "same-origin" });
+      const res = await fetch("/api/posts/comments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list", slug }) });
       const data = await res.json();
-      if (!data.ok) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败</p>`; return; }
+      if (!res.ok || !data.ok) { list.innerHTML = `<p style="color:var(--text-faint)">评论加载失败：${(data && data.error) || res.status}</p>`; return; }
       const cs = data.comments || [];
       if (!cs.length) { list.innerHTML = `<p class="comments-empty">还没有评论，来抢沙发～</p>`; return; }
       const isOwner = !!(currentUser && currentUser.username && currentPostAuthor === currentUser.username);
@@ -282,9 +283,9 @@
       if (msg) { msg.textContent = "发表中…"; msg.className = "comment-msg"; }
       const btn = form.querySelector("button"); if (btn) btn.disabled = true;
       try {
-        const res = await fetch(`/api/posts/${encodeURIComponent(slug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content, parent_id: replyTo }) });
+        const res = await fetch("/api/posts/comments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create", slug, name, content, parent_id: replyTo }) });
         const data = await res.json();
-        if (!res.ok || !data.ok) { if (msg) { msg.textContent = data.error || "发表失败"; msg.className = "comment-msg err"; } return; }
+        if (!res.ok || !data.ok) { if (msg) { msg.textContent = (data && data.error) || "发表失败"; msg.className = "comment-msg err"; } return; }
         if (msg) { msg.textContent = "✅ 已发表"; msg.className = "comment-msg ok"; }
         const input = $("commentInput"); if (input) input.value = "";
         resetReply(); // 退出回复模式（隐藏提示条）
@@ -320,7 +321,7 @@
     const id = btn.dataset.like;
     if (!id || localStorage.getItem("liked:" + id)) { btn.classList.add("liked"); return; }
     try {
-      const res = await fetch(`/api/posts/${encodeURIComponent(currentSlug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "like", id: Number(id) }) });
+      const res = await fetch("/api/posts/comments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "like", slug: currentSlug, id: Number(id) }) });
       const data = await res.json();
       if (data.ok) { localStorage.setItem("liked:" + id, "1"); btn.classList.add("liked"); const span = btn.querySelector(".like-count"); if (span) span.textContent = data.likes; }
     } catch (_) {}
@@ -330,10 +331,10 @@
     if (!id) return;
     if (!confirm("确定删除这条评论吗？")) return;
     try {
-      const res = await fetch(`/api/posts/${encodeURIComponent(currentSlug)}/comments`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id: Number(id) }) });
+      const res = await fetch("/api/posts/comments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", slug: currentSlug, id: Number(id) }) });
       const data = await res.json();
       if (data.ok) loadComments(currentSlug);
-      else alert(data.error || "删除失败");
+      else alert((data && data.error) || "删除失败");
     } catch (_) { alert("网络错误"); }
   }
 
