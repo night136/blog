@@ -448,7 +448,8 @@
             const s = next.getSolar();
             const today = Solar.fromYmd(now.getFullYear(), now.getMonth() + 1, now.getDate());
             const diff = Math.round((new Date(s.getYear(), s.getMonth() - 1, s.getDay()).getTime() - new Date(today.getYear(), today.getMonth() - 1, today.getDay()).getTime()) / 86400000);
-            jqEl.textContent = `下一节气 · ${next.getName()}${diff > 0 ? "（" + diff + "天后）" : ""}`;
+            if (diff === 1) jqEl.textContent = `明日节气 · ${next.getName()}`;
+            else jqEl.textContent = `${diff} 天后 · ${next.getName()}`;
           } else { jqEl.textContent = ""; }
         } catch (_) { jqEl.textContent = ""; }
       }
