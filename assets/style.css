@@ -234,9 +234,12 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 /* 卡片滚动入场：由小变大 + 淡入（仅对首次进入视口的卡片播放，重绘已看过的不再重播） */
 .card { opacity: 0; }
 .card.shown { opacity: 1; }
-.card.in-view { animation: cardIn .55s cubic-bezier(.22,.61,.36,1) both; }
+.card.in-view { animation: cardIn 1s cubic-bezier(.22,.61,.36,1) both; }
+/* 同一排三列依次错位露出，形成波浪感 */
+.card:nth-child(3n+2).in-view { animation-delay: .14s; }
+.card:nth-child(3n+3).in-view { animation-delay: .28s; }
 @keyframes cardIn {
-  from { opacity: 0; transform: translateY(18px) scale(.94); }
+  from { opacity: 0; transform: translateY(32px) scale(.88); }
   to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
