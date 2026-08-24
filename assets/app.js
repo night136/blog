@@ -785,23 +785,35 @@
   const hamburgerTop = $("hamburgerTop");
   if (hamburgerTop) hamburgerTop.addEventListener("click", toggleSidebar);
 
-  // 搜索防抖
+  // 搜索防抖 + Enter 触发 + 错误提示
   let searchTimer = null;
-  if (searchInput) searchInput.addEventListener("input", () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(async () => {
-      searchQuery = searchInput.value.trim();
-      if (searchQuery) {
-        try {
-          const res = await fetch(`/api/posts/search?q=${encodeURIComponent(searchQuery)}`, { credentials: "same-origin" });
-          const data = await res.json();
-          renderCardsFrom(data.ok ? (data.posts || []) : []);
-        } catch (_) { renderCardsFrom([]); }
-      } else {
-        renderCards();
+  async function doSearch(q) {
+    searchQuery = q;
+    if (!q) { renderCards(); return; }
+    if (cardGrid) cardGrid.innerHTML = '<p style="color:var(--text-faint);grid-column:1/-1;">正在搜索…</p>';
+    try {
+      const res = await fetch(`/api/posts/search?q=${encodeURIComponent(q)}`, { credentials: "same-origin" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        console.error("搜索接口异常:", res.status, data);
+        if (cardGrid) cardGrid.innerHTML = `<p style="color:var(--text-soft);grid-column:1/-1;">搜索失败：${escapeHtml(data.error || `HTTP ${res.status}`)}</p>`;
+        return;
       }
-    }, 250);
-  });
+      renderCardsFrom(data.posts || []);
+    } catch (err) {
+      console.error("搜索请求失败:", err);
+      if (cardGrid) cardGrid.innerHTML = '<p style="color:var(--text-soft);grid-column:1/-1;">搜索请求失败，请检查网络或刷新后重试。</p>';
+    }
+  }
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => doSearch(searchInput.value.trim()), 250);
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { clearTimeout(searchTimer); doSearch(searchInput.value.trim()); }
+    });
+  }
 
   // 导航
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
