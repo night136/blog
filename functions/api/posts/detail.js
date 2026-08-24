@@ -2,6 +2,7 @@
 //   POST : 取单篇文章（含 body）。slug 通过 JSON body 传递，避免 URL 百分号编码
 //          在部分国产浏览器（如小米浏览器）fetch 中被二次编码/损坏的问题。
 import { json, getCookie, verifyJWT } from "../_lib/auth.js";
+import { readingTime } from "../../_lib/readingTime.js";
 
 async function getUsername(request, env) {
   const token = getCookie(request, "auth");
@@ -14,6 +15,7 @@ async function getUsername(request, env) {
 
 function publicPost(row, username) {
   const author = row.author_username || "昉昕";
+  const rt = readingTime(row.body);
   return {
     id: row.id,
     slug: row.slug,
@@ -25,6 +27,8 @@ function publicPost(row, username) {
     author,
     isAuthor: !!(username && username === author),
     views: row.views || 0,
+    readingMinutes: rt.minutes,
+    words: rt.words,
     body: row.body,
   };
 }

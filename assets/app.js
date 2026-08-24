@@ -170,7 +170,7 @@
         <div class="card-body">
           <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
           <h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.summary || "")}</p>
-          <div class="card-foot"><span>约 ${readingTime(p.summary || p.title).minutes} 分钟</span><span class="card-go">阅读 →</span></div>
+          <div class="card-foot"><span>约 ${p.readingMinutes || readingTime(p.summary || p.title).minutes} 分钟</span><span class="card-go">阅读 →</span></div>
         </div></article>`;
   }
 
@@ -258,7 +258,7 @@
       const manageBtns = isAuthor
         ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
         : "";
-      const rt = readingTime(post.body);
+      const rt = { minutes: post.readingMinutes || 0, words: post.words || 0 };
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";

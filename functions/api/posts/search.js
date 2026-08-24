@@ -1,4 +1,6 @@
 // /api/posts/search?q=关键词 —— 全文搜索（标题/摘要/正文）
+import { readingTime } from "../../_lib/readingTime.js";
+
 export async function onRequestGet({ env, request }) {
   const json = (data, status = 200) =>
     new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
@@ -15,18 +17,23 @@ export async function onRequestGet({ env, request }) {
 
   try {
     const { results } = await env.BLOG_DB.prepare(
-      `SELECT id, slug, title, date, tag, summary, cover, author_username FROM posts WHERE ${like} ORDER BY date DESC, id DESC`
+      `SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE ${like} ORDER BY date DESC, id DESC`
     ).bind(...params).all();
-    const posts = results.map((row) => ({
-      id: row.id,
-      slug: row.slug,
-      title: row.title,
-      date: row.date,
-      tag: row.tag || "未分类",
-      summary: row.summary || "",
-      cover: row.cover || "",
-      author: row.author_username || "昉昕",
-    }));
+    const posts = results.map((row) => {
+      const rt = readingTime(row.body);
+      return {
+        id: row.id,
+        slug: row.slug,
+        title: row.title,
+        date: row.date,
+        tag: row.tag || "未分类",
+        summary: row.summary || "",
+        cover: row.cover || "",
+        author: row.author_username || "昉昕",
+        readingMinutes: rt.minutes,
+        words: rt.words,
+      };
+    });
     return json({ ok: true, posts });
   } catch (e) {
     return json({ ok: false, error: "搜索失败：" + (e && e.message ? e.message : e) }, 500);

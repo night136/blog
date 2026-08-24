@@ -2,6 +2,7 @@
 //   GET  : 列出全部文章（按 date desc）——供前台首页/归档/会员视图直接 fetch
 //   POST : 会员发文章（验证 JWT → 写入 posts 表）
 import { verifyJWT, getCookie, json } from "./_lib/auth.js";
+import { readingTime } from "../_lib/readingTime.js";
 
 const MAX_TITLE = 120;
 // 正文允许嵌 base64 图片：D1 单行上限 2,000,000 字节，正文留 1.9MB 余量（其他列也占空间）
@@ -29,6 +30,8 @@ function todayStr() {
 
 function publicPost(row) {
   // 列表接口不返回 body：避免首页把每篇文章的 base64 图片一并搬运，保证加载速度
+  // 但用 body 在服务端算好阅读时长/字数一并返回，保证卡片与详情页数据一致
+  const rt = readingTime(row.body);
   return {
     id: row.id,
     slug: row.slug,
@@ -38,6 +41,8 @@ function publicPost(row) {
     summary: row.summary || "",
     cover: row.cover || "",
     author: row.author_username || "昉昕",
+    readingMinutes: rt.minutes,
+    words: rt.words,
   };
 }
 
@@ -45,7 +50,7 @@ export async function onRequestGet({ env }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
   try {
     const { results } = await env.BLOG_DB.prepare(
-      "SELECT id, slug, title, date, tag, summary, cover, author_username FROM posts ORDER BY date DESC, id DESC"
+      "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts ORDER BY date DESC, id DESC"
     ).all();
     return json({ ok: true, posts: results.map(publicPost) });
   } catch (e) {

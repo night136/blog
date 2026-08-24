@@ -3,10 +3,12 @@
 //   PUT : 会员更新自己写的文章（author 必须 = 当前用户）
 //   DELETE: 会员删除自己写的文章
 import { verifyJWT, getCookie, json } from "../_lib/auth.js";
+import { readingTime } from "../../_lib/readingTime.js";
 
 function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
 
 function publicPost(row) {
+  const rt = readingTime(row.body);
   return {
     id: row.id,
     slug: row.slug,
@@ -16,6 +18,8 @@ function publicPost(row) {
     summary: row.summary || "",
     cover: row.cover || "",
     author: row.author_username || "昉昕",
+    readingMinutes: rt.minutes,
+    words: rt.words,
     body: row.body,
   };
 }
