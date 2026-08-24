@@ -109,7 +109,6 @@
   function formatDate(d) { const [y, m, day] = d.split("-"); return `${y}年${Number(m)}月${Number(day)}日`; }
   function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},62%,58%), hsl(${(h + 45) % 360},62%,46%))`; }
   function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${gradFor(p.title)};`; }
-  function readingTime(body) { return Math.max(1, Math.round((body || "").replace(/\s/g, "").length / 350)); }
 
   // ===== 数据 =====
   async function fetchAllPosts() {
@@ -164,7 +163,7 @@
         <div class="card-body">
           <div class="card-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span>✍ ${p.author}</span></div>
           <h3>${p.title}</h3><p>${p.summary || ""}</p>
-          <div class="card-foot"><span>约 ${readingTime(p.summary || p.title)} 分钟</span><span class="card-go">阅读 →</span></div>
+          <div class="card-foot"><span>约 ${readingTime(p.summary || p.title).minutes} 分钟</span><span class="card-go">阅读 →</span></div>
         </div></article>`).join("");
     cardGrid.querySelectorAll(".card").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
   }
@@ -243,7 +242,9 @@
   function escapeHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
   function readingTime(md) {
     const text = (md || "").replace(/!\[[^\]]*\]\([^)]+\)/g, "").replace(/[#*`\[\](){}|>\-]/g, "");
-    const words = text.trim().split(/\s+/).filter((x) => x).length;
+    const cjkChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const nonCjkWords = text.replace(/[\u4e00-\u9fa5]/g, " ").trim().split(/\s+/).filter((x) => x).length;
+    const words = cjkChars + nonCjkWords;
     return { words, minutes: Math.max(1, Math.round(words / 300)) };
   }
   function sharePost(post) {
