@@ -174,20 +174,15 @@
         </div></article>`;
   }
 
-  // 卡片滚动入场动画：每次进入视口都播放由小变大淡入；离开视口移除动画类，再次滚入重播
+  // 卡片滚动入场动画：首次进入视口时由小变大淡入；unobserve 后不再反复触发，避免边界闪动
   let cardObserver = null;
   if ("IntersectionObserver" in window) {
     cardObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
           if (e.isIntersecting) {
-            // 重新触发动画：先清类→reflow→加 in-view
-            e.target.classList.remove("in-view");
-            void e.target.offsetWidth;
             e.target.classList.add("in-view");
-          } else {
-            // 离开视口后移除，便于再次滚入重播
-            e.target.classList.remove("in-view");
+            cardObserver.unobserve(e.target);
           }
         });
       },
