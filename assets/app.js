@@ -85,9 +85,10 @@
     while (i < lines.length) {
       let line = lines[i];
       if (line.startsWith("```")) {
+        const lang = line.slice(3).trim().split(/\s+/)[0] || "";
         const code = []; i++;
         while (i < lines.length && !lines[i].startsWith("```")) { code.push(lines[i]); i++; }
-        i++; html += `<pre><code>${esc(code.join("\n"))}</code></pre>`; continue;
+        i++; html += `<pre><code class="language-${lang}">${esc(code.join("\n"))}</code></pre>`; continue;
       }
       if (/^> /.test(line)) {
         const q = []; while (i < lines.length && /^> /.test(lines[i])) { q.push(lines[i].slice(2)); i++; }
@@ -264,10 +265,11 @@
       const shareUrl = location.origin + location.pathname + "?post=" + encodeURIComponent(slug);
       const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="native" data-url="${escapeHtml(shareUrl)}" type="button">📤 分享</button></div>`;
       const nav = buildPostNav(slug);
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ ${rt.minutes} 分钟 · ${rt.words} 字</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       bindCommentForm(slug);
       loadComments(slug);
       addCodeCopyButtons();
+      highlightCodeBlocks(postDetail);
       initReadingProgress();
       initTocSpy();
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
@@ -397,6 +399,24 @@
       });
       pre.style.position = "relative";
       pre.appendChild(btn);
+    });
+  }
+
+  // 代码高亮：文章渲染后对 .post-body 内的 <pre><code> 应用 highlight.js
+  function highlightCodeBlocks(container) {
+    if (!window.hljs || !container) return;
+    container.querySelectorAll("pre code").forEach((el) => {
+      try {
+        const m = (el.className || "").match(/language-([\w-]+)/);
+        if (m && m[1]) {
+          if (!el.dataset.hl) { window.hljs.highlightElement(el); el.dataset.hl = "1"; }
+        } else {
+          // 无语言标注：调用自动识别（highlight.js v11 对无语言元素不会自动高亮）
+          const res = window.hljs.highlightAuto(el.textContent);
+          el.innerHTML = res.value;
+          el.classList.add("hljs");
+        }
+      } catch (_) {}
     });
   }
 
@@ -736,6 +756,26 @@
   // ===== 全局交互 =====
   window.addEventListener("scroll", () => { if (backTop) backTop.classList.toggle("show", window.scrollY > 400); });
   if (backTop) backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+  // ===== 图片灯箱 =====
+  const lightbox = $("lightbox");
+  const lightboxImg = $("lightboxImg");
+  const lightboxClose = $("lightboxClose");
+  function openLightbox(src, alt) {
+    if (!lightbox || !lightboxImg) return;
+    lightboxImg.src = src; lightboxImg.alt = alt || "";
+    lightbox.hidden = false; document.body.classList.add("lightbox-open");
+  }
+  function closeLightbox() {
+    if (!lightbox) return;
+    lightbox.hidden = true; lightboxImg.removeAttribute("src"); document.body.classList.remove("lightbox-open");
+  }
+  if (postDetail) postDetail.addEventListener("click", (e) => {
+    const img = e.target.closest(".post-body img");
+    if (img) { e.preventDefault(); openLightbox(img.currentSrc || img.src, img.alt); }
+  });
+  if (lightbox) lightbox.addEventListener("click", (e) => { if (e.target === lightbox || e.target === lightboxClose) closeLightbox(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && lightbox && !lightbox.hidden) closeLightbox(); });
   if (sliderEl) { sliderEl.addEventListener("mouseenter", stopAuto); sliderEl.addEventListener("mouseleave", startAuto); }
   if (slidePrev) slidePrev.addEventListener("click", () => goSlide(currentSlide - 1));
   if (slideNext) slideNext.addEventListener("click", () => goSlide(currentSlide + 1));

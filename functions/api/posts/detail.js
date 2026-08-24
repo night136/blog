@@ -24,6 +24,7 @@ function publicPost(row, username) {
     cover: row.cover || "",
     author,
     isAuthor: !!(username && username === author),
+    views: row.views || 0,
     body: row.body,
   };
 }
@@ -37,9 +38,15 @@ export async function onRequestPost({ env, request }) {
   try {
     const username = await getUsername(request, env);
     const row = await env.BLOG_DB.prepare(
-      "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE slug = ?"
+      "SELECT id, slug, title, date, tag, summary, cover, author_username, views, body FROM posts WHERE slug = ?"
     ).bind(slug).first();
     if (!row) return json({ error: "文章不存在" }, 404);
+    // 浏览量：非作者本人访问才 +1（避免自己看自己的文章虚增）
+    const author = row.author_username || "昉昕";
+    if (!(username && username === author)) {
+      await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
+      row.views = (row.views || 0) + 1;
+    }
     return json({ ok: true, post: publicPost(row, username) });
   } catch (e) {
     return json({ error: "读取失败：" + (e && e.message ? e.message : e) }, 500);

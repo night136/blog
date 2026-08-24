@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS posts (
   cover           TEXT,
   author_username TEXT    NOT NULL,
   body            TEXT    NOT NULL,           -- 原始 Markdown 正文
+  views           INTEGER NOT NULL DEFAULT 0,  -- 浏览量
   created_at      TEXT    DEFAULT (datetime('now')),
   updated_at      TEXT    DEFAULT (datetime('now'))
 );

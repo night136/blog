@@ -198,6 +198,12 @@
 
   <button class="back-top" id="backTop" aria-label="返回顶部">↑</button>
 
+  <!-- 图片灯箱（点击文章正文图片放大） -->
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭">×</button>
+    <img id="lightboxImg" src="" alt="" />
+  </div>
+
   <!-- 登录/注册弹窗（含卡通角色互动） -->
   <div class="modal-mask" id="authModal" hidden>
     <div class="modal modal-auth" role="dialog" aria-modal="true" data-state="idle">
@@ -305,6 +311,7 @@
   </div>
 
   <script src="assets/vendor/lunar.js"></script>
+  <script src="assets/vendor/highlight.min.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>

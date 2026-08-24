@@ -319,6 +319,47 @@ pre:hover .code-copy, .code-copy:focus, .code-copy.copied { opacity: 1; }
 .code-copy:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); }
 .code-copy.copied { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
+/* ===== 代码高亮主题（代码块底色恒为深色，故一套配色通用亮/暗主题）===== */
+.hljs { display: block; color: var(--pre-fg); background: transparent; }
+.hljs-comment, .hljs-quote { color: #8A837A; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag { color: #F0B06E; }
+.hljs-string, .hljs-attr, .hljs-template-tag, .hljs-addition { color: #A8D8A0; }
+.hljs-number, .hljs-literal, .hljs-boolean, .hljs-symbol, .hljs-bullet { color: #E8A0C0; }
+.hljs-title, .hljs-section, .hljs-title.function_, .hljs-title.class_ { color: #7FC8E8; }
+.hljs-params { color: var(--pre-fg); }
+.hljs-type, .hljs-class .hljs-title, .hljs-meta { color: #C792EA; }
+.hljs-variable, .hljs-template-variable, .hljs-attribute { color: #E8C07A; }
+.hljs-deletion { color: #E08A8A; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* 图片灯箱 */
+.lightbox {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 18, 15, 0.82);
+  backdrop-filter: blur(4px);
+  padding: 5vh 5vw;
+  opacity: 0; transition: opacity .22s;
+}
+.lightbox:not([hidden]) { display: flex; opacity: 1; }
+.lightbox img {
+  max-width: 92vw; max-height: 92vh;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  background: #fff;
+}
+.lightbox-close {
+  position: absolute; top: 18px; right: 22px;
+  width: 44px; height: 44px; border-radius: 50%;
+  border: none; cursor: pointer;
+  background: rgba(255,255,255,.16); color: #fff;
+  font-size: 26px; line-height: 1;
+  transition: background .18s, transform .18s;
+}
+.lightbox-close:hover { background: rgba(255,255,255,.3); transform: scale(1.08); }
+body.lightbox-open { overflow: hidden; }
+
 .prose { font-size: 16px; line-height: 1.9; color: var(--text); }
 .prose h2 { font-size: 26px; font-weight: 800; margin: 38px 0 16px; letter-spacing: .3px; }
 .prose h3 { font-size: 21px; font-weight: 700; margin: 30px 0 12px; }
