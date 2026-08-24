@@ -5,5 +5,12 @@
 /assets/*
   Cache-Control: public, max-age=86400
 
+# 业务脚本/样式：部署后立即生效，避免每次都要强刷（no-cache = 每次向源校验，内容变化即返回新文件）
+/assets/app.js
+  Cache-Control: no-cache
+
+/assets/style.css
+  Cache-Control: no-cache
+
 /content/*
   Cache-Control: public, max-age=3600

@@ -215,6 +215,7 @@
       const data = await res.json();
       if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
       const post = data.post;
+      updateMeta(post);
       currentUser = await checkSession();
       currentSlug = slug;
       currentPost = post;
@@ -255,6 +256,44 @@
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => alert("文章链接已复制到剪贴板")).catch(() => {});
     }
+  }
+
+  // ===== 动态 meta / OG 标签（分享卡片用）=====
+  function setMeta(name, content, isProperty) {
+    const attr = isProperty ? "property" : "name";
+    let el = document.head.querySelector(`meta[${attr}="${name}"]`);
+    if (!el) {
+      el = document.createElement("meta");
+      el.setAttribute(attr, name);
+      document.head.appendChild(el);
+    }
+    el.setAttribute("content", content);
+  }
+
+  function updateMeta(post) {
+    const url = location.origin + location.pathname + "?post=" + encodeURIComponent(post.slug);
+    const rawDesc = (post.summary || "").trim() || (post.body || "").replace(/[#>*`\-!\[\]()]/g, "").replace(/\s+/g, " ").trim().slice(0, 100);
+    document.title = post.title + " · 昉昕的博客";
+    setMeta("description", rawDesc, false);
+    setMeta("og:type", "article", true);
+    setMeta("og:site_name", "昉昕的博客", true);
+    setMeta("og:title", post.title, true);
+    setMeta("og:description", rawDesc, true);
+    setMeta("og:url", url, true);
+    if (post.cover) setMeta("og:image", post.cover, true);
+    setMeta("twitter:card", post.cover ? "summary_large_image" : "summary", true);
+    setMeta("twitter:title", post.title, true);
+    setMeta("twitter:description", rawDesc, true);
+    if (post.cover) setMeta("twitter:image", post.cover, true);
+  }
+
+  function resetMeta() {
+    document.title = "昉昕的博客 · 记录与思考";
+    setMeta("description", "昉昕的个人博客，记录技术实践、读书笔记与生活思考。", false);
+    ["og:type", "og:site_name", "og:title", "og:description", "og:url", "og:image", "twitter:card", "twitter:title", "twitter:description", "twitter:image"].forEach((k) => {
+      const el = document.head.querySelector(`meta[${k.startsWith("og:") || k.startsWith("twitter:") ? "property" : "name"}="${k}"]`);
+      if (el) el.remove();
+    });
   }
 
   // 构建上一篇/下一篇/相关文章导航
@@ -489,6 +528,7 @@
   }
 
   function showView(name) {
+    if (name === "home") resetMeta();
     Object.values(views).forEach((v) => v.classList.remove("active"));
     if (views[name]) views[name].classList.add("active");
     navLinks.forEach((l) => l.classList.toggle("active", l.dataset.view === name));
