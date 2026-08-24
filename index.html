@@ -69,22 +69,6 @@
           <div class="lunar-days" id="lunarDays">—</div>
           <div class="lunar-shichen" id="lunarShiChen">—</div>
         </section>
-        <section class="widget">
-          <h4 class="widget-title">🕐 此刻</h4>
-          <div class="widget-clock" id="sideClock">
-            <div class="analog-clock">
-              <div class="clock-face">
-                <div class="clock-tick tick-12"></div><div class="clock-tick tick-3"></div>
-                <div class="clock-tick tick-6"></div><div class="clock-tick tick-9"></div>
-                <div class="hand hour-hand" id="clockHour"></div>
-                <div class="hand min-hand" id="clockMin"></div>
-                <div class="hand sec-hand" id="clockSec"></div>
-                <div class="clock-center"></div>
-              </div>
-              <div class="clock-date" id="clockDate">—</div>
-            </div>
-          </div>
-        </section>
       </div>
       <div class="sidebar-footer">
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换暗色模式" title="切换暗色模式">🌙</button>
@@ -194,6 +178,26 @@
         </div>
       </section>
     </main>
+
+    <!-- 右侧小部件区 -->
+    <aside class="rightbar" id="rightbar">
+      <section class="widget">
+        <h4 class="widget-title">🕐 此刻</h4>
+        <div class="widget-clock" id="sideClock">
+          <div class="analog-clock">
+            <div class="clock-face">
+              <div class="clock-tick tick-12"></div><div class="clock-tick tick-3"></div>
+              <div class="clock-tick tick-6"></div><div class="clock-tick tick-9"></div>
+              <div class="hand hour-hand" id="clockHour"></div>
+              <div class="hand min-hand" id="clockMin"></div>
+              <div class="hand sec-hand" id="clockSec"></div>
+              <div class="clock-center"></div>
+            </div>
+            <div class="clock-date" id="clockDate">—</div>
+          </div>
+        </div>
+      </section>
+    </aside>
   </div>
 
   <button class="back-top" id="backTop" aria-label="返回顶部">↑</button>

@@ -107,7 +107,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 
 /* ── 布局 ── */
-.layout { display: grid; grid-template-columns: 270px 1fr; min-height: 100vh; max-width: var(--maxw); margin: 0 auto; gap: 26px; padding: 0 24px; }
+.layout { display: grid; grid-template-columns: 270px 1fr 270px; min-height: 100vh; max-width: var(--maxw); margin: 0 auto; gap: 26px; padding: 0 24px; }
 
 /* ── 侧边栏：奶油卡片 ── */
 .sidebar {
@@ -126,6 +126,19 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .theme-toggle { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 7px 11px; cursor: pointer; font-size: 16px; transition: all .18s; }
 .theme-toggle:hover { background: var(--accent-soft); color: var(--accent-dark); }
 .sidebar-overlay { display: none; }
+
+/* ── 右侧小部件区：与左侧边栏对称，仅放「此刻」时钟 ── */
+.rightbar {
+  margin: 24px 0;
+  padding: 28px 22px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+  position: sticky; top: 24px;
+  height: calc(100vh - 48px);
+}
 
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 34px; }
 .avatar {
@@ -507,6 +520,7 @@ body.lightbox-open { overflow: hidden; }
 /* ── 响应式增强 ── */
 @media (max-width: 980px) {
   .layout { grid-template-columns: 1fr; padding: 0 16px; }
+  .rightbar { display: none; }
   .sidebar { position: fixed; left: 0; top: 0; height: 100vh; width: min(85vw, 320px); transform: translateX(-100%); z-index: 90; border-radius: 0 var(--radius) var(--radius) 0; border: none; border-right: 1px solid var(--border); flex-direction: column; padding: 24px 22px; overflow-y: auto; margin: 0; }
   .sidebar.open { transform: translateX(0); }
   .hamburger { display: block; position: fixed; top: 18px; left: 16px; z-index: 95; }
