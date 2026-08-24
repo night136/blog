@@ -301,6 +301,8 @@
       highlightCodeBlocks(postDetail);
       initReadingProgress();
       initTocSpy();
+      // ① 文章详情进入动画：重播子元素错位淡入
+      postDetail.classList.remove("post-anim"); void postDetail.offsetWidth; postDetail.classList.add("post-anim");
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
 
@@ -601,7 +603,22 @@
     try {
       const res = await fetch("/api/posts/comments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "like", slug: currentSlug, id: Number(id) }) });
       const data = await res.json();
-      if (data.ok) { localStorage.setItem("liked:" + id, "1"); btn.classList.add("liked"); const span = btn.querySelector(".like-count"); if (span) span.textContent = data.likes; }
+      if (data.ok) {
+        localStorage.setItem("liked:" + id, "1");
+        btn.classList.add("liked");
+        const span = btn.querySelector(".like-count"); if (span) span.textContent = data.likes;
+        // ④ 点赞爆裂动效
+        btn.classList.remove("pop"); void btn.offsetWidth; btn.classList.add("pop");
+        for (let i = 0; i < 6; i++) {
+          const p = document.createElement("span");
+          p.className = "like-burst";
+          const ang = (Math.PI * 2 / 6) * i;
+          p.style.setProperty("--bx", Math.cos(ang) * 22 + "px");
+          p.style.setProperty("--by", Math.sin(ang) * 22 + "px");
+          btn.appendChild(p);
+          setTimeout(() => p.remove(), 600);
+        }
+      }
     } catch (_) {}
   }
   async function handleDelete(btn) {
@@ -663,9 +680,29 @@
     try { localStorage.setItem("blog-theme", mode); } catch (_) {}
     document.querySelectorAll(".theme-toggle").forEach((b) => { b.textContent = mode === "dark" ? "☀️" : "🌙"; });
   }
-  function toggleTheme() {
+  // ② 主题切换：从按钮位置圆形扩散铺满再换色
+  function themeBg(mode) {
+    const probe = document.createElement("div");
+    probe.setAttribute("data-theme", mode);
+    probe.style.cssText = "position:fixed;inset:0;pointer-events:none;visibility:hidden;";
+    document.body.appendChild(probe);
+    const c = getComputedStyle(probe).getPropertyValue("--bg").trim() || "#F5EFE6";
+    probe.remove();
+    return c;
+  }
+  function toggleTheme(e) {
     const cur = document.documentElement.getAttribute("data-theme") || "light";
-    applyTheme(cur === "dark" ? "light" : "dark");
+    const next = cur === "dark" ? "light" : "dark";
+    const btn = (e && e.currentTarget) || document.querySelector(".theme-toggle");
+    const rect = btn ? btn.getBoundingClientRect() : { left: innerWidth - 30, top: 30, width: 0, height: 0 };
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `position:fixed;inset:0;z-index:9999;background:${themeBg(next)};clip-path:circle(0px at ${x}px ${y}px);transition:clip-path .5s ease;`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => { overlay.style.clipPath = `circle(${end}px at ${x}px ${y}px)`; });
+    setTimeout(() => applyTheme(next), 250);
+    setTimeout(() => overlay.remove(), 560);
   }
   { const saved = (() => { try { return localStorage.getItem("blog-theme"); } catch (_) { return null; } })();
     if (saved === "dark" || saved === "light") applyTheme(saved);
@@ -783,7 +820,11 @@
   setInterval(() => { updateLunar(); updateSideClock(); }, 1000);
 
   // ===== 全局交互 =====
-  window.addEventListener("scroll", () => { if (backTop) backTop.classList.toggle("show", window.scrollY > 400); });
+  const topbarEl = $("topbar");
+  window.addEventListener("scroll", () => {
+    if (backTop) backTop.classList.toggle("show", window.scrollY > 400);
+    if (topbarEl) topbarEl.classList.toggle("scrolled", window.scrollY > 20);
+  });
   if (backTop) backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
   // ===== 图片灯箱 =====
