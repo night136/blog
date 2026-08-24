@@ -813,6 +813,15 @@ body.lightbox-open { overflow: hidden; }
 .tick-3  { width: 8px; height: 3px; right: 8px; top: 50%; transform: translateY(-50%); }
 .tick-6  { width: 3px; height: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); }
 .tick-9  { width: 8px; height: 3px; left: 8px; top: 50%; transform: translateY(-50%); }
+.clock-num {
+  position: absolute; top: 50%; left: 50%;
+  width: 16px; height: 16px; margin: -8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1; font-weight: 600;
+  color: var(--text-soft);
+  transform: rotate(var(--a)) translateY(-46px) rotate(calc(-1 * var(--a)));
+}
+.clock-num:nth-child(1) { color: var(--accent-dark); }
 .clock-center {
   position: absolute; top: 50%; left: 50%; width: 8px; height: 8px;
   background: var(--accent); border-radius: 50%; transform: translate(-50%, -50%);
