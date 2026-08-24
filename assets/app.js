@@ -174,6 +174,34 @@
         </div></article>`;
   }
 
+  // 卡片滚动入场动画：进入视口时由小变大淡入；已显示过的卡片重绘时不再重播
+  const shownSlugs = new Set();
+  let cardObserver = null;
+  if ("IntersectionObserver" in window) {
+    cardObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            e.target.classList.add("in-view");
+            if (e.target.dataset.slug) shownSlugs.add(e.target.dataset.slug);
+            cardObserver.unobserve(e.target);
+          }
+        });
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -24px 0px" }
+    );
+  }
+  function revealCards(root) {
+    (root || document).querySelectorAll(".card").forEach((el) => {
+      if (el.dataset.slug && shownSlugs.has(el.dataset.slug)) {
+        el.classList.add("shown");
+        return;
+      }
+      if (cardObserver) cardObserver.observe(el);
+      else el.classList.add("shown");
+    });
+  }
+
   function paintCards() {
     const slice = pageList.slice(0, pageCount);
     if (!slice.length) {
@@ -187,6 +215,7 @@
     cardGrid.querySelectorAll(".card").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
     const lm = $("loadMore");
     if (lm) lm.addEventListener("click", () => { pageCount += PAGE_SIZE; paintCards(); });
+    revealCards(cardGrid);
   }
 
   function renderCardsFrom(list) {
