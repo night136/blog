@@ -170,7 +170,7 @@
         <div class="card-body">
           <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
           <h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.summary || "")}</p>
-          <div class="card-foot"><span>约 ${p.readingMinutes || readingTime(p.summary || p.title).minutes} 分钟</span><span class="card-go">阅读 →</span></div>
+          <div class="card-foot"><span>⏱ ${p.readingMinutes || readingTime(p.summary || p.title).minutes} 分钟 · ${p.words || 0} 字 · ${p.views || 0} 阅读</span><span class="card-go">阅读 →</span></div>
         </div></article>`;
   }
 

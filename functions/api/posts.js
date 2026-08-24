@@ -30,7 +30,7 @@ function todayStr() {
 
 function publicPost(row) {
   // 列表接口不返回 body：避免首页把每篇文章的 base64 图片一并搬运，保证加载速度
-  // 但用 body 在服务端算好阅读时长/字数一并返回，保证卡片与详情页数据一致
+  // 但用 body 在服务端算好阅读时长/字数/浏览量一并返回，保证卡片与详情页数据一致
   const rt = readingTime(row.body);
   return {
     id: row.id,
@@ -43,15 +43,27 @@ function publicPost(row) {
     author: row.author_username || "昉昕",
     readingMinutes: rt.minutes,
     words: rt.words,
+    views: row.views || 0,
   };
 }
 
 export async function onRequestGet({ env }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
   try {
-    const { results } = await env.BLOG_DB.prepare(
-      "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts ORDER BY date DESC, id DESC"
-    ).all();
+    // 优先查询 views 列；若数据库尚未迁移（缺 views 列）则降级查询，views 显示 0
+    let results;
+    try {
+      ({ results } = await env.BLOG_DB.prepare(
+        "SELECT id, slug, title, date, tag, summary, cover, author_username, body, views FROM posts ORDER BY date DESC, id DESC"
+      ).all());
+    } catch (e) {
+      if (/no such column/i.test(e && e.message ? e.message : "")) {
+        ({ results } = await env.BLOG_DB.prepare(
+          "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts ORDER BY date DESC, id DESC"
+        ).all());
+        results.forEach((row) => { row.views = 0; });
+      } else throw e;
+    }
     return json({ ok: true, posts: results.map(publicPost) });
   } catch (e) {
     return json({ error: "读取失败：" + (e && e.message ? e.message : e) }, 500);

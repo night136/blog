@@ -16,9 +16,20 @@ export async function onRequestGet({ env, request }) {
   tokens.forEach((t) => { const w = `%${t}%`; params.push(w, w, w); });
 
   try {
-    const { results } = await env.BLOG_DB.prepare(
-      `SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE ${like} ORDER BY date DESC, id DESC`
-    ).bind(...params).all();
+    // 优先查询 views 列；若数据库尚未迁移则降级查询，views 显示 0
+    let results;
+    try {
+      ({ results } = await env.BLOG_DB.prepare(
+        `SELECT id, slug, title, date, tag, summary, cover, author_username, body, views FROM posts WHERE ${like} ORDER BY date DESC, id DESC`
+      ).bind(...params).all());
+    } catch (e) {
+      if (/no such column/i.test(e && e.message ? e.message : "")) {
+        ({ results } = await env.BLOG_DB.prepare(
+          `SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE ${like} ORDER BY date DESC, id DESC`
+        ).bind(...params).all());
+        results.forEach((row) => { row.views = 0; });
+      } else throw e;
+    }
     const posts = results.map((row) => {
       const rt = readingTime(row.body);
       return {
@@ -32,6 +43,7 @@ export async function onRequestGet({ env, request }) {
         author: row.author_username || "昉昕",
         readingMinutes: rt.minutes,
         words: rt.words,
+        views: row.views || 0,
       };
     });
     return json({ ok: true, posts });
