@@ -66,6 +66,7 @@
   let activeTag = "全部";
   let currentSlide = 0, totalSlides = 0, slideTimer = null;
   let searchQuery = "";
+  let tocScrollHandler = null;
 
   // ===== Markdown → HTML =====
   function mdToHtml(md) {
@@ -154,18 +155,50 @@
     filterBar.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => { activeTag = c.dataset.tag; filterBar.querySelectorAll(".chip").forEach((x) => x.classList.toggle("active", x === c)); renderCards(); }));
   }
 
-  function renderCards() {
-    const list = getFiltered();
-    if (!list.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint);grid-column:1/-1;">${searchQuery ? "没有匹配「" + searchQuery + "」的文章。" : "该分类下暂无文章。"}</p>`; return; }
-    cardGrid.innerHTML = list.map((p, i) => `
-      <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${p.slug}">
-        <div class="card-cover" style="${coverStyle(p)}"></div>
+  // 卡片分页：先渲染一页，剩余用「加载更多」增量展示
+  let pageList = [];
+  let pageCount = 0;
+  const PAGE_SIZE = 9;
+
+  function cardHtml(p, i) {
+    return `
+      <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${escapeHtml(p.slug)}">
+        <div class="card-cover" style="background:${gradFor(p.title)};">
+          ${p.cover ? `<img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt="">` : ""}
+        </div>
         <div class="card-body">
-          <div class="card-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span>✍ ${p.author}</span></div>
-          <h3>${p.title}</h3><p>${p.summary || ""}</p>
+          <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
+          <h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.summary || "")}</p>
           <div class="card-foot"><span>约 ${readingTime(p.summary || p.title).minutes} 分钟</span><span class="card-go">阅读 →</span></div>
-        </div></article>`).join("");
+        </div></article>`;
+  }
+
+  function paintCards() {
+    const slice = pageList.slice(0, pageCount);
+    if (!slice.length) {
+      cardGrid.innerHTML = `<p style="color:var(--text-faint);grid-column:1/-1;">${searchQuery ? "没有匹配「" + escapeHtml(searchQuery) + "」的文章。" : "该分类下暂无文章。"}</p>`;
+      return;
+    }
+    const more = pageList.length - slice.length;
+    cardGrid.innerHTML =
+      slice.map((p, i) => cardHtml(p, i)).join("") +
+      (more > 0 ? `<button class="load-more" id="loadMore" type="button">加载更多（还剩 ${more} 篇）</button>` : "");
     cardGrid.querySelectorAll(".card").forEach((el) => el.addEventListener("click", () => openPost(el.dataset.slug)));
+    const lm = $("loadMore");
+    if (lm) lm.addEventListener("click", () => { pageCount += PAGE_SIZE; paintCards(); });
+  }
+
+  function renderCardsFrom(list) {
+    pageList = list || [];
+    pageCount = PAGE_SIZE;
+    paintCards();
+  }
+
+  function renderCards() {
+    // 本地筛选（按标题+摘要）；切分类/回首页时清掉搜索态
+    searchQuery = "";
+    if (searchInput) searchInput.value = "";
+    renderCardsFrom(getFiltered());
   }
 
   function renderArchive() {
@@ -236,6 +269,7 @@
       loadComments(slug);
       addCodeCopyButtons();
       initReadingProgress();
+      initTocSpy();
     } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
   }
 
@@ -294,6 +328,32 @@
       const el = document.head.querySelector(`meta[${k.startsWith("og:") || k.startsWith("twitter:") ? "property" : "name"}="${k}"]`);
       if (el) el.remove();
     });
+  }
+
+  // 目录滚动高亮（scroll-spy）：滚动时高亮当前章节对应的目录项
+  function initTocSpy() {
+    if (tocScrollHandler) { window.removeEventListener("scroll", tocScrollHandler); tocScrollHandler = null; }
+    const links = Array.from(postDetail.querySelectorAll(".toc-list a"));
+    if (!links.length) return;
+    const map = links
+      .map((a) => {
+        const id = a.getAttribute("href").slice(1);
+        const h = postDetail.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(id) : id));
+        return { a, h };
+      })
+      .filter((x) => x.h);
+    if (!map.length) return;
+    const onScroll = () => {
+      let active = map[0];
+      for (const x of map) {
+        if (x.h.getBoundingClientRect().top <= 90) active = x;
+        else break;
+      }
+      map.forEach((x) => x.a.classList.toggle("active", x === active));
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    tocScrollHandler = onScroll;
+    onScroll();
   }
 
   // 构建上一篇/下一篇/相关文章导航
@@ -687,7 +747,21 @@
 
   // 搜索防抖
   let searchTimer = null;
-  if (searchInput) searchInput.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { searchQuery = searchInput.value.trim(); renderCards(); }, 250); });
+  if (searchInput) searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      searchQuery = searchInput.value.trim();
+      if (searchQuery) {
+        try {
+          const res = await fetch(`/api/posts/search?q=${encodeURIComponent(searchQuery)}`, { credentials: "same-origin" });
+          const data = await res.json();
+          renderCardsFrom(data.ok ? (data.posts || []) : []);
+        } catch (_) { renderCardsFrom([]); }
+      } else {
+        renderCards();
+      }
+    }, 250);
+  });
 
   // 导航
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
