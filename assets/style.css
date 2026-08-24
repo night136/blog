@@ -808,11 +808,6 @@ body.lightbox-open { overflow: hidden; }
   content: ""; position: absolute; inset: 6px; border-radius: 50%;
   border: 1px dashed var(--border);
 }
-.clock-tick { position: absolute; background: var(--text-faint); border-radius: 1px; }
-.tick-12 { width: 3px; height: 8px; top: 8px; left: 50%; transform: translateX(-50%); }
-.tick-3  { width: 8px; height: 3px; right: 8px; top: 50%; transform: translateY(-50%); }
-.tick-6  { width: 3px; height: 8px; bottom: 8px; left: 50%; transform: translateX(-50%); }
-.tick-9  { width: 8px; height: 3px; left: 8px; top: 50%; transform: translateY(-50%); }
 .clock-num {
   position: absolute; top: 50%; left: 50%;
   width: 16px; height: 16px; margin: -8px;
