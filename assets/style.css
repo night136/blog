@@ -231,9 +231,8 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
 }
 .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-hover); border-color: transparent; }
-/* 卡片滚动入场：由小变大 + 淡入（仅对首次进入视口的卡片播放，重绘已看过的不再重播） */
-.card { opacity: 0; }
-.card.shown { opacity: 1; }
+/* 卡片滚动入场：每次进入视口都播放由小变大淡入；离开视口移除动画类，再次滚入重播 */
+.card { opacity: 1; }
 .card.in-view { animation: cardIn 1s cubic-bezier(.22,.61,.36,1) both; }
 /* 同一排三列依次错位露出，形成波浪感 */
 .card:nth-child(3n+2).in-view { animation-delay: .14s; }
@@ -243,7 +242,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card, .card.shown, .card.in-view { opacity: 1; animation: none; }
+  .card, .card.in-view { opacity: 1; animation: none; }
 }
 .card-cover { height: 172px; background-size: cover; background-position: center; position: relative; overflow: hidden; }
 .card-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }

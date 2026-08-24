@@ -174,17 +174,20 @@
         </div></article>`;
   }
 
-  // 卡片滚动入场动画：进入视口时由小变大淡入；已显示过的卡片重绘时不再重播
-  const shownSlugs = new Set();
+  // 卡片滚动入场动画：每次进入视口都播放由小变大淡入；离开视口移除动画类，再次滚入重播
   let cardObserver = null;
   if ("IntersectionObserver" in window) {
     cardObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
           if (e.isIntersecting) {
+            // 重新触发动画：先清类→reflow→加 in-view
+            e.target.classList.remove("in-view");
+            void e.target.offsetWidth;
             e.target.classList.add("in-view");
-            if (e.target.dataset.slug) shownSlugs.add(e.target.dataset.slug);
-            cardObserver.unobserve(e.target);
+          } else {
+            // 离开视口后移除，便于再次滚入重播
+            e.target.classList.remove("in-view");
           }
         });
       },
@@ -193,12 +196,8 @@
   }
   function revealCards(root) {
     (root || document).querySelectorAll(".card").forEach((el) => {
-      if (el.dataset.slug && shownSlugs.has(el.dataset.slug)) {
-        el.classList.add("shown");
-        return;
-      }
       if (cardObserver) cardObserver.observe(el);
-      else el.classList.add("shown");
+      else { el.classList.add("in-view"); }
     });
   }
 
