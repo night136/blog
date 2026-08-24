@@ -37,15 +37,29 @@ export async function onRequestPost({ env, request }) {
   if (!slug) return json({ error: "缺少 slug" }, 400);
   try {
     const username = await getUsername(request, env);
-    const row = await env.BLOG_DB.prepare(
-      "SELECT id, slug, title, date, tag, summary, cover, author_username, views, body FROM posts WHERE slug = ?"
-    ).bind(slug).first();
+    // 优先尝试带 views 列的查询；若数据库尚未执行迁移（缺 views 列）则自动降级，
+    // 保证文章仍可正常打开，浏览量暂时显示 0。
+    let row;
+    try {
+      row = await env.BLOG_DB.prepare(
+        "SELECT id, slug, title, date, tag, summary, cover, author_username, views, body FROM posts WHERE slug = ?"
+      ).bind(slug).first();
+    } catch (e) {
+      if (/no such column/i.test(e && e.message ? e.message : "")) {
+        row = await env.BLOG_DB.prepare(
+          "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts WHERE slug = ?"
+        ).bind(slug).first();
+        row.views = 0;
+      } else throw e;
+    }
     if (!row) return json({ error: "文章不存在" }, 404);
-    // 浏览量：非作者本人访问才 +1（避免自己看自己的文章虚增）
+    // 浏览量：非作者本人访问才 +1（避免自己看自己的文章虚增）；列不存在时静默跳过
     const author = row.author_username || "昉昕";
     if (!(username && username === author)) {
-      await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
-      row.views = (row.views || 0) + 1;
+      try {
+        await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
+        row.views = (row.views || 0) + 1;
+      } catch (_) {}
     }
     return json({ ok: true, post: publicPost(row, username) });
   } catch (e) {
