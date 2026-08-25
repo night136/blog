@@ -2,7 +2,7 @@
 // 文章管理统一入口（POST body 传 slug，避免国产浏览器对 URL 中文 slug 的编码损坏）
 //   action: "update" → 更新文章（仅作者）
 //   action: "delete" → 删除文章（仅作者）
-import { verifyJWT, getCookie, json } from "../_lib/auth.js";
+import { verifyJWT, getCookie, json, isOwner } from "../_lib/auth.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
 // Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。fire-and-forget。
@@ -48,7 +48,7 @@ export async function onRequestPost({ request, env }) {
     "SELECT author_username FROM posts WHERE slug = ?"
   ).bind(slug).first();
   if (!row) return json({ ok: false, error: "文章不存在" }, 404);
-  if (row.author_username !== username) return json({ ok: false, error: "只能操作自己写的文章" }, 403);
+  if (row.author_username !== username && !isOwner(username, env)) return json({ ok: false, error: "只能操作自己写的文章" }, 403);
 
   if (action === "delete") {
     try {

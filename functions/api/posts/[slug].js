@@ -2,7 +2,7 @@
 //   GET : 取单篇文章（含 body），供前台文章详情页使用
 //   PUT : 会员更新自己写的文章（author 必须 = 当前用户）
 //   DELETE: 会员删除自己写的文章
-import { verifyJWT, getCookie, json } from "../_lib/auth.js";
+import { verifyJWT, getCookie, json, isOwner } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
 
 function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
@@ -57,7 +57,7 @@ export async function onRequestDelete({ env, params, request }) {
     "SELECT author_username FROM posts WHERE slug = ?"
   ).bind(slug).first();
   if (!row) return json({ error: "文章不存在" }, 404);
-  if (row.author_username !== username) return json({ error: "只能删除自己写的文章" }, 403);
+  if (row.author_username !== username && !isOwner(username, env)) return json({ error: "只能删除自己写的文章" }, 403);
 
   await env.BLOG_DB.prepare("DELETE FROM posts WHERE slug = ?").bind(slug).run();
   return json({ ok: true });

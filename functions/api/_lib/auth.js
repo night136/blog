@@ -101,3 +101,10 @@ export function sessionCookie(token, maxAgeSec) {
 export function clearCookie() {
   return `auth=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
 }
+
+// 站长判定：环境变量 BLOG_OWNER 设为站长的登录用户名后，
+// 站长可管理（编辑/删除）任意文章，不受 author_username 限制。未设置则该函数恒返回 false。
+export function isOwner(username, env) {
+  const owner = env && env.BLOG_OWNER;
+  return !!(owner && username && username === owner);
+}

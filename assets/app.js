@@ -338,7 +338,7 @@
       updateMeta(post);
       if (!sessionReady) { currentUser = await checkSession(); sessionReady = true; }
       // 静态快照无法判断作者，按当前会话修正，保证作者看到编辑/删除按钮
-      post.isAuthor = !!(currentUser && currentUser === post.author);
+      post.isAuthor = !!(currentUser && currentUser.username && post.author && (currentUser.username === post.author || currentUser.isOwner));
       // 静态加载未经过 detail.js 的 +1 逻辑，这里补一次实时阅读数（非作者才 +1）
       if (fromStatic) {
         try {
