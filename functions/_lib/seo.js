@@ -1,6 +1,6 @@
 // SEO 共享工具：站点地址、XML 转义、文章链接
 export function siteUrl(env) {
-  const raw = (env && env.SITE_URL) || "https://blog.zhongfangxin682.workers.dev";
+  const raw = (env && env.SITE_URL) || "https://blog-6p3.pages.dev";
   return raw.replace(/\/+$/, "");
 }
 
