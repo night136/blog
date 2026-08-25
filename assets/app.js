@@ -67,6 +67,8 @@
   let currentSlide = 0, totalSlides = 0, slideTimer = null;
   let searchQuery = "";
   let tocScrollHandler = null;
+  let sessionReady = false;       // 会话已校验过则不再每次打开文章都请求 /api/me
+  const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
   function mdToHtml(md) {
@@ -268,12 +270,16 @@
     showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       // slug 放 body，避免部分国产浏览器（小米等）fetch 对中文 slug 的 % 编码损坏
-      const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
-      const data = await res.json();
-      if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
-      const post = data.post;
+      let post = postCache.get(slug);
+      if (!post) {
+        const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
+        const data = await res.json();
+        if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
+        post = data.post;
+        postCache.set(slug, post);
+      }
       updateMeta(post);
-      currentUser = await checkSession();
+      if (!sessionReady) { currentUser = await checkSession(); sessionReady = true; }
       currentSlug = slug;
       currentPost = post;
       currentPostAuthor = post.author;
@@ -292,7 +298,8 @@
       bindCommentForm(slug);
       loadComments(slug);
       addCodeCopyButtons();
-      highlightCodeBlocks(postDetail);
+      // 仅当文章含代码块时才懒加载 highlight.js（122KB），并放到绘制之后执行，先让正文可见
+      if (postDetail.querySelector("pre code")) ensureHljs().then(() => highlightCodeBlocks(postDetail)).catch(() => {});
       initReadingProgress();
       initTocSpy();
       // ① 文章详情进入动画：重播子元素错位淡入
@@ -443,6 +450,21 @@
         }
       } catch (_) {}
     });
+  }
+
+  // 按需懒加载 highlight.js（仅当文章含代码块时），避免首页/无代码页无谓加载 122KB
+  let hljsLoading = null;
+  function ensureHljs() {
+    if (window.hljs) return Promise.resolve();
+    if (hljsLoading) return hljsLoading;
+    hljsLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "assets/vendor/highlight.min.js";
+      s.onload = () => resolve();
+      s.onerror = () => { hljsLoading = null; reject(new Error("hljs load failed")); };
+      document.head.appendChild(s);
+    });
+    return hljsLoading;
   }
 
   function initReadingProgress() {
@@ -1182,6 +1204,7 @@
       }
       data = await res.json();
       if (!res.ok || !data.ok) { if (composeMsg) { composeMsg.textContent = data.error || (editingSlug ? "保存失败" : "发布失败"); composeMsg.className = "form-msg err"; } return; }
+      postCache.delete(editingSlug); // 文章有变动，失效详情缓存
       if (composeMsg) { composeMsg.innerHTML = editingSlug ? "✅ 已保存" : "✅ 已发布"; composeMsg.className = "form-msg ok"; }
       const slugToOpen = editingSlug || data.slug;
       editingSlug = "";
@@ -1197,6 +1220,7 @@
       const res = await fetch("/api/posts/manage", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", slug }) });
       const data = await res.json();
       if (!res.ok || !data.ok) { alert(data.error || "删除失败"); return; }
+      postCache.delete(slug); // 失效详情缓存
       showView("home"); loadPosts();
     } catch (_) { alert("网络错误，删除失败"); }
   }
