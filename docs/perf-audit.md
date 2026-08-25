@@ -32,7 +32,7 @@
 | 🔴 最高 | 列表接口不再 SELECT body | `posts.js` 列表查询去掉 `body`，改用发布/更新时预存的 `words` 列；三分支均不再读大文本 | `e6fcaac` |
 | 🟠 高 | 有图文章图片懒解码 | `app.js` 新增 `lazyLoadImages()`：base64 图先占位，滚到视口（`IntersectionObserver`, rootMargin 300px）才回填 src，首屏文字先出 | `c751cea` |
 | 🟠 高 | `lunar.js` 436KB 动态加载 | 移除阻塞 `<script>`，改 `requestIdleCallback`（兜底 2.5s）空闲时再注入；库未加载时 widget 显示占位（已有 `typeof Lunar` 保护） | `1874cbc` |
-| 🟡 中 | 列表接口边缘缓存 | 列表 `GET /api/posts` 返回 `Cache-Control: s-maxage=60, stale-while-revalidate=300` | `1874cbc` |
+| 🟡 中 | 列表接口边缘缓存（修正） | **`1874cbc` 的 `s-maxage` 标头对 Pages Functions 无效**——实测响应无 `cf-cache-status`、每次仍真打 D1+冷启动 1.5–2.5s。改为在函数内用 **Cache API (`caches.default`)** 显式存边缘 60s，复测 `cf-cache-status: HIT` 出现，窗口内请求秒回 | `669923a` |
 | 🟡 中 | 详情客户端缓存 + 会话只校验一次 | `postCache` 避免重复拉大正文；`sessionReady` 只请求一次 `/api/me` | `f643261` |
 | 🟢 低 | 代码高亮延后 + 按需懒加载 | 仅当文章含代码块才加载 122KB highlight，且延后到正文绘制后执行，文字先出 | `f643261` |
 | — | 首屏关键 CSS 内联（已回退） | 曾把变量/布局骨架内联、完整样式 `media="print" onload` 非阻塞加载，**在小米/360 上失败**，已回退为正常阻塞加载 | `9e979c5` |
@@ -81,3 +81,9 @@
 2. 点开有图文章 → 标题文字先出，图片灰色占位后淡入。
 3. 点开文章再回首页 → 卡片「X 阅读」+1；存量文章显示真实「约 N 分钟 · M 字」。
 4. Cloudflare 控制台开 Auto Minify（CSS/JS/HTML）→ 线上静态资源自动压缩。
+
+## 七、实测方法论与重要提醒
+
+- **`s-maxage` 标头对 Pages Functions 不生效**：Cloudflare Pages Functions 的响应不会因为 `Cache-Control: s-maxage=60` 自动走边缘缓存（与静态资源不同）。证据：早期响应头虽有该标头，但 `cf-cache-status` 始终缺位，且连续请求仍 1.5–2.5s。必须用 **Cache API（`caches.default`）** 在函数内显式 `cache.put` 才能真正边缘缓存。
+- **测量环境会误导**：本审计用沙箱 `node fetch` 测线上接口，静态首页 HTML 也需 880–1438ms、API HIT 仍 1.2–2.3s——这是沙箱到 Cloudflare 边缘（如西雅图 SEA）的**网络往返**，并非函数/缓存成本。判据应看 `cf-cache-status: HIT` 是否出现，而不是绝对毫秒数。对邻近边缘的真实用户，窗口内命中 ≈ 边缘耗时(~10–50ms) + 本地 RTT。
+- **冷启动仍存在但被摊薄**：每 60s 窗口首请求仍会执行函数（冷启动 0.5–2s），但之后同窗口所有请求均边缘命中，不再触发。个人低流量博客可接受。
