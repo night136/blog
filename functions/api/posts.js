@@ -47,8 +47,18 @@ function publicPost(row) {
   };
 }
 
-export async function onRequestGet({ env }) {
+export async function onRequestGet({ env, request }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
+  // 边缘缓存：Pages Functions 不会因 s-maxage 标头自动走 CDN 缓存，必须用 Cache API 显式存边缘。
+  // 列表为公开只读数据，缓存 60s，期间所有访客（含不同设备/网络）直接从 Cloudflare 边缘秒回，
+  // 不再每次打 D1 + 触发函数冷启动（实测冷启动 1.5–2.5s）。发布/更新文章后 60s 内自动生效。
+  const cache = caches.default;
+  const cacheKey = new Request(request.url);
+  try {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+  } catch (_) { /* Cache API 不可用时降级为直连 D1 */ }
+
   try {
     // 关键优化：列表只 SELECT 文本列，绝不 SELECT body（body 含 base64 图片，单篇可达 1.9MB，
     // 首页若读取会把所有文章的 base64 一并从 D1 搬出，严重拖慢）。字数 words 在发布/更新时已算好存入。
@@ -75,12 +85,17 @@ export async function onRequestGet({ env }) {
         results.forEach((row) => { row.views = 0; row.words = 0; });
       } else throw e;
     }
-    // 边缘缓存：列表为公开只读数据，边缘节点缓存 60s，过期后后台重新校验（stale-while-revalidate）
-    return json(
-      { ok: true, posts: results.map(publicPost) },
-      200,
-      { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300" }
-    );
+    const body = JSON.stringify({ ok: true, posts: results.map(publicPost) });
+    const response = new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=60, s-maxage=60",
+      },
+    });
+    // 写入边缘缓存（克隆，因为 response 正文只能消费一次）
+    try { await cache.put(cacheKey, response.clone()); } catch (_) {}
+    return response;
   } catch (e) {
     return json({ error: "读取失败：" + (e && e.message ? e.message : e) }, 500);
   }
