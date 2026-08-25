@@ -152,6 +152,15 @@
 
   // ===== 数据 =====
   async function fetchAllPosts() {
+    // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成，命中即秒回）；
+    // 缺失/失败则降级到 Function 动态接口。两种方式返回结构一致。
+    try {
+      const sres = await fetch("/generated/posts.json", { credentials: "same-origin" });
+      if (sres.ok) {
+        const sd = await sres.json();
+        if (sd && sd.ok && Array.isArray(sd.posts)) return sd.posts;
+      }
+    } catch (_) {}
     const res = await fetch("/api/posts", { credentials: "same-origin" });
     if (!res.ok) throw new Error("list " + res.status);
     const data = await res.json();
@@ -307,15 +316,37 @@
     try {
       // slug 放 body，避免部分国产浏览器（小米等）fetch 对中文 slug 的 % 编码损坏
       let post = postCache.get(slug);
+      let fromStatic = false;
       if (!post) {
-        const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
-        const data = await res.json();
-        if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
-        post = data.post;
+        // 静态预渲染优先：CDN 直读 /generated/posts/<slug>.json（含 body，秒回）；
+        // 缺失/失败则降级到 Function 动态接口。
+        try {
+          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin" });
+          if (sres.ok) {
+            const sd = await sres.json();
+            if (sd && sd.ok && sd.post) { post = sd.post; fromStatic = true; }
+          }
+        } catch (_) {}
+        if (!post) {
+          const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
+          const data = await res.json();
+          if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
+          post = data.post;
+        }
         postCache.set(slug, post);
       }
       updateMeta(post);
       if (!sessionReady) { currentUser = await checkSession(); sessionReady = true; }
+      // 静态快照无法判断作者，按当前会话修正，保证作者看到编辑/删除按钮
+      post.isAuthor = !!(currentUser && currentUser === post.author);
+      // 静态加载未经过 detail.js 的 +1 逻辑，这里补一次实时阅读数（非作者才 +1）
+      if (fromStatic) {
+        try {
+          const vres = await fetch("/api/posts/view", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
+          const vd = await vres.json();
+          if (vd && vd.ok) post.views = vd.views;
+        } catch (_) {}
+      }
       currentSlug = slug;
       currentPost = post;
       currentPostAuthor = post.author;

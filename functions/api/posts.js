@@ -101,6 +101,14 @@ export async function onRequestGet({ env, request }) {
   }
 }
 
+// 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
+// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。fire-and-forget。
+function triggerRedeploy(env) {
+  const url = env && env.DEPLOY_HOOK_URL;
+  if (!url) return;
+  try { fetch(url, { method: "POST" }).catch(() => {}); } catch (_) {}
+}
+
 export async function onRequestPost({ request, env }) {
   // 1. 验证会话
   const token = getCookie(request, "auth");
@@ -166,5 +174,6 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "写入失败：" + (e && e.message ? e.message : e) }, 500);
   }
 
+  triggerRedeploy(env); // 重新生成静态预渲染文件
   return json({ ok: true, slug, message: "文章已发布！刷新首页即可看到。" });
 }

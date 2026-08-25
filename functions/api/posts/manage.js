@@ -4,6 +4,14 @@
 //   action: "delete" → 删除文章（仅作者）
 import { verifyJWT, getCookie, json } from "../_lib/auth.js";
 
+// 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
+// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。fire-and-forget。
+function triggerRedeploy(env) {
+  const url = env && env.DEPLOY_HOOK_URL;
+  if (!url) return;
+  try { fetch(url, { method: "POST" }).catch(() => {}); } catch (_) {}
+}
+
 const MAX_TITLE = 120;
 const MAX_BODY = 1900000;
 const MAX_TAG = 30;
@@ -45,6 +53,7 @@ export async function onRequestPost({ request, env }) {
   if (action === "delete") {
     try {
       await env.BLOG_DB.prepare("DELETE FROM posts WHERE slug = ?").bind(slug).run();
+      triggerRedeploy(env); // 重新生成静态预渲染文件
       return json({ ok: true });
     } catch (e) {
       return json({ ok: false, error: "删除失败：" + (e && e.message ? e.message : e) }, 500);
@@ -74,6 +83,7 @@ export async function onRequestPost({ request, env }) {
       await env.BLOG_DB.prepare(
         `UPDATE posts SET title = ?, tag = ?, summary = ?, cover = ?, body = ?, words = ? WHERE slug = ?`
       ).bind(title, tag, summary || null, cover || null, mdBody, words, slug).run();
+      triggerRedeploy(env); // 重新生成静态预渲染文件
       return json({ ok: true, slug });
     } catch (e) {
       return json({ ok: false, error: "更新失败：" + (e && e.message ? e.message : e) }, 500);
