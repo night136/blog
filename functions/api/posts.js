@@ -29,9 +29,9 @@ function todayStr() {
 }
 
 function publicPost(row) {
-  // 列表接口不返回 body：避免首页把每篇文章的 base64 图片一并搬运，保证加载速度
-  // 但用 body 在服务端算好阅读时长/字数/浏览量一并返回，保证卡片与详情页数据一致
-  const rt = readingTime(row.body);
+  // 列表接口读取预存的 words 列（发布/更新时已算好写入 D1），不再 SELECT body，
+  // 避免把每篇文章的 base64 图片从数据库搬出来，首页加载大幅提速
+  const words = row.words || 0;
   return {
     id: row.id,
     slug: row.slug,
@@ -41,8 +41,8 @@ function publicPost(row) {
     summary: row.summary || "",
     cover: row.cover || "",
     author: row.author_username || "昉昕",
-    readingMinutes: rt.minutes,
-    words: rt.words,
+    readingMinutes: Math.max(1, Math.round(words / 300)),
+    words,
     views: row.views || 0,
   };
 }
@@ -50,18 +50,29 @@ function publicPost(row) {
 export async function onRequestGet({ env }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
   try {
-    // 优先查询 views 列；若数据库尚未迁移（缺 views 列）则降级查询，views 显示 0
+    // 关键优化：列表只 SELECT 文本列，绝不 SELECT body（body 含 base64 图片，单篇可达 1.9MB，
+    // 首页若读取会把所有文章的 base64 一并从 D1 搬出，严重拖慢）。字数 words 在发布/更新时已算好存入。
+    // 列缺失则逐级降级，兼容未执行迁移的库（words/views 默认 0），且任何分支都不读 body。
+    const COLS_FULL = "id, slug, title, date, tag, summary, cover, author_username, views, words";
+    const COLS_NO_WORDS = "id, slug, title, date, tag, summary, cover, author_username, views";
+    const COLS_BASE = "id, slug, title, date, tag, summary, cover, author_username";
     let results;
     try {
       ({ results } = await env.BLOG_DB.prepare(
-        "SELECT id, slug, title, date, tag, summary, cover, author_username, body, views FROM posts ORDER BY date DESC, id DESC"
+        `SELECT ${COLS_FULL} FROM posts ORDER BY date DESC, id DESC`
       ).all());
     } catch (e) {
-      if (/no such column/i.test(e && e.message ? e.message : "")) {
+      const msg = (e && e.message) ? e.message : "";
+      if (/no such column: words/i.test(msg)) {
         ({ results } = await env.BLOG_DB.prepare(
-          "SELECT id, slug, title, date, tag, summary, cover, author_username, body FROM posts ORDER BY date DESC, id DESC"
+          `SELECT ${COLS_NO_WORDS} FROM posts ORDER BY date DESC, id DESC`
         ).all());
-        results.forEach((row) => { row.views = 0; });
+        results.forEach((row) => { row.words = 0; });
+      } else if (/no such column: views/i.test(msg)) {
+        ({ results } = await env.BLOG_DB.prepare(
+          `SELECT ${COLS_BASE} FROM posts ORDER BY date DESC, id DESC`
+        ).all());
+        results.forEach((row) => { row.views = 0; row.words = 0; });
       } else throw e;
     }
     return json({ ok: true, posts: results.map(publicPost) });
@@ -114,9 +125,10 @@ export async function onRequestPost({ request, env }) {
 
   // 4. 写入 D1
   try {
+    const { words } = readingTime(mdBody);
     await env.BLOG_DB.prepare(
-      `INSERT INTO posts (slug, title, date, tag, summary, cover, author_username, body)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO posts (slug, title, date, tag, summary, cover, author_username, body, words)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         slug,
@@ -126,7 +138,8 @@ export async function onRequestPost({ request, env }) {
         summary || null,
         cover || null,
         username,
-        mdBody
+        mdBody,
+        words
       )
       .run();
   } catch (e) {

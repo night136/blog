@@ -70,9 +70,10 @@ export async function onRequestPost({ request, env }) {
     }
 
     try {
+      const { words } = readingTime(mdBody);
       await env.BLOG_DB.prepare(
-        `UPDATE posts SET title = ?, tag = ?, summary = ?, cover = ?, body = ? WHERE slug = ?`
-      ).bind(title, tag, summary || null, cover || null, mdBody, slug).run();
+        `UPDATE posts SET title = ?, tag = ?, summary = ?, cover = ?, body = ?, words = ? WHERE slug = ?`
+      ).bind(title, tag, summary || null, cover || null, mdBody, words, slug).run();
       return json({ ok: true, slug });
     } catch (e) {
       return json({ ok: false, error: "更新失败：" + (e && e.message ? e.message : e) }, 500);
