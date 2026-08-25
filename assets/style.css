@@ -929,7 +929,8 @@ body.lightbox-open { overflow: hidden; }
 .post-body pre { margin: 18px 0; padding: 18px; background: var(--pre-bg); color: var(--pre-fg); border-radius: var(--radius-sm); overflow-x: auto; font-size: 14px; line-height: 1.6; }
 .post-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
 .post-body :not(pre) > code { background: var(--accent-soft); color: var(--accent-dark); padding: 2px 6px; border-radius: 6px; }
-.post-body img { max-width: 100%; border-radius: var(--radius-sm); margin: 16px 0; box-shadow: var(--shadow-sm); }
+.post-body img { max-width: 100%; border-radius: var(--radius-sm); margin: 16px 0; box-shadow: var(--shadow-sm); transition: opacity .35s ease; }
+.post-body img.img-lazy, .post-cover.img-lazy { min-height: 160px; background: var(--card); box-shadow: none; opacity: .35; }
 .post-body > p:first-of-type::first-letter { font-family: var(--serif); font-size: 3.1em; font-weight: 800; float: left; line-height: .82; padding: 8px 12px 0 0; color: var(--accent); }
 
 /* ===== 目录 TOC ===== */

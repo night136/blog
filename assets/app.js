@@ -110,6 +110,42 @@
     return html;
   }
 
+  // 有 base64 内联图的文章：先占位、进入视口再回填真实 src，避免首屏同步解码卡顿
+  const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='3'%3E%3C/svg%3E";
+  let imgObserver = null;
+  function getImgObserver() {
+    if (imgObserver) return imgObserver;
+    if (!("IntersectionObserver" in window)) return null;
+    imgObserver = new IntersectionObserver((entries, obs) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        const img = e.target;
+        const real = img.dataset.src;
+        if (real) {
+          img.src = real;
+          img.removeAttribute("data-src");
+          img.addEventListener("load", () => img.classList.remove("img-lazy"), { once: true });
+        }
+        obs.unobserve(img);
+      });
+    }, { rootMargin: "300px 0px" });
+    return imgObserver;
+  }
+  function lazyLoadImages(container) {
+    if (!container) return;
+    const obs = getImgObserver();
+    container.querySelectorAll("img").forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (!src.startsWith("data:image")) return; // 仅处理 base64 内联图，外链图交给浏览器原生 lazy
+      if (img.dataset.src) return;               // 已处理过则跳过
+      img.dataset.src = src;
+      img.src = IMG_PLACEHOLDER;
+      img.classList.add("img-lazy");
+      if (obs) obs.observe(img);
+      else { img.src = img.dataset.src; img.removeAttribute("data-src"); img.classList.remove("img-lazy"); }
+    });
+  }
+
   function formatDate(d) { const [y, m, day] = d.split("-"); return `${y}年${Number(m)}月${Number(day)}日`; }
   function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},62%,58%), hsl(${(h + 45) % 360},62%,46%))`; }
   function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${gradFor(p.title)};`; }
@@ -295,6 +331,7 @@
       const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="native" data-url="${escapeHtml(shareUrl)}" type="button">📤 分享</button></div>`;
       const nav = buildPostNav(slug);
       postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      lazyLoadImages(postDetail);
       bindCommentForm(slug);
       loadComments(slug);
       addCodeCopyButtons();
