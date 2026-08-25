@@ -9,6 +9,19 @@
   <!-- 字体：使用国内可访问的 Google Fonts 镜像（fonts.font.im），赣州网络下不再卡顿；失败则回退系统衬线字体 -->
   <link rel="preconnect" href="https://fonts.font.im" crossorigin />
   <link href="https://fonts.font.im/css2?family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet" />
+  <script>
+    /* 标记 JS 可用：仅当 JS 启用时才隐藏卡片（opacity:0 默认），JS 被禁用时卡片直接显示，避免永久空白 */
+    document.documentElement.classList.add('js');
+    /* 兜底：若 1.2s 后仍停留在视口内却未被 observer 点亮（如脚本异常），强制显示，避免卡片消失 */
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        document.querySelectorAll('.card:not(.in-view)').forEach(function (c) {
+          var r = c.getBoundingClientRect();
+          if (r.top < (window.innerHeight || 0) && r.bottom > 0) c.classList.add('in-view');
+        });
+      }, 1200);
+    });
+  </script>
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>

@@ -232,17 +232,14 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-hover); border-color: transparent; }
 /* 卡片滚动入场：默认隐藏，进入视口才「从无到有」由小变大淡入；首次进入播放一次后停止观察，避免边界闪动 */
-.card { opacity: 0; }
-.card.in-view { animation: cardIn 1s cubic-bezier(.22,.61,.36,1) both; }
+.js .card { opacity: 0; }
+.js .card.in-view { animation: cardIn 1s cubic-bezier(.22,.61,.36,1) both; }
 /* 同一排三列依次错位露出，形成波浪感 */
-.card:nth-child(3n+2).in-view { animation-delay: .14s; }
-.card:nth-child(3n+3).in-view { animation-delay: .28s; }
+.js .card:nth-child(3n+2).in-view { animation-delay: .14s; }
+.js .card:nth-child(3n+3).in-view { animation-delay: .28s; }
 @keyframes cardIn {
   from { opacity: 0; transform: translateY(32px) scale(.88); }
   to   { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .card, .card.in-view { opacity: 1; animation: none; }
 }
 .card-cover { height: 172px; background-size: cover; background-position: center; position: relative; overflow: hidden; }
 .card-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
