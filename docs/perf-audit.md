@@ -33,6 +33,7 @@
 | 🟠 高 | 有图文章图片懒解码 | `app.js` 新增 `lazyLoadImages()`：base64 图先占位，滚到视口（`IntersectionObserver`, rootMargin 300px）才回填 src，首屏文字先出 | `c751cea` |
 | 🟠 高 | `lunar.js` 436KB 动态加载 | 移除阻塞 `<script>`，改 `requestIdleCallback`（兜底 2.5s）空闲时再注入；库未加载时 widget 显示占位（已有 `typeof Lunar` 保护） | `1874cbc` |
 | 🟡 中 | 列表接口边缘缓存（修正） | **`1874cbc` 的 `s-maxage` 标头对 Pages Functions 无效**——实测响应无 `cf-cache-status`、每次仍真打 D1+冷启动 1.5–2.5s。改为在函数内用 **Cache API (`caches.default`)** 显式存边缘 60s，复测 `cf-cache-status: HIT` 出现，窗口内请求秒回 | `669923a` |
+| 🟡 中 | 详情接口（有图文章）边缘缓存 | `detail.js` 用 Cache API 显式存边缘 180s（POST 用 GET 形式 key 绕过 Cache API 不存非 GET 的限制）；命中仍 `UPDATE views+1` 并 `SELECT` 真实 views 返回，计数精准。实测有图文章连续请求 `X-Cache: HIT`、views 正确累加 | `cfb5cbe` |
 | 🟡 中 | 详情客户端缓存 + 会话只校验一次 | `postCache` 避免重复拉大正文；`sessionReady` 只请求一次 `/api/me` | `f643261` |
 | 🟢 低 | 代码高亮延后 + 按需懒加载 | 仅当文章含代码块才加载 122KB highlight，且延后到正文绘制后执行，文字先出 | `f643261` |
 | — | 首屏关键 CSS 内联（已回退） | 曾把变量/布局骨架内联、完整样式 `media="print" onload` 非阻塞加载，**在小米/360 上失败**，已回退为正常阻塞加载 | `9e979c5` |
