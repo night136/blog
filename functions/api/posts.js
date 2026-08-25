@@ -75,7 +75,12 @@ export async function onRequestGet({ env }) {
         results.forEach((row) => { row.views = 0; row.words = 0; });
       } else throw e;
     }
-    return json({ ok: true, posts: results.map(publicPost) });
+    // 边缘缓存：列表为公开只读数据，边缘节点缓存 60s，过期后后台重新校验（stale-while-revalidate）
+    return json(
+      { ok: true, posts: results.map(publicPost) },
+      200,
+      { "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300" }
+    );
   } catch (e) {
     return json({ error: "读取失败：" + (e && e.message ? e.message : e) }, 500);
   }

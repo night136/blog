@@ -1286,6 +1286,21 @@
   // ===== 启动 =====
   updateLunar();
   setInterval(updateLunar, 1000);
+
+  // 农历库体积较大(~436KB)，延后到页面空闲再加载，避免阻塞首屏渲染；
+  // updateLunar 已内置 typeof Lunar 保护，库加载完成前 widget 显示占位，加载后自动生效
+  (function loadLunarLib() {
+    var done = false;
+    function inject() {
+      if (done) return; done = true;
+      var s = document.createElement("script");
+      s.src = "assets/vendor/lunar.js";
+      s.onload = function () { try { updateLunar(); updateSideClock(); } catch (e) {} };
+      document.head.appendChild(s);
+    }
+    if ("requestIdleCallback" in window) requestIdleCallback(inject, { timeout: 2500 });
+    else window.addEventListener("load", inject);
+  })();
   bindInputStates();
   checkSession();
   loadPosts();

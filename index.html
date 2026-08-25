@@ -9,6 +9,43 @@
   <!-- 字体：使用国内可访问的 Google Fonts 镜像（fonts.font.im），赣州网络下不再卡顿；失败则回退系统衬线字体 -->
   <link rel="preconnect" href="https://fonts.font.im" crossorigin />
   <link href="https://fonts.font.im/css2?family=Noto+Serif+SC:wght@400;600;700;900&display=swap" rel="stylesheet" />
+  <!-- 首屏关键 CSS 内联：变量 + 防闪 + 布局骨架，避免 62KB style.css 阻塞首屏渲染 -->
+  <style>
+    :root {
+      --bg:#F5EFE6; --bg-soft:#FAF6F0; --surface:rgba(255,251,247,.82);
+      --surface-2:rgba(255,253,250,.60); --surface-3:#FFF8F0; --surface-solid:#FFFBF7;
+      --text:#3D3A36; --text-soft:#7A756D; --text-faint:#A8A095;
+      --accent:#E89B4C; --accent-soft:rgba(232,155,76,.14); --accent-dark:#C77E34; --accent-text:#FFFFFF;
+      --border:rgba(210,200,185,.50); --border-strong:rgba(210,200,185,.80);
+      --radius:24px; --radius-sm:16px; --radius-xs:12px;
+      --shadow:0 4px 20px rgba(61,58,54,.05),0 14px 44px rgba(61,58,54,.07);
+      --shadow-hover:0 8px 28px rgba(61,58,54,.08),0 22px 60px rgba(61,58,54,.10);
+      --shadow-sm:0 2px 8px rgba(61,58,54,.04);
+      --maxw:1480px; --pre-bg:#2C2925; --pre-fg:#F5EFE6;
+      --quote-border:#E89B4C; --quote-bg:rgba(232,155,76,.08); --glass-blur:16px;
+    }
+    [data-theme="dark"] {
+      --bg:#2A2621; --bg-soft:#322D27; --surface:rgba(50,46,40,.78);
+      --surface-2:rgba(58,53,46,.55); --surface-3:#3A3530; --surface-solid:#3A3530;
+      --text:#F5EFE6; --text-soft:#B8B0A5; --text-faint:#8A837A;
+      --accent:#F0B06E; --accent-soft:rgba(240,176,110,.15); --accent-dark:#E89B4C; --accent-text:#3D3A36;
+      --border:rgba(120,112,100,.35); --border-strong:rgba(120,112,100,.55);
+      --shadow:0 4px 20px rgba(0,0,0,.22),0 14px 44px rgba(0,0,0,.32);
+      --shadow-hover:0 8px 28px rgba(0,0,0,.28),0 22px 60px rgba(0,0,0,.38);
+      --shadow-sm:0 2px 8px rgba(0,0,0,.18);
+      --pre-bg:#1A1815; --pre-fg:#E8E2D9; --quote-border:#F0B06E; --quote-bg:rgba(240,176,110,.08);
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    html,body{margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:"Noto Serif SC",Georgia,"Songti SC",serif;-webkit-font-smoothing:antialiased}
+    html.js .card{opacity:0}
+    .layout{display:grid;grid-template-columns:270px 1fr 270px;gap:24px;max-width:var(--maxw);margin:0 auto;padding:0 24px}
+    .topbar{position:sticky;top:0;z-index:50}
+    .content{grid-column:2;min-height:60vh}
+    .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px}
+    .card{background:var(--surface-solid);border-radius:var(--radius);border:1px solid var(--border)}
+    [hidden]{display:none!important}
+  </style>
   <script>
     /* 标记 JS 可用：仅当 JS 启用时才隐藏卡片（opacity:0 默认），JS 被禁用时卡片直接显示，避免永久空白 */
     document.documentElement.classList.add('js');
@@ -22,7 +59,9 @@
       }, 1200);
     });
   </script>
-  <link rel="stylesheet" href="assets/style.css" />
+  <!-- 完整样式表：非阻塞加载（首屏已由上方内联 critical CSS 兜底），避免渲染阻塞 -->
+  <link rel="stylesheet" href="assets/style.css" media="print" onload="this.media='all'" />
+  <noscript><link rel="stylesheet" href="assets/style.css" /></noscript>
 </head>
 <body>
   <div class="layout">
@@ -337,7 +376,6 @@
     </div>
   </div>
 
-  <script src="assets/vendor/lunar.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>
