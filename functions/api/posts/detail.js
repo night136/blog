@@ -39,6 +39,37 @@ export async function onRequestPost({ env, request }) {
   try { body = await request.json(); } catch (_) { return json({ error: "请求格式错误" }, 400); }
   const slug = (body.slug || "").toString();
   if (!slug) return json({ error: "缺少 slug" }, 400);
+
+  // 边缘缓存：详情响应体可能含 base64 大图（单篇数百 KB～1MB+），从源站到边缘的传输是主要开销。
+  // POST 请求 CDN 不自动缓存，且 Cache API 不缓存非 GET 响应，故用 GET 形式的 key 绕过限制。
+  // 缓存 180s；命中时仍执行阅读数 +1，并 SELECT 真实 views 返回（轻量、不含 body），保证计数准确。
+  const cache = caches.default;
+  const cacheUrl = new Request(
+    `${new URL(request.url).origin}/api/posts/detail-cache?slug=${encodeURIComponent(slug)}`,
+    { method: "GET" }
+  );
+  try {
+    const cached = await cache.match(cacheUrl);
+    if (cached) {
+      const username = await getUsername(request, env);
+      const data = await cached.json();
+      const author = (data.post && data.post.author) || "";
+      if (!(username && username === author)) {
+        try {
+          await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
+        } catch (_) {}
+      }
+      try {
+        const fresh = await env.BLOG_DB.prepare("SELECT views FROM posts WHERE slug = ?").bind(slug).first();
+        if (data.post) data.post.views = (fresh && fresh.views) || 0;
+      } catch (_) {}
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "X-Cache": "HIT" },
+      });
+    }
+  } catch (_) { /* Cache API 不可用时降级直连 D1 */ }
+
   try {
     const username = await getUsername(request, env);
     // 优先尝试带 views 列的查询；若数据库尚未执行迁移（缺 views 列）则自动降级，
@@ -65,7 +96,26 @@ export async function onRequestPost({ env, request }) {
         row.views = (row.views || 0) + 1;
       } catch (_) {}
     }
-    return json({ ok: true, post: publicPost(row, username) });
+    const payload = { ok: true, post: publicPost(row, username) };
+    const bodyStr = JSON.stringify(payload);
+    const response = new Response(bodyStr, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    // 写入边缘缓存（克隆，避免正文流被消费）：缓存含当时 views 快照的大响应体
+    try {
+      await cache.put(
+        cacheUrl,
+        new Response(bodyStr, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=180, s-maxage=180",
+          },
+        })
+      );
+    } catch (_) {}
+    return response;
   } catch (e) {
     return json({ error: "读取失败：" + (e && e.message ? e.message : e) }, 500);
   }
