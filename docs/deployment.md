@@ -65,6 +65,12 @@ node build.mjs
 
 作用：发布 / 修改 / 删除文章成功后，`functions/api/posts.js` 与 `functions/api/posts/manage.js` 会以 fire-and-forget 方式 `fetch(DEPLOY_HOOK_URL)` 触发一次新部署，使 `generated/` 静态文件自动刷新，新内容立即进入 CDN。
 
+> **关于全量重部署**：每次发布都会触发**完整重部署**，而非只更新新增那一篇。原因有二：
+> 1. `build.mjs` 的查询为 `SELECT ... FROM posts`（**无 WHERE、无 LIMIT**），每次构建都会从 D1 拉取**全部文章**重新生成 `generated/` 下的所有 JSON。
+> 2. Cloudflare Pages 的部署模型是**整站替换**——即使只新增 / 修改一篇，也会重新发布整个输出目录到 CDN，**无法只推送单个文件**（除非改用 R2 / KV 存静态 JSON，需额外改造，当前未采用）。
+>
+> 对博客规模（几十~几百篇、总计数百 KB）完全无影响，全量生成 + 部署通常 1~2 分钟；Cloudflare 免费额度内轻松覆盖。若日后文章量极大且介意重部署耗时，再考虑增量生成或 R2 方案。
+
 ---
 
 ## 三、关键文件说明
