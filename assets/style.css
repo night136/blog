@@ -402,7 +402,7 @@ body.lightbox-open { overflow: hidden; }
 /* ── 轮播 ── */
 .slider { position: relative; margin-bottom: 30px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); height: 320px; background: var(--surface-2); border: 1px solid var(--border); }
 .slides { position: relative; height: 100%; }
-.slide { position: absolute; inset: 0; opacity: 0; pointer-events: none; background-size: cover; background-position: center; transition: opacity .6s ease; display: flex; align-items: flex-end; }
+.slide { position: absolute; inset: 0; opacity: 0; pointer-events: none; background-size: cover; background-position: center; transition: opacity .6s ease; display: flex; align-items: flex-end; will-change: opacity; }
 .slide.active { opacity: 1; pointer-events: auto; }
 .slide-overlay { width: 100%; padding: 36px 40px; color: #fff; background: linear-gradient(180deg, transparent 28%, rgba(61,58,54,.66)); }
 .slide-tag { display: inline-block; background: rgba(255,255,255,.24); color: #fff; padding: 4px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 10px; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
@@ -616,8 +616,11 @@ body.lightbox-open { overflow: hidden; }
 [data-theme="dark"] .auth-side { background: linear-gradient(160deg, #3A3530 0%, #2E2924 100%); }
 .auth-side .modal-close { color: var(--text); z-index: 2; }
 .chars-stage { position: relative; width: 100%; height: 280px; flex-shrink: 0; }
-.char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; max-width: 100%; box-sizing: border-box; }
+.char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; max-width: 100%; box-sizing: border-box; will-change: transform; }
 .char:hover { animation-play-state: paused; }
+/* 弹窗关闭时停止角色动画，省 CPU（关闭即暂停） */
+.modal-mask[hidden] .char,
+.modal-mask[hidden] .char .eye-bg { animation-play-state: paused; }
 @keyframes char-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.02); } }
 
 /* 显式死宽，防止 360 等浏览器把 SVG 撑爆 */
@@ -847,11 +850,12 @@ body.lightbox-open { overflow: hidden; }
 .hand {
   position: absolute; bottom: 50%; left: 50%; transform-origin: bottom center;
   border-radius: 999px; z-index: 2; transform: translateX(-50%) rotate(0deg);
-  transition: transform .05s cubic-bezier(.4,2.08,.55,.44);
+  transition: transform .05s cubic-bezier(.4,2.08,.55,.44); will-change: transform;
 }
 .hour-hand { width: 4px; height: 30px; background: var(--text); }
 .min-hand { width: 3px; height: 42px; background: var(--text-soft); }
-.sec-hand { width: 1.5px; height: 48px; background: var(--accent); z-index: 3; transition: none; }
+.sec-hand { width: 1.5px; height: 48px; background: var(--accent); z-index: 3; will-change: transform; animation: secSpin 60s linear infinite; }
+@keyframes secSpin { from { transform: translateX(-50%) rotate(0deg); } to { transform: translateX(-50%) rotate(360deg); } }
 .clock-date { font-size: 12px; color: var(--text-faint); text-align: center; }
 
 /* ── 侧边栏农历挂件（月份 + 日历格子 + 24节气） ── */

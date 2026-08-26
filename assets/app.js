@@ -64,7 +64,7 @@
   // ── 状态 ──
   let posts = [];
   let activeTag = "全部";
-  let currentSlide = 0, totalSlides = 0, slideTimer = null;
+  let currentSlide = 0, totalSlides = 0, slideTimer = null, hoverPaused = false;
   let searchQuery = "";
   let tocScrollHandler = null;
   let sessionReady = false;       // 会话已校验过则不再每次打开文章都请求 /api/me
@@ -184,7 +184,7 @@
     currentSlide = 0; totalSlides = top.length; startAuto();
   }
   function goSlide(i) { if (!totalSlides) return; currentSlide = (i + totalSlides) % totalSlides; slidesEl.querySelectorAll(".slide").forEach((s, ix) => s.classList.toggle("active", ix === currentSlide)); slideDotsEl.querySelectorAll(".dot").forEach((d, ix) => d.classList.toggle("active", ix === currentSlide)); }
-  function startAuto() { stopAuto(); slideTimer = setInterval(() => goSlide(currentSlide + 1), 5000); }
+  function startAuto() { if (hoverPaused) return; stopAuto(); slideTimer = setInterval(() => goSlide(currentSlide + 1), 5000); }
   function stopAuto() { if (slideTimer) clearInterval(slideTimer); slideTimer = null; }
 
   // ===== 筛选+搜索 =====
@@ -896,7 +896,11 @@
     const sec = now.getSeconds() + now.getMilliseconds() / 1000;
     const min = now.getMinutes() + sec / 60;
     const hour = (now.getHours() % 12) + min / 60;
-    secHand.style.transform = `rotate(${sec * 6}deg)`;
+    // 秒针改纯 CSS 动画（secSpin 60s 连续扫秒），仅初始化相位一次
+    if (!secHand.dataset.cssSpin) {
+      secHand.style.animationDelay = `${-sec}s`;
+      secHand.dataset.cssSpin = "1";
+    }
     minHand.style.transform = `rotate(${min * 6}deg)`;
     hourHand.style.transform = `rotate(${hour * 30}deg)`;
   }
@@ -930,7 +934,22 @@
   });
   if (lightbox) lightbox.addEventListener("click", (e) => { if (e.target === lightbox || e.target === lightboxClose) closeLightbox(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && lightbox && !lightbox.hidden) closeLightbox(); });
-  if (sliderEl) { sliderEl.addEventListener("mouseenter", stopAuto); sliderEl.addEventListener("mouseleave", startAuto); }
+  if (sliderEl) {
+    sliderEl.addEventListener("mouseenter", () => { hoverPaused = true; stopAuto(); });
+    sliderEl.addEventListener("mouseleave", () => { hoverPaused = false; startAuto(); });
+    // 滚出视口暂停自动播放，回到视口恢复（省电 + 不打扰阅读）
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && !hoverPaused) startAuto();
+          else stopAuto();
+        });
+      }, { threshold: 0.15 });
+      io.observe(sliderEl);
+    } else {
+      startAuto();
+    }
+  }
   if (slidePrev) slidePrev.addEventListener("click", () => goSlide(currentSlide - 1));
   if (slideNext) slideNext.addEventListener("click", () => goSlide(currentSlide + 1));
   if (themeToggle) themeToggle.addEventListener("click", toggleTheme);
