@@ -533,7 +533,7 @@ body.lightbox-open { overflow: hidden; }
   .rightbar { display: none; }
   .sidebar { position: fixed; left: 0; top: 0; height: 100vh; width: min(85vw, 320px); transform: translateX(-100%); z-index: 90; border-radius: 0 var(--radius) var(--radius) 0; border: none; border-right: 1px solid var(--border); flex-direction: column; padding: 24px 22px; overflow-y: auto; margin: 0; }
   .sidebar.open { transform: translateX(0); }
-  .hamburger { display: block; position: fixed; top: 18px; left: 10px; z-index: 95; }
+  .hamburger { display: block; position: fixed; top: 9px; left: 10px; z-index: 95; }
   .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(45,40,34,.35); z-index: 89; }
   .sidebar-overlay[hidden] { display: none; }
   .sidebar-footer { margin-top: 20px; }
