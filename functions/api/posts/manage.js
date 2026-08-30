@@ -5,11 +5,20 @@
 import { verifyJWT, getCookie, json, isOwner } from "../_lib/auth.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
-// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。fire-and-forget。
-function triggerRedeploy(env) {
+// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
+//
+// ⚠️ 关键坑：Workers / Pages Functions 在 Response 返回后会立即取消所有未完成的 fetch。
+// 裸 fire-and-forget（既不 await、也不用 waitUntil）的调用根本发不出去 —— Deploy Hook 从未被
+// 真正触发，静态快照（generated/）永远不刷新，表现为「发布文章后首页不显示」。
+// 必须用 ctx.waitUntil() 告知运行时：响应返回后仍继续等待该 Promise 完成。
+async function triggerRedeploy(env, ctx) {
   const url = env && env.DEPLOY_HOOK_URL;
   if (!url) return;
-  try { fetch(url, { method: "POST" }).catch(() => {}); } catch (_) {}
+  const p = fetch(url, { method: "POST" })
+    .then((r) => console.log("[redeploy] hook HTTP " + r.status))
+    .catch((e) => console.log("[redeploy] hook 失败: " + ((e && e.message) || e)));
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
+  else { try { await p; } catch (_) {} } // 兜底：无 waitUntil 时阻塞等待，确保 Hook 真的发出
 }
 
 const MAX_TITLE = 120;
@@ -31,7 +40,8 @@ async function getUsername(request, env) {
   } catch (e) { return null; }
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(ctx) {
+  const { request, env } = ctx;
   if (!env.BLOG_DB) return json({ ok: false, error: "服务端未配置数据库" }, 500);
 
   const username = await getUsername(request, env);
@@ -53,7 +63,7 @@ export async function onRequestPost({ request, env }) {
   if (action === "delete") {
     try {
       await env.BLOG_DB.prepare("DELETE FROM posts WHERE slug = ?").bind(slug).run();
-      triggerRedeploy(env); // 重新生成静态预渲染文件
+      await triggerRedeploy(env, ctx); // 重新生成静态预渲染文件
       return json({ ok: true });
     } catch (e) {
       return json({ ok: false, error: "删除失败：" + (e && e.message ? e.message : e) }, 500);
@@ -83,7 +93,7 @@ export async function onRequestPost({ request, env }) {
       await env.BLOG_DB.prepare(
         `UPDATE posts SET title = ?, tag = ?, summary = ?, cover = ?, body = ?, words = ? WHERE slug = ?`
       ).bind(title, tag, summary || null, cover || null, mdBody, words, slug).run();
-      triggerRedeploy(env); // 重新生成静态预渲染文件
+      await triggerRedeploy(env, ctx); // 重新生成静态预渲染文件
       return json({ ok: true, slug });
     } catch (e) {
       return json({ ok: false, error: "更新失败：" + (e && e.message ? e.message : e) }, 500);

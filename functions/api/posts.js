@@ -102,14 +102,24 @@ export async function onRequestGet({ env, request }) {
 }
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
-// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。fire-and-forget。
-function triggerRedeploy(env) {
+// Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
+//
+// ⚠️ 关键坑：Workers / Pages Functions 在 Response 返回后会立即取消所有未完成的 fetch。
+// 裸 fire-and-forget（既不 await、也不用 waitUntil）的调用根本发不出去 —— Deploy Hook 从未被
+// 真正触发，静态快照（generated/）永远不刷新，表现为「发布文章后首页不显示」。
+// 必须用 ctx.waitUntil() 告知运行时：响应返回后仍继续等待该 Promise 完成。
+async function triggerRedeploy(env, ctx) {
   const url = env && env.DEPLOY_HOOK_URL;
   if (!url) return;
-  try { fetch(url, { method: "POST" }).catch(() => {}); } catch (_) {}
+  const p = fetch(url, { method: "POST" })
+    .then((r) => console.log("[redeploy] hook HTTP " + r.status))
+    .catch((e) => console.log("[redeploy] hook 失败: " + ((e && e.message) || e)));
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p);
+  else { try { await p; } catch (_) {} } // 兜底：无 waitUntil 时阻塞等待，确保 Hook 真的发出
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(ctx) {
+  const { request, env } = ctx;
   // 1. 验证会话
   const token = getCookie(request, "auth");
   let username;
@@ -174,6 +184,6 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "写入失败：" + (e && e.message ? e.message : e) }, 500);
   }
 
-  triggerRedeploy(env); // 重新生成静态预渲染文件
+  await triggerRedeploy(env, ctx); // 重新生成静态预渲染文件
   return json({ ok: true, slug, message: "文章已发布！刷新首页即可看到。" });
 }
