@@ -84,7 +84,18 @@ async function main() {
   );
   const rows = res[0].results;
   mkdirSync(POST_DIR, { recursive: true });
-  writeFileSync(LIST_FILE, JSON.stringify({ ok: true, posts: rows.map(publicList) }));
+  // 列表附带新鲜度元信息：静态快照无法感知数据库后续新增，前端据此校验是否过期
+  // （Deploy Hook 未生效 / 部署延迟时，前端自动回退动态接口，保证发布后一定能看到）
+  writeFileSync(
+    LIST_FILE,
+    JSON.stringify({
+      ok: true,
+      count: rows.length,
+      latest: rows.length ? rows[0].slug : "",
+      generatedAt: new Date().toISOString(),
+      posts: rows.map(publicList),
+    })
+  );
   for (const row of rows) {
     writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row) }));
   }

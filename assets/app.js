@@ -151,6 +151,30 @@
   function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${gradFor(p.title)};`; }
 
   // ===== 数据 =====
+  // 动态列表：直查 D1 的 Function 接口（静态快照不可用或已过期时使用）
+  async function fetchDynamicPosts() {
+    const res = await fetch("/api/posts", { credentials: "same-origin" });
+    if (!res.ok) throw new Error("list " + res.status);
+    const data = await res.json();
+    if (!data.ok) throw new Error("bad list");
+    return data.posts || [];
+  }
+
+  // 静态快照新鲜度自检：generated/posts.json 是构建期产物，无法感知数据库后续新增。
+  // 一旦 Deploy Hook 未生效或部署延迟，快照会长期停留在旧版本 —— 新文章进了 D1 却显示不出来。
+  // 这里用极轻量的 /api/posts/meta（count + 最新 slug）比对，过期则回调刷新，且不阻塞首屏。
+  async function verifyStaticFreshness(meta, onStale) {
+    if (!meta || typeof meta.count !== "number") return;
+    try {
+      const r = await fetch("/api/posts/meta", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d || !d.ok) return;
+      const stale = d.count !== meta.count || (meta.latest && d.latest && meta.latest !== d.latest);
+      if (stale) await onStale();
+    } catch (_) {}
+  }
+
   async function fetchAllPosts() {
     // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成，命中即秒回）；
     // 缺失/失败则降级到 Function 动态接口。两种方式返回结构一致。
@@ -158,14 +182,19 @@
       const sres = await fetch("/generated/posts.json", { credentials: "same-origin" });
       if (sres.ok) {
         const sd = await sres.json();
-        if (sd && sd.ok && Array.isArray(sd.posts)) return sd.posts;
+        if (sd && sd.ok && Array.isArray(sd.posts)) {
+          // 先用静态列表秒开首屏，再后台校验快照是否过期；有新文章则静默补上
+          verifyStaticFreshness({ count: sd.count, latest: sd.latest }, async () => {
+            try {
+              const fresh = await fetchDynamicPosts();
+              if (fresh && fresh.length) refreshHomeList(fresh);
+            } catch (_) {}
+          });
+          return sd.posts;
+        }
       }
     } catch (_) {}
-    const res = await fetch("/api/posts", { credentials: "same-origin" });
-    if (!res.ok) throw new Error("list " + res.status);
-    const data = await res.json();
-    if (!data.ok) throw new Error("bad list");
-    return data.posts || [];
+    return fetchDynamicPosts();
   }
 
   // ===== 轮播 =====
@@ -746,6 +775,14 @@
     if (sidebar) sidebar.classList.remove("open");
     if (sidebarOverlay) sidebarOverlay.hidden = true;
     document.body.style.overflow = "";
+  }
+
+  // 用新列表静默重渲染首页（静态快照过期后补上最新文章，不打断用户浏览、不显示加载态）
+  function refreshHomeList(list) {
+    try {
+      posts = list.map((p) => ({ ...p, summary: p.summary || (p.title || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
+      renderSlider(); renderFilters(); renderCards(); renderArchive(); renderWidgets();
+    } catch (_) {}
   }
 
   async function loadPosts() {
