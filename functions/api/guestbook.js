@@ -50,6 +50,28 @@ function nowUtc8() {
   return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
 }
 
+// "YYYY-MM-DD" 加减天数
+function addDays(s, n) {
+  const [y, m, d] = String(s).split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d) + n * 86400000);
+  const pad = (x) => String(x).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+}
+
+// 连续打卡天数（streak）：
+//   今天写了 → 从今天往前数；今天还没写但昨天写了 → 从昨天往前数（今天不算断签）；
+//   昨天也没写 → 已断签，返回 0。
+function calcStreak(dates) {
+  const set = new Set((dates || []).filter(Boolean));
+  if (!set.size) return 0;
+  const today = todayStartUtc8().slice(0, 10);
+  let cursor = set.has(today) ? today : addDays(today, -1);
+  if (!set.has(cursor)) return 0;
+  let n = 0;
+  while (set.has(cursor)) { n++; cursor = addDays(cursor, -1); }
+  return n;
+}
+
 export async function onRequestGet({ env, request }) {
   if (!env.BLOG_DB) return json({ error: "服务端未配置数据库" }, 500);
 
@@ -68,7 +90,19 @@ export async function onRequestGet({ env, request }) {
     const { results } = await env.BLOG_DB.prepare(
       "SELECT id, name, content, color, created_at FROM guestbook_notes ORDER BY created_at DESC, id DESC LIMIT ?"
     ).bind(LIMIT).all();
-    const body = JSON.stringify({ ok: true, notes: results, canDelete });
+    // 顶部统计：总数 + 连续打卡天数
+    let total = 0;
+    let streak = 0;
+    try {
+      const cRow = await env.BLOG_DB.prepare("SELECT COUNT(*) AS c FROM guestbook_notes").first();
+      total = (cRow && Number(cRow.c)) || 0;
+      const dRes = await env.BLOG_DB.prepare(
+        "SELECT DISTINCT substr(created_at, 1, 10) AS d FROM guestbook_notes ORDER BY d DESC LIMIT 400"
+      ).all();
+      streak = calcStreak((dRes.results || []).map((r) => r.d));
+    } catch (_) { /* 统计失败不影响便签展示 */ }
+
+    const body = JSON.stringify({ ok: true, notes: results, canDelete, total, streak });
     const response = new Response(body, {
       status: 200,
       headers: {

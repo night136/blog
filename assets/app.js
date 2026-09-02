@@ -828,6 +828,42 @@
     </article>`;
   }
 
+  // UTC+8 下的"今天 / N 天前"，格式 YYYY-MM-DD
+  function gbTodayStr(offsetDays) {
+    const d = new Date(Date.now() + 8 * 3600 * 1000 - (offsetDays || 0) * 86400000);
+    const pad = (x) => String(x).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+
+  // 按日期分组：今天 / 昨天 / 具体日期 —— 像翻日记本，而不是一堆散卡
+  function groupNotesByDate(notes) {
+    const todayStr = gbTodayStr(0);
+    const yStr = gbTodayStr(1);
+    const order = [];
+    const map = new Map();
+    (notes || []).forEach((n) => {
+      const d = (n.created_at || "").slice(0, 10);
+      if (!map.has(d)) { map.set(d, []); order.push(d); }
+      map.get(d).push(n);
+    });
+    return order.map((d) => ({
+      date: d,
+      label: d === todayStr ? "今天" : d === yStr ? "昨天" : d.replace(/-/g, "."),
+      items: map.get(d),
+    }));
+  }
+
+  // 顶部统计：连续打卡天数 + 便签总数
+  function renderGuestStats(total, streak) {
+    const box = $("guestbookStats");
+    if (!box) return;
+    const t = $("gbTotal");
+    const s = $("gbStreak");
+    if (t) t.textContent = String(total || 0);
+    if (s) s.textContent = String(streak || 0);
+    box.hidden = false;
+  }
+
   function renderGuestbook(notes) {
     const board = $("guestbookBoard");
     if (!board) return;
@@ -835,7 +871,20 @@
       board.innerHTML = `<p style="color:var(--text-faint);text-align:center;padding:32px 0">还没有便签 —— 来写第一张吧 ☕️</p>`;
       return;
     }
-    board.innerHTML = `<div class="g-board-inner">${notes.map(buildGuestCard).join("")}</div>`;
+    const groups = groupNotesByDate(notes);
+    board.innerHTML = groups
+      .map(
+        (g) => `
+        <div class="g-group" data-date="${escapeHtml(g.date)}">
+          <div class="g-group-head">
+            <span class="g-group-label">${escapeHtml(g.label)}</span>
+            <span class="g-group-count">${g.items.length} 张</span>
+          </div>
+          <div class="g-board-inner">${g.items.map(buildGuestCard).join("")}</div>
+        </div>
+      `
+      )
+      .join("");
     bindGuestDeletes(board);
   }
 
@@ -872,6 +921,7 @@
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       guestbookCanDelete = !!data.canDelete;
       renderGuestbook(data.notes || []);
+      renderGuestStats(data.total, data.streak);
       guestbookLoaded = true;
     } catch (e) {
       const board = $("guestbookBoard");
@@ -898,6 +948,8 @@
         if (msg) { msg.hidden = false; msg.textContent = "便签内容不能为空"; msg.className = "guestbook-msg err"; }
         return;
       }
+      // 提交前先记下「今天是否已有便签」，用于决定连续天数是否 +1
+      const hadToday = !!document.querySelector(`.g-group[data-date="${gbTodayStr(0)}"]`);
       const name = (($("guestName") || {}).value || "").trim();
       if (msg) { msg.hidden = false; msg.textContent = "钉上中…"; msg.className = "guestbook-msg"; }
       if (submitBtn) submitBtn.disabled = true;
@@ -909,19 +961,35 @@
         });
         const data = await res.json();
         if (data.ok && data.note) {
-          // 立即把新便签插入顶部（无需刷新）
+          // 立即把新便签插到「今天」这一组最前面（无需刷新）
           const board = $("guestbookBoard");
           if (board) {
             const placeholder = board.querySelector("p");
             if (placeholder) placeholder.remove();
-            let inner = board.querySelector(".g-board-inner");
-            if (!inner) {
-              inner = document.createElement("div");
-              inner.className = "g-board-inner";
-              board.appendChild(inner);
+            const d = (data.note.created_at || "").slice(0, 10);
+            let group = board.querySelector(`.g-group[data-date="${d}"]`);
+            if (!group) {
+              // 今天还没有分组 → 新建一个放到最前面
+              group = document.createElement("div");
+              group.className = "g-group";
+              group.dataset.date = d;
+              group.innerHTML = `<div class="g-group-head"><span class="g-group-label">今天</span><span class="g-group-count">0 张</span></div><div class="g-board-inner"></div>`;
+              board.insertBefore(group, board.firstChild);
             }
-            inner.insertAdjacentHTML("afterbegin", buildGuestCard(data.note));
-            bindGuestDeletes(inner);
+            const inner = group.querySelector(".g-board-inner");
+            if (inner) {
+              inner.insertAdjacentHTML("afterbegin", buildGuestCard(data.note));
+              const cnt = group.querySelector(".g-group-count");
+              if (cnt) cnt.textContent = `${inner.querySelectorAll(".g-card").length} 张`;
+              bindGuestDeletes(inner);
+            }
+          }
+          // 乐观更新统计：总数 +1；若今天原本没有便签，连续天数 +1
+          const tEl = $("gbTotal");
+          if (tEl) tEl.textContent = String((Number(tEl.textContent) || 0) + 1);
+          if (!hadToday) {
+            const sEl = $("gbStreak");
+            if (sEl) sEl.textContent = String((Number(sEl.textContent) || 0) + 1);
           }
           if (content) content.value = "";
           const nameInput = $("guestName"); if (nameInput) nameInput.value = "";
