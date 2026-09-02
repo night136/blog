@@ -1001,16 +1001,20 @@ body.lightbox-open { overflow: hidden; }
   animation: gPin .45s cubic-bezier(.22, .61, .36, 1) both;
   border: 1px solid rgba(255, 255, 255, 0.55);
 }
+/* 入场动画刻意只动 translate / scale / opacity，**不碰 transform**：
+   否则 animation 的最终帧（transform: none）优先级高于普通声明，会把下面 nth-child 的
+   倾斜"按直"，卡片就站得笔直、看不出手贴感了。
+   （translate/scale 是独立属性，与 transform 互不覆盖；老旧浏览器不支持时优雅降级为纯淡入） */
 @keyframes gPin {
-  from { opacity: 0; transform: translateY(14px) scale(.94) rotate(-2deg); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; translate: 0 12px; scale: .96; }
+  to   { opacity: 1; translate: 0 0; scale: 1; }
 }
 
 /* 随机倾斜：让整面墙看起来是手贴上去的（nth-child 循环，不依赖后端） */
-.g-board-inner .g-card:nth-child(4n+1) { transform: rotate(-.7deg); }
-.g-board-inner .g-card:nth-child(4n+2) { transform: rotate(.5deg); }
-.g-board-inner .g-card:nth-child(4n+3) { transform: rotate(-.3deg); }
-.g-board-inner .g-card:nth-child(4n+4) { transform: rotate(.8deg); }
+.g-board-inner .g-card:nth-child(4n+1) { transform: rotate(-1.2deg); }
+.g-board-inner .g-card:nth-child(4n+2) { transform: rotate(1deg); }
+.g-board-inner .g-card:nth-child(4n+3) { transform: rotate(-.6deg); }
+.g-board-inner .g-card:nth-child(4n+4) { transform: rotate(1.4deg); }
 /* hover 浮起并回正 */
 .g-board-inner .g-card:hover { transform: translateY(-5px) rotate(0deg); box-shadow: 0 14px 28px rgba(61, 58, 54, 0.16); z-index: 2; }
 
