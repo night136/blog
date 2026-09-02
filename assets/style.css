@@ -971,14 +971,25 @@ body.lightbox-open { overflow: hidden; }
    便签板：暖米色底 + 大圆角；便签卡片随机 7 色，顶部用纯 CSS 画一枚图钉；
    hover 微微浮起并回正；站长（BLOG_OWNER）hover 时右上角浮出删除按钮。 */
 .guestbook-board {
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
+  position: relative;
+  border: 6px solid #A37E50;
   border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .22),
+    inset 0 3px 16px rgba(0, 0, 0, .12),
+    0 12px 28px rgba(61, 58, 54, .18);
   padding: 26px 24px;
   margin-bottom: 22px;
   min-height: 180px;
+  /* 软木板：底色 + 两层径向噪点 + 暖色渐变，营造真实软木颗粒感 */
+  background:
+    radial-gradient(circle, rgba(0, 0, 0, .07) 1.2px, transparent 1.3px) 0 0 / 6px 6px,
+    radial-gradient(circle, rgba(255, 255, 255, .16) 1px, transparent 1.1px) 3px 3px / 9px 9px,
+    linear-gradient(160deg, #D6B98C 0%, #C6A576 100%);
 }
+/* 日期分组标题直接压在软木板上，需要更深一点的颜色保证可读性 */
+.guestbook-board .g-group-head { color: #5C432E; text-shadow: 0 1px 0 rgba(255, 255, 255, .25); }
+.guestbook-board .g-group-head::after { background: rgba(92, 67, 46, .18); }
 .guestbook-skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
 .guestbook-skeleton:empty { display: none; }
 .g-sk { height: 120px; border-radius: var(--radius-sm); }
@@ -1156,6 +1167,21 @@ body.lightbox-open { overflow: hidden; }
 [data-theme="dark"] .g-content { color: var(--text); }
 [data-theme="dark"] .g-meta { color: rgba(245, 239, 230, 0.55); border-top-color: rgba(245, 239, 230, 0.16); }
 [data-theme="dark"] .g-card { border-color: rgba(255, 255, 255, 0.08); }
+
+/* 暗色模式：软木板变深木色，仍保留颗粒 */
+[data-theme="dark"] .guestbook-board {
+  border-color: #3E2F1E;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .08),
+    inset 0 3px 16px rgba(0, 0, 0, .22),
+    0 12px 28px rgba(0, 0, 0, .35);
+  background:
+    radial-gradient(circle, rgba(0, 0, 0, .16) 1.2px, transparent 1.3px) 0 0 / 6px 6px,
+    radial-gradient(circle, rgba(255, 255, 255, .05) 1px, transparent 1.1px) 3px 3px / 9px 9px,
+    linear-gradient(160deg, #5C4A32 0%, #453624 100%);
+}
+[data-theme="dark"] .guestbook-board .g-group-head { color: rgba(245, 239, 230, .55); text-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+[data-theme="dark"] .guestbook-board .g-group-head::after { background: rgba(245, 239, 230, .12); }
 
 /* 顶部统计：连续打卡天数 + 便签总数 */
 .guestbook-stats {
