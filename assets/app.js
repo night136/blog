@@ -768,6 +768,7 @@
 
   function showView(name) {
     if (name === "home") resetMeta();
+    if (name === "guestbook") loadGuestbook();
     Object.values(views).forEach((v) => v.classList.remove("active"));
     if (views[name]) views[name].classList.add("active");
     navLinks.forEach((l) => l.classList.toggle("active", l.dataset.view === name));
@@ -793,6 +794,147 @@
     } catch (e) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${e.message}</p>`; if (sliderEl) sliderEl.style.display = "none"; return; }
     if (!posts.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">暂无文章。</p>`; return; }
     renderSlider(); renderFilters(); renderCards(); renderArchive(); renderWidgets();
+  }
+
+  // ===== 留言墙（便签墙 / 感恩日记）=====
+  // 公开功能：游客可写（可选名字 + 200 字以内），站长可删（BLOG_OWNER）。
+  // 设计：第一次进入视图才加载（lazy），之后用模块变量标记已加载；提交 / 删除均在前端即时更新，无需刷新。
+  let guestbookLoaded = false;
+  let guestbookCanDelete = false;
+
+  // 与后端保持一致的色板（前端也用一份作为兜底）
+  const GB_G_ICON = { blue: "🌸", pink: "💗", yellow: "⭐", purple: "🌙", green: "🌿", orange: "🍂", mint: "❄️" };
+
+  function formatGuestDate(s) {
+    // "2026-09-02 18:30" -> "2026.09.02  18:30"
+    if (!s) return "";
+    const [d, t] = s.split(" ");
+    return `${(d || "").replace(/-/g, ".")}  ${t || ""}`;
+  }
+
+  function buildGuestCard(n) {
+    const canDel = guestbookCanDelete;
+    const icon = GB_G_ICON[n.color] || "🌷";
+    return `<article class="g-card g-card-${escapeHtml(n.color)}" data-id="${n.id}">
+      <span class="g-pin" aria-hidden="true"></span>
+      <div class="g-content">${escapeHtml(n.content)}</div>
+      <div class="g-meta">
+        <span class="g-icon">${icon}</span>
+        <span class="g-date">${escapeHtml(formatGuestDate(n.created_at))}</span>
+        <span class="g-name">— ${escapeHtml(n.name || "匿名")}</span>
+      </div>
+      ${canDel ? `<button class="g-del" type="button" data-del="${n.id}" aria-label="删除便签">×</button>` : ""}
+    </article>`;
+  }
+
+  function renderGuestbook(notes) {
+    const board = $("guestbookBoard");
+    if (!board) return;
+    if (!notes || !notes.length) {
+      board.innerHTML = `<p style="color:var(--text-faint);text-align:center;padding:32px 0">还没有便签 —— 来写第一张吧 ☕️</p>`;
+      return;
+    }
+    board.innerHTML = `<div class="g-board-inner">${notes.map(buildGuestCard).join("")}</div>`;
+    bindGuestDeletes(board);
+  }
+
+  function bindGuestDeletes(board) {
+    if (!guestbookCanDelete) return;
+    board.querySelectorAll(".g-del").forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", async () => {
+        const card = btn.closest(".g-card");
+        const id = Number(btn.dataset.del);
+        if (!id || !confirm("确定删除这张便签吗？")) return;
+        try {
+          const res = await fetch("/api/guestbook/manage", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id }),
+          });
+          const data = await res.json();
+          if (data.ok) { if (card) card.remove(); }
+          else alert(data.error || "删除失败");
+        } catch (_) { alert("网络错误"); }
+      });
+    });
+  }
+
+  async function loadGuestbook() {
+    if (guestbookLoaded) return;
+    const sk = $("guestbookSkeleton");
+    if (sk) sk.innerHTML = '<div class="sk-card g-sk"></div>'.repeat(6);
+    try {
+      const res = await fetch("/api/guestbook", { credentials: "same-origin" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      guestbookCanDelete = !!data.canDelete;
+      renderGuestbook(data.notes || []);
+      guestbookLoaded = true;
+    } catch (e) {
+      const board = $("guestbookBoard");
+      if (board) board.innerHTML = `<p style="color:var(--text-faint)">留言墙加载失败：${escapeHtml(e.message || "网络错误")}</p>`;
+    }
+  }
+
+  function bindGuestbookForm() {
+    const form = $("guestbookForm");
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = "1";
+    const content = $("guestContent");
+    const counter = $("guestbookCount");
+    const submitBtn = $("guestSubmit");
+    const msg = $("guestbookMsg");
+
+    if (content && counter) {
+      content.addEventListener("input", () => { counter.textContent = `${content.value.length} / 200`; });
+    }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = (content && content.value || "").trim();
+      if (!text) {
+        if (msg) { msg.hidden = false; msg.textContent = "便签内容不能为空"; msg.className = "guestbook-msg err"; }
+        return;
+      }
+      const name = (($("guestName") || {}).value || "").trim();
+      if (msg) { msg.hidden = false; msg.textContent = "钉上中…"; msg.className = "guestbook-msg"; }
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const res = await fetch("/api/guestbook", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, content: text }),
+        });
+        const data = await res.json();
+        if (data.ok && data.note) {
+          // 立即把新便签插入顶部（无需刷新）
+          const board = $("guestbookBoard");
+          if (board) {
+            const placeholder = board.querySelector("p");
+            if (placeholder) placeholder.remove();
+            let inner = board.querySelector(".g-board-inner");
+            if (!inner) {
+              inner = document.createElement("div");
+              inner.className = "g-board-inner";
+              board.appendChild(inner);
+            }
+            inner.insertAdjacentHTML("afterbegin", buildGuestCard(data.note));
+            bindGuestDeletes(inner);
+          }
+          if (content) content.value = "";
+          const nameInput = $("guestName"); if (nameInput) nameInput.value = "";
+          if (counter) counter.textContent = "0 / 200";
+          if (msg) { msg.textContent = "✅ 已钉上"; msg.className = "guestbook-msg ok"; }
+        } else {
+          if (msg) { msg.textContent = data.error || "提交失败"; msg.className = "guestbook-msg err"; }
+        }
+      } catch (_) {
+        if (msg) { msg.textContent = "网络错误"; msg.className = "guestbook-msg err"; }
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
   }
 
   // ===== 深色模式 =====
@@ -1028,6 +1170,7 @@
   // 导航
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
+  bindGuestbookForm();
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====

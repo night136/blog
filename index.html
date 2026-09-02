@@ -77,6 +77,7 @@
         <nav class="topbar-nav">
           <a href="#" class="nav-link" data-view="home">首页</a>
           <a href="#" class="nav-link" data-view="archive">归档</a>
+          <a href="#" class="nav-link" data-view="guestbook">留言墙</a>
           <a href="#" class="nav-link" data-view="member">会员</a>
           <a href="#" class="nav-link" data-view="about">关于</a>
         </nav>
@@ -99,6 +100,7 @@
       <nav class="nav" id="mainNav">
         <a href="#" class="nav-link active" data-view="home">首页</a>
         <a href="#" class="nav-link" data-view="archive">归档</a>
+        <a href="#" class="nav-link" data-view="guestbook">留言墙</a>
         <a href="#" class="nav-link" data-view="member">👥 会员专区</a>
         <a href="#" class="nav-link" data-view="about">关于</a>
       </nav>
@@ -159,6 +161,32 @@
       <section class="view view-archive">
         <header class="page-head"><h2>归档</h2><p>所有文章按时间排列。</p></header>
         <div class="archive-list" id="archiveList"></div>
+      </section>
+
+      <!-- 留言墙视图 -->
+      <section class="view view-guestbook">
+        <header class="page-head">
+          <h2>留言墙</h2>
+          <p>留下你的足迹，每一张便签都是一份温暖。</p>
+        </header>
+        <div class="guestbook-board" id="guestbookBoard">
+          <div class="guestbook-skeleton" id="guestbookSkeleton"></div>
+        </div>
+        <form class="guestbook-form" id="guestbookForm" autocomplete="off">
+          <div class="guestbook-form-head">
+            <span class="pen-icon" aria-hidden="true">✏️</span>
+            <h3>写一张便签</h3>
+          </div>
+          <div class="guestbook-form-row">
+            <input name="guestName" id="guestName" type="text" placeholder="你的名字（可选）" maxlength="20" />
+            <textarea name="guestContent" id="guestContent" placeholder="写下你想说的话..." maxlength="200" rows="3" required></textarea>
+          </div>
+          <div class="guestbook-form-foot">
+            <span class="guestbook-count" id="guestbookCount">0 / 200</span>
+            <button type="submit" id="guestSubmit" class="btn-publish">📌 钉上便签</button>
+          </div>
+          <p class="guestbook-msg" id="guestbookMsg" hidden></p>
+        </form>
       </section>
 
       <!-- 关于视图 -->

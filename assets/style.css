@@ -966,3 +966,196 @@ body.lightbox-open { overflow: hidden; }
 @media (min-width: 981px) {
   .sidebar { align-self: start; position: sticky; top: 76px; max-height: calc(100vh - 84px); overflow-y: auto; }
 }
+
+/* ===== 留言墙（便签墙 / 感恩日记）=====
+   便签板：暖米色底 + 大圆角；便签卡片随机 7 色，顶部用纯 CSS 画一枚图钉；
+   hover 微微浮起并回正；站长（BLOG_OWNER）hover 时右上角浮出删除按钮。 */
+.guestbook-board {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 26px 24px;
+  margin-bottom: 22px;
+  min-height: 180px;
+}
+.guestbook-skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+.guestbook-skeleton:empty { display: none; }
+.g-sk { height: 120px; border-radius: var(--radius-sm); }
+
+/* 便签网格（auto-fill 自适应，窄屏自动降列） */
+.g-board-inner {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+/* 单张便签 */
+.g-card {
+  position: relative;
+  padding: 30px 16px 14px;
+  border-radius: 4px 4px 14px 14px;
+  box-shadow: 0 6px 16px rgba(61, 58, 54, 0.10);
+  transition: transform .28s cubic-bezier(.2, .7, .2, 1), box-shadow .28s;
+  animation: gPin .45s cubic-bezier(.22, .61, .36, 1) both;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+@keyframes gPin {
+  from { opacity: 0; transform: translateY(14px) scale(.94) rotate(-2deg); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 随机倾斜：让整面墙看起来是手贴上去的（nth-child 循环，不依赖后端） */
+.g-board-inner .g-card:nth-child(4n+1) { transform: rotate(-.7deg); }
+.g-board-inner .g-card:nth-child(4n+2) { transform: rotate(.5deg); }
+.g-board-inner .g-card:nth-child(4n+3) { transform: rotate(-.3deg); }
+.g-board-inner .g-card:nth-child(4n+4) { transform: rotate(.8deg); }
+/* hover 浮起并回正 */
+.g-board-inner .g-card:hover { transform: translateY(-5px) rotate(0deg); box-shadow: 0 14px 28px rgba(61, 58, 54, 0.16); z-index: 2; }
+
+/* 便签内容 */
+.g-content {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4A453E;
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+  min-height: 24px;
+}
+/* 底部：图标 + 日期 + 名字 */
+.g-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: rgba(74, 69, 62, 0.62);
+  border-top: 1px dashed rgba(74, 69, 62, 0.18);
+  padding-top: 8px;
+  flex-wrap: wrap;
+}
+.g-icon { font-size: 12px; }
+.g-name { margin-left: auto; font-style: italic; }
+
+/* 便签配色（浅色纸感渐变） */
+.g-card-blue   { background: linear-gradient(160deg, #EAF2FB, #DCE8F7); }
+.g-card-pink   { background: linear-gradient(160deg, #FDEDF2, #F8DDE7); }
+.g-card-yellow { background: linear-gradient(160deg, #FFF6DF, #FDEEC4); }
+.g-card-purple { background: linear-gradient(160deg, #F2EDFA, #E6DDF5); }
+.g-card-green  { background: linear-gradient(160deg, #EDF6EC, #DEEFDC); }
+.g-card-orange { background: linear-gradient(160deg, #FDEEE2, #FBE0CB); }
+.g-card-mint   { background: linear-gradient(160deg, #E7F6F5, #D8EFED); }
+
+/* 图钉（纯 CSS：一枚小圆钉 + 针） */
+.g-pin {
+  position: absolute;
+  top: 9px; left: 50%;
+  transform: translateX(-50%);
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #FF8D6B, #D9433A 62%);
+  box-shadow: 0 2px 4px rgba(61, 58, 54, 0.28), inset 0 -1px 1px rgba(0, 0, 0, 0.18);
+}
+.g-pin::after {
+  content: "";
+  position: absolute;
+  top: 11px; left: 50%;
+  transform: translateX(-50%);
+  width: 2px; height: 5px;
+  background: rgba(217, 67, 58, 0.62);
+  border-radius: 0 0 2px 2px;
+}
+
+/* 站长删除按钮：hover 才浮出 */
+.g-del {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 20px; height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.86);
+  color: #B4453C;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .2s, background .2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.g-card:hover .g-del { opacity: 1; }
+.g-del:hover { background: #fff; }
+
+/* ===== 写便签表单 ===== */
+.guestbook-form {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 20px 22px 18px;
+}
+.guestbook-form-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.guestbook-form-head .pen-icon { font-size: 20px; }
+.guestbook-form-head h3 { margin: 0; font-size: 17px; color: var(--text); font-weight: 600; }
+.guestbook-form-row { display: grid; gap: 12px; }
+.guestbook-form input,
+.guestbook-form textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.guestbook-form input:focus,
+.guestbook-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.guestbook-form textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
+.guestbook-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.guestbook-count { font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.guestbook-form .btn-publish {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .2s, box-shadow .2s, background .2s;
+  box-shadow: 0 4px 14px rgba(232, 155, 76, 0.28);
+}
+.guestbook-form .btn-publish:hover { background: var(--accent-dark); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(232, 155, 76, 0.34); }
+.guestbook-form .btn-publish:disabled { opacity: .62; cursor: not-allowed; transform: none; }
+.guestbook-msg { margin: 12px 0 0; font-size: 13px; color: var(--text-soft); }
+.guestbook-msg.err { color: #C4544B; }
+.guestbook-msg.ok { color: #4F8A55; }
+
+/* 暗色模式：便签降亮度，保持纸感但不过曝 */
+[data-theme="dark"] .g-card-blue   { background: linear-gradient(160deg, #39485A, #2F3D4C); }
+[data-theme="dark"] .g-card-pink   { background: linear-gradient(160deg, #4A3A42, #3F3038); }
+[data-theme="dark"] .g-card-yellow { background: linear-gradient(160deg, #4E4634, #423B2C); }
+[data-theme="dark"] .g-card-purple { background: linear-gradient(160deg, #413C50, #363145); }
+[data-theme="dark"] .g-card-green  { background: linear-gradient(160deg, #35463A, #2C3B31); }
+[data-theme="dark"] .g-card-orange { background: linear-gradient(160deg, #4E3F33, #42352A); }
+[data-theme="dark"] .g-card-mint   { background: linear-gradient(160deg, #31464A, #293B3F); }
+[data-theme="dark"] .g-content { color: var(--text); }
+[data-theme="dark"] .g-meta { color: rgba(245, 239, 230, 0.55); border-top-color: rgba(245, 239, 230, 0.16); }
+[data-theme="dark"] .g-card { border-color: rgba(255, 255, 255, 0.08); }
+
+/* 移动端：便签两列、表单更紧凑 */
+@media (max-width: 640px) {
+  .g-board-inner { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .guestbook-board { padding: 18px 14px; }
+  .guestbook-form { padding: 16px 14px; }
+}
