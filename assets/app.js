@@ -11,6 +11,7 @@
     archive: document.querySelector(".view-archive"),
     about: document.querySelector(".view-about"),
     member: document.querySelector(".view-member"),
+    guestbook: document.querySelector(".view-guestbook"),
     post: document.querySelector(".view-post"),
     compose: document.querySelector(".view-compose"),
   };
