@@ -8,7 +8,9 @@ import { verifyTurnstile } from "./_lib/turnstile.js";
 const MAX_NAME = 20;
 const MAX_CONTENT = 200;
 const COLORS = ["blue", "pink", "yellow", "purple", "green", "orange", "mint"];
-const LIMIT = 200;            // 单次返回最多 200 条（按 created_at DESC）
+const LIMIT = 200;            // 兼容旧值
+const PAGE_SIZE = 50;         // 分页默认页大小（优化 #6）
+const MAX_PAGE_SIZE = 100;    // 单页上限，防止前端传过大
 const DAILY_LIMIT = 5;        // 每天每 IP 最多 5 条
 
 // 用 SHA-256(IP + secret) 哈希，不存原 IP（隐私）
@@ -88,9 +90,31 @@ export async function onRequestGet({ env, request }) {
   } catch (_) {}
 
   try {
-    const { results } = await env.BLOG_DB.prepare(
-      "SELECT id, name, content, color, created_at FROM guestbook_notes ORDER BY created_at DESC, id DESC LIMIT ?"
-    ).bind(LIMIT).all();
+    // 分页参数：默认 50/页，上限 100/页（优化 #6）
+    //   ?limit=N      每页条数
+    //   ?before=...   created_at 游标（"YYYY-MM-DD HH:MM"）
+    //   ?before_id=N  同时间戳时的 id 游标
+    const url = new URL(request.url);
+    const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(url.searchParams.get("limit") || PAGE_SIZE)));
+    const before = url.searchParams.get("before");
+    const beforeId = Math.max(0, Number(url.searchParams.get("before_id") || 0));
+    const useCursor = !!(before && beforeId);
+
+    let query, bind;
+    if (useCursor) {
+      // 严格小于 (created_at, id) 的元组（按 desc 取下一页）
+      query = "SELECT id, name, content, color, created_at FROM guestbook_notes WHERE (created_at < ?) OR (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?";
+      bind = [before, before, beforeId, limit + 1];
+    } else {
+      query = "SELECT id, name, content, color, created_at FROM guestbook_notes ORDER BY created_at DESC, id DESC LIMIT ?";
+      bind = [limit + 1];
+    }
+    const { results } = await env.BLOG_DB.prepare(query).bind(...bind).all();
+    const hasMore = results.length > limit;
+    const page = hasMore ? results.slice(0, limit) : results;
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last ? { before: last.created_at, before_id: last.id } : null;
+
     // 顶部统计：总数 + 连续打卡天数
     let total = 0;
     let streak = 0;
@@ -104,7 +128,7 @@ export async function onRequestGet({ env, request }) {
     } catch (_) { /* 统计失败不影响便签展示 */ }
 
     const turnstileSiteKey = env.TURNSTILE_SITE_KEY || null;
-    const body = JSON.stringify({ ok: true, notes: results, canDelete, total, streak, turnstileSiteKey });
+    const body = JSON.stringify({ ok: true, notes: page, canDelete, total, streak, turnstileSiteKey, hasMore, nextCursor });
     const response = new Response(body, {
       status: 200,
       headers: {

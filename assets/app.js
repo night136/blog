@@ -805,6 +805,10 @@
   let turnstileSiteKey = null;   // 后端下发，未配置时不启用
   let turnstileWidgetId = null;  // 留言墙 Turnstile widget 实例 id
   let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
+  let guestNextCursor = null;    // 下一页游标 { before, before_id }
+  let guestHasMore = false;      // 是否还有更早的便签
+  let guestbookMineIds = new Set(); // 本机（localStorage）记录自己写过的便签 id（优化 #7）
+  const MINE_LS_KEY = "guestbook_mine";
 
   // 与后端保持一致的色板（前端也用一份作为兜底）
   const GB_G_ICON = { blue: "🌸", pink: "💗", yellow: "⭐", purple: "🌙", green: "🌿", orange: "🍂", mint: "❄️" };
@@ -819,8 +823,10 @@
   function buildGuestCard(n) {
     const canDel = guestbookCanDelete;
     const icon = GB_G_ICON[n.color] || "🌷";
-    return `<article class="g-card g-card-${escapeHtml(n.color)}" data-id="${n.id}">
+    const mine = guestbookMineIds.has(Number(n.id));
+    return `<article class="g-card g-card-${escapeHtml(n.color)}${mine ? " g-mine" : ""}" data-id="${n.id}">
       <span class="g-pin" aria-hidden="true"></span>
+      ${mine ? `<span class="g-mine-badge" title="这是你写过的便签">我的</span>` : ""}
       <div class="g-content">${escapeHtml(n.content)}</div>
       <div class="g-meta">
         <span class="g-icon">${icon}</span>
@@ -829,6 +835,35 @@
       </div>
       ${canDel ? `<button class="g-del" type="button" data-del="${n.id}" aria-label="删除便签">×</button>` : ""}
     </article>`;
+  }
+
+  // ===== 优化 #7：「我的便签」本地记忆 =====
+  // 用 localStorage 记住自己写过的便签 id，渲染时显示小徽章。
+  // 失败（隐私模式 / quota）静默：徽章本来就是锦上添花。
+  function loadMineIds() {
+    try {
+      const raw = localStorage.getItem(MINE_LS_KEY);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) guestbookMineIds = new Set(arr.map(Number).filter(Number.isFinite));
+    } catch (_) { /* 忽略：隐私模式 / 损坏数据 */ }
+  }
+  function saveMineIds() {
+    try { localStorage.setItem(MINE_LS_KEY, JSON.stringify(Array.from(guestbookMineIds))); }
+    catch (_) { /* 忽略：隐私模式 / quota */ }
+  }
+  function addMineId(id) {
+    const n = Number(id);
+    if (!Number.isFinite(n)) return;
+    if (guestbookMineIds.has(n)) return;
+    guestbookMineIds.add(n);
+    saveMineIds();
+  }
+  function removeMineId(id) {
+    const n = Number(id);
+    if (!guestbookMineIds.has(n)) return;
+    guestbookMineIds.delete(n);
+    saveMineIds();
   }
 
   // UTC+8 下的"今天 / N 天前"，格式 YYYY-MM-DD
@@ -867,15 +902,24 @@
     box.hidden = false;
   }
 
-  function renderGuestbook(notes) {
+  function renderGuestbook(notes, opts) {
     const board = $("guestbookBoard");
     if (!board) return;
+    const append = !!(opts && opts.append);
     if (!notes || !notes.length) {
-      board.innerHTML = `<p style="color:var(--text-faint);text-align:center;padding:32px 0">还没有便签 —— 来写第一张吧 ☕️</p>`;
+      if (!append) board.innerHTML = `<p style="color:var(--text-faint);text-align:center;padding:32px 0">还没有便签 —— 来写第一张吧 ☕️</p>`;
       return;
     }
+    // 追加时去掉可能存在的"还没有便签"占位
+    if (append) {
+      const placeholder = board.querySelector("p");
+      if (placeholder) placeholder.remove();
+      // 去掉"加载更多"按钮区域，准备重建
+      const more = board.querySelector(".g-load-more");
+      if (more) more.remove();
+    }
     const groups = groupNotesByDate(notes);
-    board.innerHTML = groups
+    const html = groups
       .map(
         (g) => `
         <div class="g-group" data-date="${escapeHtml(g.date)}">
@@ -888,7 +932,63 @@
       `
       )
       .join("");
-    bindGuestDeletes(board);
+    if (append) {
+      // 追加分组：相同日期的合并到现有 group，其他新建
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      tmp.querySelectorAll(".g-group").forEach((g) => {
+        const date = g.dataset.date;
+        const exist = board.querySelector(`.g-group[data-date="${date}"]`);
+        if (exist) {
+          // 把新卡片追加到现有 inner，更新计数
+          const inner = exist.querySelector(".g-board-inner");
+          const newCards = g.querySelector(".g-board-inner").innerHTML;
+          inner.insertAdjacentHTML("beforeend", newCards);
+          const cnt = exist.querySelector(".g-group-count");
+          if (cnt) cnt.textContent = `${inner.querySelectorAll(".g-card").length} 张`;
+          bindGuestDeletes(inner);
+        } else {
+          // 新日期：插到尾部（但要避开"加载更多"占位；前面已 remove）
+          board.appendChild(g);
+          bindGuestDeletes(g);
+        }
+      });
+    } else {
+      board.innerHTML = html;
+      bindGuestDeletes(board);
+    }
+    // "加载更多" 按钮
+    if (guestHasMore) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "g-load-more";
+      btn.innerHTML = "📜 加载更早的便签";
+      btn.addEventListener("click", loadMoreGuestbook);
+      board.appendChild(btn);
+    }
+  }
+
+  // 优化 #6：分页加载更多（按游标）
+  async function loadMoreGuestbook() {
+    if (!guestNextCursor || !guestHasMore) return;
+    const board = $("guestbookBoard");
+    const btn = board && board.querySelector(".g-load-more");
+    if (btn) { btn.disabled = true; btn.textContent = "加载中…"; }
+    try {
+      const u = new URL("/api/guestbook", location.origin);
+      u.searchParams.set("limit", "50");
+      u.searchParams.set("before", guestNextCursor.before);
+      u.searchParams.set("before_id", String(guestNextCursor.before_id));
+      const res = await fetch(u.pathname + u.search, { credentials: "same-origin" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+      guestNextCursor = data.nextCursor || null;
+      guestHasMore = !!data.hasMore;
+      renderGuestbook(data.notes || [], { append: true });
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = "📜 加载更早的便签"; }
+      alert("加载失败：" + (e.message || "网络错误"));
+    }
   }
 
   function bindGuestDeletes(board) {
@@ -907,7 +1007,11 @@
             body: JSON.stringify({ id }),
           });
           const data = await res.json();
-          if (data.ok) { if (card) card.remove(); }
+          if (data.ok) {
+            if (card) card.remove();
+            // 如果删除的是本机"我的便签"，从本地记忆移除
+            if (guestbookMineIds.has(id)) removeMineId(id);
+          }
           else alert(data.error || "删除失败");
         } catch (_) { alert("网络错误"); }
       });
@@ -976,6 +1080,7 @@
 
   async function loadGuestbook() {
     if (guestbookLoaded) return;
+    loadMineIds();
     const sk = $("guestbookSkeleton");
     if (sk) sk.innerHTML = '<div class="sk-card g-sk"></div>'.repeat(6);
     try {
@@ -984,6 +1089,8 @@
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       guestbookCanDelete = !!data.canDelete;
       turnstileSiteKey = data.turnstileSiteKey || null;
+      guestNextCursor = data.nextCursor || null;
+      guestHasMore = !!data.hasMore;
       renderGuestbook(data.notes || []);
       renderGuestStats(data.total, data.streak);
       renderTurnstile();
@@ -1005,6 +1112,30 @@
 
     if (content && counter) {
       content.addEventListener("input", () => { counter.textContent = `${content.value.length} / 200`; });
+    }
+    // 优化 #8：emoji 快捷插入
+    const emojiBar = $("guestbookEmoji");
+    function insertAtCursor(text) {
+      if (!content) return;
+      content.focus();
+      const max = content.maxLength > 0 ? content.maxLength : 200;
+      const start = content.selectionStart || 0;
+      const end = content.selectionEnd || 0;
+      const before = content.value.slice(0, start);
+      const after = content.value.slice(end);
+      const merged = (before + text + after);
+      content.value = merged.slice(0, max);
+      const pos = Math.min(start + text.length, content.value.length);
+      content.setSelectionRange(pos, pos);
+      content.dispatchEvent(new Event("input"));
+    }
+    if (emojiBar) {
+      emojiBar.addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-emoji]");
+        if (!b) return;
+        e.preventDefault();
+        insertAtCursor(b.dataset.emoji || "");
+      });
     }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1032,6 +1163,8 @@
         });
         const data = await res.json();
         if (data.ok && data.note) {
+          // 标记为「我的便签」，渲染徽章
+          addMineId(data.note.id);
           // 立即把新便签插到「今天」这一组最前面（无需刷新）
           const board = $("guestbookBoard");
           if (board) {

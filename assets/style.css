@@ -1142,6 +1142,53 @@ body.lightbox-open { overflow: hidden; }
 /* 注册表单内的人机验证（与留言墙共用同一个 Site Key） */
 .auth-turnstile { margin: 2px 0; min-height: 65px; display: flex; justify-content: center; }
 .auth-turnstile[hidden] { display: none; }
+
+/* 优化 #8：便签输入框下方的 emoji 快捷栏 */
+.guestbook-emoji {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 2px 0;
+}
+.guestbook-emoji button {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; font-size: 18px; line-height: 1;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.guestbook-emoji button:hover { transform: translateY(-2px); background: var(--surface-2); border-color: var(--accent); }
+.guestbook-emoji button:active { transform: translateY(0) scale(.94); }
+
+/* 优化 #6：分页加载更多按钮 */
+.g-load-more {
+  display: block; width: 100%; margin: 18px 0 4px;
+  padding: 11px 16px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+  font-family: inherit; font-size: 14px;
+  cursor: pointer;
+  transition: background .18s, color .18s, border-color .18s, transform .18s;
+}
+.g-load-more:hover { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); border-style: solid; transform: translateY(-1px); }
+.g-load-more:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+/* 优化 #7：「我的便签」徽章 */
+.g-mine-badge {
+  position: absolute; top: 8px; right: 10px;
+  padding: 2px 8px;
+  font-size: 11px; font-weight: 700; letter-spacing: .4px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  z-index: 2;
+}
+.g-card.g-mine { box-shadow: 0 6px 16px rgba(232, 155, 76, .18), var(--shadow-sm); }
+[data-theme="dark"] .g-mine-badge { color: var(--accent); border-color: rgba(232, 155, 76, .55); }
+
 .guestbook-count { font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .guestbook-form .btn-publish {
   padding: 10px 20px;
