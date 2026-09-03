@@ -68,6 +68,10 @@
   let currentSlide = 0, totalSlides = 0, slideTimer = null, hoverPaused = false;
   let searchQuery = "";
   let tocScrollHandler = null;
+  // 当前登录用户（含 username），用于判断楼主 / 留言墙署名。
+  // 注意：必须在此处声明（IIFE 顶部），否则 bindGuestbookForm() 等早期执行的代码
+  // 会因 let 的暂时性死区（TDZ）抛 ReferenceError，中断整个脚本初始化。
+  let currentUser = null;
   let sessionReady = false;       // 会话已校验过则不再每次打开文章都请求 /api/me
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
@@ -1480,7 +1484,7 @@
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====
-  let currentUser = null;        // 当前登录用户（含 username），用于判断楼主
+  // currentUser 已在 IIFE 顶部声明（避免 TDZ），此处不再重复声明
   let currentPostAuthor = "";    // 当前打开文章的作者
   let currentSlug = "";          // 当前打开文章的 slug
   let currentPost = null;        // 当前打开文章的完整数据（用于编辑）
