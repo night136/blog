@@ -1,5 +1,6 @@
 // 注册：POST /api/register
 import { hashPassword, json, sessionCookie, signJWT } from "./_lib/auth.js";
+import { verifyTurnstile, getClientIp } from "./_lib/turnstile.js";
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -14,6 +15,16 @@ export async function onRequestPost({ request, env }) {
     if (!username || !password) return json({ error: "用户名和密码必填" }, 400);
     if (username.length < 2 || username.length > 32) return json({ error: "用户名长度需 2–32 位" }, 400);
     if (password.length < 6) return json({ error: "密码至少 6 位" }, 400);
+
+    // Turnstile 人机验证（未配置 TURNSTILE_SECRET_KEY 时自动跳过）
+    const ts = await verifyTurnstile(
+      body.turnstileToken,
+      env.TURNSTILE_SECRET_KEY,
+      getClientIp(request)
+    );
+    if (!ts.success) {
+      return json({ error: ts.error || "人机验证失败，请重试" }, 403);
+    }
 
     // 检查用户名是否已存在
     const existing = await env.BLOG_DB.prepare(

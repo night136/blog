@@ -3,34 +3,13 @@
 //   POST ：公开创建便签 —— 校验长度、按 ip_hash 限频、随机分配颜色
 // 留言墙是公开功能（无需登录），但删除便签需要站长（复用 BLO_OWNER 机制）
 import { json, verifyJWT, getCookie, isOwner } from "./_lib/auth.js";
+import { verifyTurnstile } from "./_lib/turnstile.js";
 
 const MAX_NAME = 20;
 const MAX_CONTENT = 200;
 const COLORS = ["blue", "pink", "yellow", "purple", "green", "orange", "mint"];
 const LIMIT = 200;            // 单次返回最多 200 条（按 created_at DESC）
 const DAILY_LIMIT = 5;        // 每天每 IP 最多 5 条
-
-const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-async function verifyTurnstile(token, secret, remoteip) {
-  if (!secret) return { success: true }; // 未配置则跳过
-  if (!token) return { success: false, error: "请完成人机验证" };
-  const body = new URLSearchParams();
-  body.append("secret", secret);
-  body.append("response", token);
-  if (remoteip) body.append("remoteip", remoteip);
-  try {
-    const res = await fetch(TURNSTILE_VERIFY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    const json = await res.json();
-    return { success: json.success === true, error: json["error-codes"] ? json["error-codes"].join(", ") : null };
-  } catch (e) {
-    return { success: false, error: "验证服务不可用" };
-  }
-}
 
 // 用 SHA-256(IP + secret) 哈希，不存原 IP（隐私）
 async function hashIp(ip, secret) {

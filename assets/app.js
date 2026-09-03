@@ -803,7 +803,8 @@
   let guestbookLoaded = false;
   let guestbookCanDelete = false;
   let turnstileSiteKey = null;   // 后端下发，未配置时不启用
-  let turnstileWidgetId = null;  // Cloudflare Turnstile widget 实例 id
+  let turnstileWidgetId = null;  // 留言墙 Turnstile widget 实例 id
+  let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
 
   // 与后端保持一致的色板（前端也用一份作为兜底）
   const GB_G_ICON = { blue: "🌸", pink: "💗", yellow: "⭐", purple: "🌙", green: "🌿", orange: "🍂", mint: "❄️" };
@@ -938,6 +939,39 @@
     } catch (e) {
       console.error("Turnstile render failed", e);
     }
+  }
+
+  // 注册表单的 Turnstile widget（与留言墙共用同一个 Site Key）
+  function renderRegisterTurnstile() {
+    const container = $("registerTurnstile");
+    if (!container) return;
+    if (!turnstileSiteKey) { container.hidden = true; return; }
+    if (typeof window.turnstile === "undefined") return;
+    if (registerWidgetId) {
+      try { window.turnstile.reset(registerWidgetId); } catch (_) {}
+      return;
+    }
+    try {
+      registerWidgetId = window.turnstile.render(container, {
+        sitekey: turnstileSiteKey,
+        theme: "auto",
+        language: "zh-cn",
+        callback: () => { if (registerMsg) { registerMsg.textContent = ""; registerMsg.className = "form-msg"; } },
+      });
+    } catch (e) {
+      console.error("Turnstile render failed (register)", e);
+    }
+  }
+
+  // 拉取公开配置（仅 Turnstile Site Key，非密钥），成功后渲染各处 widget
+  async function loadTurnstileConfig() {
+    try {
+      const res = await fetch("/api/config", { credentials: "same-origin" });
+      const d = await res.json();
+      if (d && d.turnstileSiteKey) turnstileSiteKey = d.turnstileSiteKey;
+    } catch (_) { /* 配置拉取失败不阻塞页面 */ }
+    renderTurnstile();
+    renderRegisterTurnstile();
   }
 
   async function loadGuestbook() {
@@ -1283,8 +1317,9 @@
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
   bindGuestbookForm();
+  loadTurnstileConfig();
   if (window.turnstile && window.turnstile.ready) {
-    window.turnstile.ready(renderTurnstile);
+    window.turnstile.ready(() => { renderTurnstile(); renderRegisterTurnstile(); });
   }
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
@@ -1310,7 +1345,7 @@
   async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
   function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
   function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
-  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); }
+  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register" && typeof renderRegisterTurnstile === "function") renderRegisterTurnstile(); }
 
   // ===== 卡通角色互动 =====
   let charStateTimer = null;
@@ -1402,13 +1437,25 @@
     const fd = new FormData(registerForm);
     registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";
     setAuthState("loading");
+    const tsToken = (turnstileSiteKey && typeof window.turnstile !== "undefined") ? window.turnstile.getResponse(registerWidgetId) : null;
+    if (turnstileSiteKey && !tsToken) {
+      registerMsg.textContent = "请先完成人机验证"; registerMsg.className = "form-msg err";
+      triggerState("error", 2500);
+      return;
+    }
     try {
-      const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password") }) });
+      const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password"), turnstileToken: tsToken }) });
       const d = await r.json();
       if (!r.ok || !d.ok) {
         registerMsg.textContent = d.error || "注册失败"; registerMsg.className = "form-msg err";
         triggerState("error", 2500);
+        if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
+          try { window.turnstile.reset(registerWidgetId); } catch (_) {}
+        }
         return;
+      }
+      if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
+        try { window.turnstile.reset(registerWidgetId); } catch (_) {}
       }
       registerMsg.textContent = "✅ 注册成功，已登录";
       registerMsg.className = "form-msg ok";
