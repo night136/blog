@@ -1175,6 +1175,19 @@ body.lightbox-open { overflow: hidden; }
 .g-load-more:hover { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); border-style: solid; transform: translateY(-1px); }
 .g-load-more:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 
+/* 已登录时在「你的名字」栏位置显示的署名提示 */
+.guestbook-auth-hint {
+  margin: 0; padding: 10px 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 600;
+}
+.guestbook-auth-hint[hidden] { display: none; }
+.guestbook-name-wrap[hidden] { display: none; }
+
 /* 优化 #7：「我的便签」徽章 */
 .g-mine-badge {
   position: absolute; top: 8px; right: 10px;

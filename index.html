@@ -183,7 +183,10 @@
             <h3>写一张便签</h3>
           </div>
           <div class="guestbook-form-row">
-            <input name="guestName" id="guestName" type="text" placeholder="你的名字（可选）" maxlength="20" />
+            <div class="guestbook-name-wrap" id="guestNameWrap">
+              <input name="guestName" id="guestName" type="text" placeholder="你的名字（可选）" maxlength="20" />
+            </div>
+            <p class="guestbook-auth-hint" id="guestbookAuthHint" hidden></p>
             <textarea name="guestContent" id="guestContent" placeholder="写下你想说的话..." maxlength="200" rows="3" required></textarea>
             <div class="guestbook-emoji" id="guestbookEmoji" role="toolbar" aria-label="常用 emoji">
               <button type="button" data-emoji="🌸">🌸</button>

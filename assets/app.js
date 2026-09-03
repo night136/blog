@@ -808,6 +808,7 @@
   let guestNextCursor = null;    // 下一页游标 { before, before_id }
   let guestHasMore = false;      // 是否还有更早的便签
   let guestbookMineIds = new Set(); // 本机（localStorage）记录自己写过的便签 id（优化 #7）
+  let guestbookCurrentUser = null;  // 当前登录用户名（来自 /api/guestbook 返回；已登录则隐藏「你的名字」栏）
   const MINE_LS_KEY = "guestbook_mine";
 
   // 与后端保持一致的色板（前端也用一份作为兜底）
@@ -900,6 +901,26 @@
     if (t) t.textContent = String(total || 0);
     if (s) s.textContent = String(streak || 0);
     box.hidden = false;
+  }
+
+  // 已登录时隐藏「你的名字」栏并提示「以 X 署名」；未登录则反之。
+  // 由 bindGuestbookForm 初始化时 + setAuthUI 状态变更时调用，保证登录/登出即时同步。
+  function updateGuestbookAuthHint() {
+    const wrap = $("guestNameWrap");
+    const input = $("guestName");
+    const hint = $("guestbookAuthHint");
+    if (!wrap || !input || !hint) return;
+    const u = currentUser && currentUser.username ? currentUser.username : null;
+    if (u) {
+      wrap.hidden = true;
+      input.value = "";
+      hint.hidden = false;
+      hint.textContent = `将以「${u}」署名（已登录）`;
+    } else {
+      wrap.hidden = false;
+      hint.hidden = true;
+      hint.textContent = "";
+    }
   }
 
   function renderGuestbook(notes, opts) {
@@ -1109,6 +1130,7 @@
     const counter = $("guestbookCount");
     const submitBtn = $("guestSubmit");
     const msg = $("guestbookMsg");
+    updateGuestbookAuthHint(); // 初始化时按当前登录态显示/隐藏名字栏
 
     if (content && counter) {
       content.addEventListener("input", () => { counter.textContent = `${content.value.length} / 200`; });
@@ -1146,7 +1168,8 @@
       }
       // 提交前先记下「今天是否已有便签」，用于决定连续天数是否 +1
       const hadToday = !!document.querySelector(`.g-group[data-date="${gbTodayStr(0)}"]`);
-      const name = (($("guestName") || {}).value || "").trim();
+      // 已登录时用登录名；未登录才回退到输入框
+      const name = (currentUser && currentUser.username ? currentUser.username : ((($("guestName") || {}).value || "").trim()));
       if (msg) { msg.hidden = false; msg.textContent = "钉上中…"; msg.className = "guestbook-msg"; }
       if (submitBtn) submitBtn.disabled = true;
       const tsToken = (turnstileSiteKey && typeof window.turnstile !== "undefined") ? window.turnstile.getResponse(turnstileWidgetId) : null;
@@ -1474,6 +1497,7 @@
       if (userChip) userChip.hidden = true;
       if (publishBtnChip) publishBtnChip.hidden = true;
     }
+    if (typeof updateGuestbookAuthHint === "function") updateGuestbookAuthHint();
   }
   async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
   function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }

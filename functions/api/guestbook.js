@@ -128,7 +128,7 @@ export async function onRequestGet({ env, request }) {
     } catch (_) { /* 统计失败不影响便签展示 */ }
 
     const turnstileSiteKey = env.TURNSTILE_SITE_KEY || null;
-    const body = JSON.stringify({ ok: true, notes: page, canDelete, total, streak, turnstileSiteKey, hasMore, nextCursor });
+    const body = JSON.stringify({ ok: true, notes: page, canDelete, total, streak, turnstileSiteKey, hasMore, nextCursor, currentUser: username || null });
     const response = new Response(body, {
       status: 200,
       headers: {
@@ -151,7 +151,10 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "请求格式错误" }, 400);
   }
 
-  const name = ((body.name || "").toString().trim().slice(0, MAX_NAME)) || "匿名";
+  const username = await getCurrentUsername(request, env);
+  // 已登录用户：服务端强制用登录名（前端再隐藏「你的名字」栏，杜绝前端被改后伪造署名）
+  const inputName = ((body.name || "").toString().trim().slice(0, MAX_NAME)) || "";
+  const name = (username && username.trim().slice(0, MAX_NAME)) || inputName || "匿名";
   const contentRaw = (body.content || "").toString().trim();
   if (!contentRaw) return json({ ok: false, error: "便签内容不能为空" }, 400);
   if (contentRaw.length > MAX_CONTENT) {
