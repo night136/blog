@@ -10,6 +10,28 @@ const COLORS = ["blue", "pink", "yellow", "purple", "green", "orange", "mint"];
 const LIMIT = 200;            // 单次返回最多 200 条（按 created_at DESC）
 const DAILY_LIMIT = 5;        // 每天每 IP 最多 5 条
 
+const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+async function verifyTurnstile(token, secret, remoteip) {
+  if (!secret) return { success: true }; // 未配置则跳过
+  if (!token) return { success: false, error: "请完成人机验证" };
+  const body = new URLSearchParams();
+  body.append("secret", secret);
+  body.append("response", token);
+  if (remoteip) body.append("remoteip", remoteip);
+  try {
+    const res = await fetch(TURNSTILE_VERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const json = await res.json();
+    return { success: json.success === true, error: json["error-codes"] ? json["error-codes"].join(", ") : null };
+  } catch (e) {
+    return { success: false, error: "验证服务不可用" };
+  }
+}
+
 // 用 SHA-256(IP + secret) 哈希，不存原 IP（隐私）
 async function hashIp(ip, secret) {
   const data = new TextEncoder().encode((ip || "") + "|" + (secret || ""));
@@ -102,7 +124,8 @@ export async function onRequestGet({ env, request }) {
       streak = calcStreak((dRes.results || []).map((r) => r.d));
     } catch (_) { /* 统计失败不影响便签展示 */ }
 
-    const body = JSON.stringify({ ok: true, notes: results, canDelete, total, streak });
+    const turnstileSiteKey = env.TURNSTILE_SITE_KEY || null;
+    const body = JSON.stringify({ ok: true, notes: results, canDelete, total, streak, turnstileSiteKey });
     const response = new Response(body, {
       status: 200,
       headers: {
@@ -132,6 +155,16 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: `便签内容不能超过 ${MAX_CONTENT} 字` }, 400);
   }
   const content = contentRaw;
+
+  // Turnstile 人机验证（若配置了 SECRET）
+  const ts = await verifyTurnstile(
+    body.turnstileToken,
+    env.TURNSTILE_SECRET_KEY,
+    getIp(request)
+  );
+  if (!ts.success) {
+    return json({ ok: false, error: ts.error || "人机验证失败，请重试" }, 403);
+  }
 
   // 随机颜色（前端也会用同样的色板作为兜底）
   const color = COLORS[Math.floor(Math.random() * COLORS.length)];

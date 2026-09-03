@@ -186,6 +186,7 @@
             <input name="guestName" id="guestName" type="text" placeholder="你的名字（可选）" maxlength="20" />
             <textarea name="guestContent" id="guestContent" placeholder="写下你想说的话..." maxlength="200" rows="3" required></textarea>
           </div>
+          <div class="guestbook-turnstile" id="turnstileWidget"></div>
           <div class="guestbook-form-foot">
             <span class="guestbook-count" id="guestbookCount">0 / 200</span>
             <button type="submit" id="guestSubmit" class="btn-publish">📌 钉上便签</button>
@@ -414,6 +415,7 @@
     </div>
   </div>
 
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>

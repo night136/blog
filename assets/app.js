@@ -802,6 +802,8 @@
   // 设计：第一次进入视图才加载（lazy），之后用模块变量标记已加载；提交 / 删除均在前端即时更新，无需刷新。
   let guestbookLoaded = false;
   let guestbookCanDelete = false;
+  let turnstileSiteKey = null;   // 后端下发，未配置时不启用
+  let turnstileWidgetId = null;  // Cloudflare Turnstile widget 实例 id
 
   // 与后端保持一致的色板（前端也用一份作为兜底）
   const GB_G_ICON = { blue: "🌸", pink: "💗", yellow: "⭐", purple: "🌙", green: "🌿", orange: "🍂", mint: "❄️" };
@@ -911,6 +913,33 @@
     });
   }
 
+  function renderTurnstile() {
+    const container = $("turnstileWidget");
+    if (!container) return;
+    if (!turnstileSiteKey) { container.hidden = true; return; }
+    if (typeof window.turnstile === "undefined") {
+      // Turnstile 脚本还在加载，等脚本就绪事件自动触发
+      return;
+    }
+    if (turnstileWidgetId) {
+      window.turnstile.reset(turnstileWidgetId);
+      return;
+    }
+    try {
+      turnstileWidgetId = window.turnstile.render(container, {
+        sitekey: turnstileSiteKey,
+        theme: "auto",
+        language: "zh-cn",
+        callback: () => {
+          const msg = $("guestbookMsg");
+          if (msg) { msg.hidden = true; msg.textContent = ""; }
+        },
+      });
+    } catch (e) {
+      console.error("Turnstile render failed", e);
+    }
+  }
+
   async function loadGuestbook() {
     if (guestbookLoaded) return;
     const sk = $("guestbookSkeleton");
@@ -920,8 +949,10 @@
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       guestbookCanDelete = !!data.canDelete;
+      turnstileSiteKey = data.turnstileSiteKey || null;
       renderGuestbook(data.notes || []);
       renderGuestStats(data.total, data.streak);
+      renderTurnstile();
       guestbookLoaded = true;
     } catch (e) {
       const board = $("guestbookBoard");
@@ -953,11 +984,17 @@
       const name = (($("guestName") || {}).value || "").trim();
       if (msg) { msg.hidden = false; msg.textContent = "钉上中…"; msg.className = "guestbook-msg"; }
       if (submitBtn) submitBtn.disabled = true;
+      const tsToken = (turnstileSiteKey && typeof window.turnstile !== "undefined") ? window.turnstile.getResponse(turnstileWidgetId) : null;
+      if (turnstileSiteKey && !tsToken) {
+        if (msg) { msg.hidden = false; msg.textContent = "请先完成人机验证"; msg.className = "guestbook-msg err"; }
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
       try {
         const res = await fetch("/api/guestbook", {
           method: "POST", credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, content: text }),
+          body: JSON.stringify({ name, content: text, turnstileToken: tsToken }),
         });
         const data = await res.json();
         if (data.ok && data.note) {
@@ -995,8 +1032,14 @@
           const nameInput = $("guestName"); if (nameInput) nameInput.value = "";
           if (counter) counter.textContent = "0 / 200";
           if (msg) { msg.textContent = "✅ 已钉上"; msg.className = "guestbook-msg ok"; }
+          if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
+            try { window.turnstile.reset(turnstileWidgetId); } catch (_) {}
+          }
         } else {
           if (msg) { msg.textContent = data.error || "提交失败"; msg.className = "guestbook-msg err"; }
+          if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
+            try { window.turnstile.reset(turnstileWidgetId); } catch (_) {}
+          }
         }
       } catch (_) {
         if (msg) { msg.textContent = "网络错误"; msg.className = "guestbook-msg err"; }
@@ -1240,6 +1283,9 @@
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
   bindGuestbookForm();
+  if (window.turnstile && window.turnstile.ready) {
+    window.turnstile.ready(renderTurnstile);
+  }
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====
