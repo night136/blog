@@ -2,33 +2,34 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 
+# 静态资源：长缓存 + 后台再验证（stale-while-revalidate）。
+# 跨境网络抖动时浏览器直接命中本地缓存秒开，后台静默校验更新，
+# 避免「刷新后 JS 不跑 / 读不到缓存」的问题（pages.dev 在大陆无节点，每次强校验都会跨境重下）。
 /assets/*
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
-# 业务脚本/样式：部署后立即生效，避免每次都要强刷（no-cache = 每次向源校验，内容变化即返回新文件）
+# 业务脚本/样式：同上。改版后靠 stale-while-revalidate 后台更新，无需用户强刷。
 /assets/app.js
-  Cache-Control: no-cache
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
 /assets/style.css
-  Cache-Control: no-cache
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
 /content/*
-  Cache-Control: public, max-age=3600
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
 
-# 封面图：文件名带内容哈希（build.mjs 生成），换封面即换文件名，
-# 因此可以安全地设一年 immutable 缓存 —— 二次访问直接命中，不会卡住旧封面。
+# 封面图：文件名带内容哈希（build.mjs 生成），换封面即换文件名，一年 immutable。
 /generated/covers/*
   Cache-Control: public, max-age=31536000, immutable
 
-# 列表/详情快照：发布新文章后内容会变，必须每次回源校验（304 未变更成本极低），
-# 保证「发布后刷新就能看到」，同时避免用户看到陈旧列表。
+# 列表/详情快照：长缓存 + 后台再验证（SWR）。
+# 前端用 force-cache 即时读本地缓存秒开首屏；后台 /api/posts/meta 校验新鲜度并静默刷新最新文章。
 /generated/posts.json
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: public, max-age=300, stale-while-revalidate=86400
 
 /generated/posts/*
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: public, max-age=300, stale-while-revalidate=86400
 
-# 首页 HTML 外壳：每次回源校验，确保改版后立即生效，
-# 避免手机端长期缓存旧外壳（与前端 fetch no-store 双重保险）
+# 首页 HTML 外壳：SWR，跨境刷新也能秒开旧壳，后台校验更新（1 分钟内自更新，避免手机端长期缓存旧壳）。
 /
-  Cache-Control: no-cache
+  Cache-Control: public, max-age=60, stale-while-revalidate=86400

@@ -163,9 +163,19 @@
 
   // ===== 数据 =====
   // 动态列表：直查 D1 的 Function 接口（静态快照不可用或已过期时使用）
+  // 带超时与缓存策略的 JSON 请求：跨境网络慢/抖时快速失败并走降级路径，避免「正在加载」永久卡死。
+  async function fetchJSON(url, { cache = "no-store", timeout = 6000 } = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const res = await fetch(url, { credentials: "same-origin", cache, signal: ctrl.signal });
+      if (!res.ok) throw new Error(url + " " + res.status);
+      return res;
+    } finally { clearTimeout(timer); }
+  }
+
   async function fetchDynamicPosts() {
-    const res = await fetch("/api/posts", { credentials: "same-origin", cache: "no-store" });
-    if (!res.ok) throw new Error("list " + res.status);
+    const res = await fetchJSON("/api/posts", { cache: "no-store", timeout: 6000 });
     const data = await res.json();
     if (!data.ok) throw new Error("bad list");
     return data.posts || [];
@@ -185,8 +195,7 @@
       return;
     }
     try {
-      const r = await fetch("/api/posts/meta", { credentials: "same-origin", cache: "no-store" });
-      if (!r.ok) return;
+      const r = await fetchJSON("/api/posts/meta", { cache: "no-store", timeout: 5000 });
       const d = await r.json();
       if (!d || !d.ok) return;
       const stale =
@@ -197,10 +206,12 @@
   }
 
   async function fetchAllPosts() {
-    // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成，命中即秒回）；
-    // 用 cache:"no-cache" 让浏览器能读本地缓存，同时发条件请求校验；304 时回退动态接口。
+    // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成）。
+    // 用 cache:"force-cache" 让浏览器直接命中本地缓存秒开首屏（跨境刷新也不依赖网络）；
+    // 后台再由 verifyStaticFreshness 用 /api/posts/meta 校验新鲜度并静默补最新文章。
+    // 304（本地缓存有效、响应体为空）也视为命中、安全回退动态接口，避免白屏。
     try {
-      const sres = await fetch("/generated/posts.json", { credentials: "same-origin", cache: "no-cache" });
+      const sres = await fetchJSON("/generated/posts.json", { cache: "force-cache", timeout: 8000 });
       // 304 表示本地缓存的静态快照仍有效（但响应体为空），此时回退动态接口；
       // 200 则正常解析。两者都视为「静态命中」，避免把 304 误判为失败导致白屏。
       if (sres.ok || sres.status === 304) {
@@ -375,7 +386,7 @@
         // 静态预渲染优先：CDN 直读 /generated/posts/<slug>.json（含 body，秒回）；
         // 缺失/失败则降级到 Function 动态接口。
         try {
-          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin", cache: "no-cache" });
+          const sres = await fetchJSON(`/generated/posts/${encodeURIComponent(slug)}.json`, { cache: "force-cache", timeout: 8000 });
           // 304 视为静态命中（无 body），回退下方动态接口；200 正常解析
           if (sres.ok || sres.status === 304) {
             if (sres.ok) {
@@ -817,10 +828,27 @@
   async function loadPosts() {
     cardGrid.innerHTML = Array.from({ length: 4 }).map(() => '<div class="sk-card"><div class="sk-cover skeleton"></div><div class="sk-line skeleton"></div><div class="sk-line short skeleton"></div></div>').join("");
     if (sliderEl) sliderEl.style.display = "block";
+    // 看门狗：跨境网络极端抖动导致 8s 仍未返回时，提示手动重试，而非永久停留在「正在加载」
+    const watchdog = setTimeout(() => {
+      if (!posts || !posts.length) {
+        cardGrid.innerHTML = `<p style="color:var(--text-faint)">加载较慢，可能是跨境网络延迟。<button id="retryPosts" style="margin-left:8px;cursor:pointer">重试</button></p>`;
+        const btn = document.getElementById("retryPosts");
+        if (btn) btn.addEventListener("click", loadPosts);
+      }
+    }, 8000);
     try {
-      posts = (await fetchAllPosts()).map((p) => ({ ...p, summary: p.summary || (p.title || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
-    } catch (e) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${e.message}</p>`; if (sliderEl) sliderEl.style.display = "none"; return; }
-    if (!posts.length) { cardGrid.innerHTML = `<p style="color:var(--text-faint)">暂无文章。</p>`; return; }
+      const list = await fetchAllPosts();
+      clearTimeout(watchdog);
+      posts = list.map((p) => ({ ...p, summary: p.summary || (p.title || "").replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim() }));
+    } catch (e) {
+      clearTimeout(watchdog);
+      cardGrid.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${e.message}<button id="retryPosts" style="margin-left:8px;cursor:pointer">重试</button></p>`;
+      if (sliderEl) sliderEl.style.display = "none";
+      const btn = document.getElementById("retryPosts");
+      if (btn) btn.addEventListener("click", loadPosts);
+      return;
+    }
+    if (!posts.length) { clearTimeout(watchdog); cardGrid.innerHTML = `<p style="color:var(--text-faint)">暂无文章。</p>`; return; }
     renderSlider(); renderFilters(); renderCards(); renderArchive(); renderWidgets();
   }
 
@@ -1878,6 +1906,13 @@
     }
     setTimeout(inject, 0);
   })();
+  // 兜底：若 5s 后农历库仍未加载（极端跨境抖动），把挂件从「加载中」降级为「—」，不再永久卡住
+  setTimeout(() => {
+    if (typeof Lunar === "undefined") {
+      const el = document.getElementById("lunarClock");
+      if (el && /加载中/.test(el.textContent)) el.textContent = "—";
+    }
+  }, 5000);
   bindInputStates();
   checkSession();
   loadPosts();
