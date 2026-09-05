@@ -195,17 +195,21 @@
     // 缺失/失败则降级到 Function 动态接口。两种方式返回结构一致。
     try {
       const sres = await fetch("/generated/posts.json", { credentials: "same-origin", cache: "no-store" });
-      if (sres.ok) {
-        const sd = await sres.json();
-        if (sd && sd.ok && Array.isArray(sd.posts)) {
-          // 先用静态列表秒开首屏，再后台校验快照是否过期；有新文章则静默补上
-          verifyStaticFreshness({ count: sd.count, latest: sd.latest }, async () => {
-            try {
-              const fresh = await fetchDynamicPosts();
-              if (fresh && fresh.length) refreshHomeList(fresh);
-            } catch (_) {}
-          });
-          return sd.posts;
+      // 304 表示本地缓存的静态快照仍有效（但响应体为空），此时回退动态接口；
+      // 200 则正常解析。两者都视为「静态命中」，避免把 304 误判为失败导致白屏。
+      if (sres.ok || sres.status === 304) {
+        if (sres.ok) {
+          const sd = await sres.json();
+          if (sd && sd.ok && Array.isArray(sd.posts)) {
+            // 先用静态列表秒开首屏，再后台校验快照是否过期；有新文章则静默补上
+            verifyStaticFreshness({ count: sd.count, latest: sd.latest }, async () => {
+              try {
+                const fresh = await fetchDynamicPosts();
+                if (fresh && fresh.length) refreshHomeList(fresh);
+              } catch (_) {}
+            });
+            return sd.posts;
+          }
         }
       }
     } catch (_) {}
@@ -366,9 +370,12 @@
         // 缺失/失败则降级到 Function 动态接口。
         try {
           const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin", cache: "no-store" });
-          if (sres.ok) {
-            const sd = await sres.json();
-            if (sd && sd.ok && sd.post) { post = sd.post; fromStatic = true; }
+          // 304 视为静态命中（无 body），回退下方动态接口；200 正常解析
+          if (sres.ok || sres.status === 304) {
+            if (sres.ok) {
+              const sd = await sres.json();
+              if (sd && sd.ok && sd.post) { post = sd.post; fromStatic = true; }
+            }
           }
         } catch (_) {}
         if (!post) {
