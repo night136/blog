@@ -163,7 +163,9 @@
 
   function formatDate(d) { const [y, m, day] = d.split("-"); return `${y}年${Number(m)}月${Number(day)}日`; }
   function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},46%,68%), hsl(${(h + 38) % 360},44%,54%))`; }
-  function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${gradFor(p.title)};`; }
+  // 无封面卡片统一奶油玻璃底色（不用 gradFor 彩色，避免"色块"感）
+  function glassBg(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; const t = 20 + (h % 2) * 8; return `linear-gradient(135deg, hsl(${h},${t}%,92%), hsl(${(h + 30) % 360},${t}%,86%))`; }
+  function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${glassBg(p.title)};`; }
 
   // ===== 数据 =====
   // 动态列表：直查 D1 的 Function 接口（静态快照不可用或已过期时使用）
@@ -280,7 +282,7 @@
   function cardHtml(p, i) {
     return `
       <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${escapeHtml(p.slug)}">
-        <div class="card-cover ${p.cover ? "" : "no-img"}" style="background:${gradFor(p.title)};">
+        <div class="card-cover ${p.cover ? "" : "no-img"}" style="background:${p.cover ? "" : glassBg(p.title)};">
           ${p.cover ? `<img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt="">` : `<div class="cover-empty" aria-hidden="true"></div>`}
         </div>
         <div class="card-body">
