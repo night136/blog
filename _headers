@@ -27,3 +27,8 @@
 
 /generated/posts/*
   Cache-Control: public, max-age=0, must-revalidate
+
+# 首页 HTML 外壳：每次回源校验，确保改版后立即生效，
+# 避免手机端长期缓存旧外壳（与前端 fetch no-store 双重保险）
+/
+  Cache-Control: no-cache
