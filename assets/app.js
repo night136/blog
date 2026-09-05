@@ -280,11 +280,14 @@
   const PAGE_SIZE = 9;
 
   function cardHtml(p, i) {
+    const hasCover = !!p.cover;
+    const cls = [i === 0 ? "feature" : i === 1 ? "wide" : "", hasCover ? "" : "no-cover"].filter(Boolean).join(" ");
+    const cover = hasCover
+      ? `<div class="card-cover"><img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt=""></div>`
+      : "";
     return `
-      <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${escapeHtml(p.slug)}">
-        <div class="card-cover ${p.cover ? "" : "no-img"}" style="background:${p.cover ? "" : glassBg()};">
-          ${p.cover ? `<img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt="">` : `<div class="cover-empty" aria-hidden="true"></div>`}
-        </div>
+      <article class="card ${cls}" data-slug="${escapeHtml(p.slug)}">
+        ${cover}
         <div class="card-body">
           <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
           <h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.summary || "")}</p>
