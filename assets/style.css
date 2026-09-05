@@ -420,7 +420,7 @@ body.lightbox-open { overflow: hidden; }
 /* 无封面轮播图：背景是奶油色，用浅色玻璃卡 + 深色文字，避免褐色块 */
 .slide.no-cover .slide-overlay { background: rgba(255,255,255,.46); color: var(--text); border-color: rgba(255,255,255,.72); box-shadow: 0 14px 40px rgba(0,0,0,.12); }
 .slide.no-cover .slide-tag { background: rgba(255,255,255,.58); color: var(--text); border-color: rgba(255,255,255,.85); }
-.slide.no-cover .slide-title { color: var(--text); text-shadow: none; }
+.slide.no-cover .slide-title { color: var(--text); text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .slide.no-cover .slide-summary { color: var(--text-soft); opacity: 1; text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .slide.no-cover .slide-read { background: rgba(255,255,255,.54); color: var(--text); border-color: rgba(255,255,255,.82); }
 .slide.no-cover .slide-read:hover { background: rgba(255,255,255,.72); }
