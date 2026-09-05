@@ -421,12 +421,12 @@ body.lightbox-open { overflow: hidden; }
 .slide.no-cover .slide-overlay { background: rgba(255,255,255,.46); color: var(--text); border-color: rgba(255,255,255,.72); box-shadow: 0 14px 40px rgba(0,0,0,.12); }
 .slide.no-cover .slide-tag { background: rgba(255,255,255,.58); color: var(--text); border-color: rgba(255,255,255,.85); }
 .slide.no-cover .slide-title { color: var(--text); text-shadow: none; }
-.slide.no-cover .slide-summary { color: var(--text-soft); opacity: 1; }
+.slide.no-cover .slide-summary { color: var(--text-soft); opacity: 1; text-shadow: none; }
 .slide.no-cover .slide-read { background: rgba(255,255,255,.54); color: var(--text); border-color: rgba(255,255,255,.82); }
 .slide.no-cover .slide-read:hover { background: rgba(255,255,255,.72); }
 .slide-tag { display: inline-block; background: rgba(255,255,255,.20); color: #fff; padding: 4px 13px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 12px; border: 1px solid rgba(255,255,255,.30); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .slide-title { font-size: 27px; font-weight: 900; letter-spacing: .5px; margin-bottom: 8px; text-shadow: 0 1px 4px rgba(0,0,0,.35), 0 2px 16px rgba(0,0,0,.45); }
-.slide-summary { font-size: 15px; max-width: 540px; opacity: .95; margin-bottom: 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.slide-summary { font-size: 15px; max-width: 540px; opacity: .95; margin-bottom: 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .slide-read { background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.55); cursor: pointer; padding: 9px 20px; border-radius: 999px; font-size: 14px; font-weight: 700; transition: background .15s, transform .15s; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 .slide-read:hover { background: rgba(255,255,255,.26); transform: translateX(3px); }
 .slider-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border-radius: 50%; border: none; cursor: pointer; background: rgba(255,251,247,.92); color: var(--text); font-size: 22px; line-height: 1; display: grid; place-items: center; box-shadow: var(--shadow-sm); transition: background .15s; }
