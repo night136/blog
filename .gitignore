@@ -13,3 +13,8 @@ dist/
 
 # 静态预渲染构建产物（由 build.mjs 在 Cloudflare Pages 构建时生成，不入库）
 /generated/
+
+# 资源内容哈希副本（build.mjs 生成，文件名带 sha256 前缀；源文件 app.js/style.css/vendor/lunar.js 不受影响）
+/assets/app.*.js
+/assets/style.*.css
+/assets/vendor/lunar.*.js

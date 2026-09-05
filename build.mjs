@@ -3,7 +3,7 @@
 //   generated/posts.json              → 列表（不含 body）
 //   generated/posts/<slug>.json       → 单篇详情（含 body）
 // 容错：任何异常都不抛出，保证 Pages 部署不因构建失败而中断；前端在静态缺失时降级到 Function。
-import { mkdirSync, writeFileSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, readFileSync, copyFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -103,6 +103,42 @@ function publicDetail(row) {
   };
 }
 
+// 资源内容哈希化：给 app.js / style.css / vendor/lunar.js 加「内容哈希」文件名。
+// 部署后文件名随内容变化而变 → 浏览器视为全新资源自动拉取，无需手动硬刷新/清缓存。
+// 失败仅 warn 不影响部署（前端仍可正常降级到未哈希的旧路径语义）。
+function hashAssets() {
+  const assetsDir = join(__dirname, "assets");
+  // 返回「带 assets/ 前缀的相对路径」，便于直接替换 index.html 与 app.js 内部引用
+  function hashCopy(relPath) {
+    const abs = join(assetsDir, relPath);
+    const buf = readFileSync(abs);
+    const h = createHash("sha256").update(buf).digest("hex").slice(0, 10);
+    const dot = relPath.lastIndexOf(".");
+    const hashedRel = relPath.slice(0, dot) + "." + h + relPath.slice(dot);
+    // 保留原文件作兜底，新增一份哈希副本（部署后旧哈希文件仍在 CDN，不会出现 404）
+    copyFileSync(abs, join(assetsDir, hashedRel));
+    return "assets/" + hashedRel;
+  }
+  // 1) lunar 先哈希：app.js 内部动态引用它，需先拿到哈希名
+  const lunarHashed = hashCopy("vendor/lunar.js");
+  // 2) app.js：把内部 lunar 引用替换为哈希名，再对自身内容哈希
+  const appAbs = join(assetsDir, "app.js");
+  let appSrc = readFileSync(appAbs, "utf8");
+  appSrc = appSrc.split("assets/vendor/lunar.js").join(lunarHashed);
+  const appH = createHash("sha256").update(appSrc).digest("hex").slice(0, 10);
+  const appName = `assets/app.${appH}.js`;
+  writeFileSync(join(assetsDir, `app.${appH}.js`), appSrc);
+  // 3) style.css
+  const styleHashed = hashCopy("style.css");
+  // 4) 最后一步改写 index.html 引用（务必等上述全部成功后再动 html，避免半残状态）
+  const htmlAbs = join(__dirname, "index.html");
+  let html = readFileSync(htmlAbs, "utf8");
+  html = html.split("assets/app.js").join(appName);
+  html = html.split("assets/style.css").join(styleHashed);
+  writeFileSync(htmlAbs, html);
+  console.log(`[build] 资源哈希化完成 → app:${appName}, style:${styleHashed}, lunar:${lunarHashed}`);
+}
+
 async function main() {
   if (!ACCOUNT || !DB || !TOKEN) {
     console.warn("[build] 未配置 CF_ACCOUNT_ID / CF_DATABASE_ID / CF_API_TOKEN，跳过静态生成；前端将降级到 Function。");
@@ -144,7 +180,17 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  // 构建失败不应中断部署：前端会降级到 Function
-  console.warn("[build] 静态生成失败，已忽略（前端降级到 Function）：", e && e.message ? e.message : e);
-});
+main()
+  .catch((e) => {
+    // 构建失败不应中断部署：前端会降级到 Function
+    console.warn("[build] 静态生成失败，已忽略（前端降级到 Function）：", e && e.message ? e.message : e);
+  })
+  .finally(() => {
+    // 资源哈希化独立于静态 JSON：无论 D1 是否可用都执行，失败仅 warn 不影响部署。
+    // 放在 finally，保证「Deploy latest」每次都重新计算哈希、产出带新文件名的 index.html。
+    try {
+      hashAssets();
+    } catch (e) {
+      console.warn("[build] 资源哈希化失败(已忽略)：", e && e.message ? e.message : e);
+    }
+  });
