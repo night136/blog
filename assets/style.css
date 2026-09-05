@@ -148,9 +148,9 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 34px; }
 .avatar {
   width: 52px; height: 52px; border-radius: var(--radius-xs);
-  background: linear-gradient(135deg, #E89B4C 0%, #F5C687 100%);
-  color: #fff; font-size: 22px; font-weight: 800;
-  display: grid; place-items: center; box-shadow: var(--shadow-sm);
+  object-fit: cover;
+  background: transparent;
+  display: block; box-shadow: var(--shadow-sm);
 }
 .brand-text h1 { font-size: 20px; letter-spacing: 0.5px; }
 .brand-text p { font-size: 13px; color: var(--text-faint); margin-top: 2px; }
@@ -579,7 +579,7 @@ body.lightbox-open { overflow: hidden; }
   .content { padding: 64px 0 20px; }
   .hero { padding: 28px 20px; }
   .hero h2 { font-size: 26px; }
-  .hero-avatar { width: 60px; height: 60px; font-size: 26px; }
+  .hero-avatar { width: 60px; height: 60px; }
   .search-box { width: 100%; }
   .topbar-inner { height: 54px; gap: 10px; padding: 0 14px; }
   .topbar-brand { font-size: 18px; margin-left: 42px; }
@@ -944,7 +944,7 @@ body.lightbox-open { overflow: hidden; }
 .lunar-shichen { margin-top: 8px; font-size: 11px; color: var(--text-faint); text-align: center; }
 
 /* ===== Hero 头像 ===== */
-.hero-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; font-family: var(--serif); font-weight: 800; font-size: 30px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); margin-bottom: 14px; }
+.hero-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: transparent; display: block; box-shadow: var(--shadow); margin-bottom: 14px; }
 
 /* ===== 首页错落 Bento 网格（首篇头条大卡） ===== */
 .card.feature { column-span: all; }
