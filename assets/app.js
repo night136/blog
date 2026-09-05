@@ -245,7 +245,7 @@
     if (!top.length) { if (sliderEl) sliderEl.style.display = "none"; return; }
     if (sliderEl) sliderEl.style.display = "block";
     slidesEl.innerHTML = top.map((p, i) => `
-      <div class="slide ${i === 0 ? "active" : ""}" data-slug="${p.slug}" style="${coverStyle(p)}">
+      <div class="slide ${i === 0 ? "active" : ""} ${p.cover ? "" : "no-cover"}" data-slug="${p.slug}" style="${coverStyle(p)}">
         <div class="slide-overlay"><span class="slide-tag">${p.tag}</span><h3 class="slide-title">${p.title}</h3><p class="slide-summary">${p.summary || ""}</p><button class="slide-read" data-slug="${p.slug}">阅读全文 →</button></div>
       </div>`).join("");
     slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`).join("");
