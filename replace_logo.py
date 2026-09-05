@@ -103,6 +103,18 @@ def replace_logo(base_path, logo_path, out_path, shape="circle"):
     if ey + eh > base.height:
         ey = base.height - eh
 
+    # 先裁掉原头像的黑色外圈圆环和四向箭头，只保留内部太极/人物
+    lw0, lh0 = logo.size
+    crop_ratio = 0.78
+    crop_r = int(min(lw0, lh0) * crop_ratio / 2)
+    cx, cy = lw0 // 2, lh0 // 2
+    inner_mask = Image.new("L", (lw0, lh0), 0)
+    draw = ImageDraw.Draw(inner_mask)
+    draw.ellipse((cx - crop_r, cy - crop_r, cx + crop_r, cy + crop_r), fill=255)
+    cropped = Image.new("RGBA", (lw0, lh0), (0, 0, 0, 0))
+    cropped.paste(logo, (0, 0), inner_mask)
+    logo = cropped
+
     target_w = ew
     target_h = eh
     logo.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
