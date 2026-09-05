@@ -1,5 +1,9 @@
 // ===== 昉昕的博客 — 前端交互 =====
 (function () {
+  // IIFE 已开始执行即视为脚本启动成功；index.html 的 6s 兜底检测据此判断是否误报。
+  // 放在最前面，避免后续任何同步/异步延迟让诊断横幅错误弹出。
+  window.__APP_BOOTED__ = true;
+
   // ── DOM 缓存 ──
   const $ = (id) => document.getElementById(id);
   const archiveList = $("archiveList");
@@ -1924,6 +1928,4 @@
     setTimeout(() => openPost(decodeURIComponent(startSlug)), 300);
   }
 
-  // 标记启动成功：index.html 的兜底逻辑据此判断脚本是否已正常加载/执行
-  window.__APP_BOOTED__ = true;
 })();

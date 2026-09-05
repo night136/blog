@@ -84,18 +84,25 @@
   <script>
     /* 标记 JS 可用：仅当 JS 启用时才隐藏卡片（opacity:0 默认），JS 被禁用时卡片直接显示，避免永久空白 */
     document.documentElement.classList.add('js');
-    /* app.js 启动成功后由 IIFE 末尾置 true；本页 6s 内未启动则判定脚本未加载/运行中断 */
+    /* app.js 启动成功后由 IIFE 置 true；本页 6s 内未启动则判定脚本未加载/运行中断 */
     window.__APP_BOOTED__ = false;
-    /* 全局错误捕获：脚本加载/执行失败（如跨境网络导致 app.js 没下下来、或运行报错）时，
-       显示可见横幅而非静默卡在「加载中」，方便一眼看出是域名问题还是缓存问题。 */
+    /* 全局错误捕获：只关心 JS/CSS 这类关键资源的加载失败；
+       像 <link rel="canonical"> 这类非资源 link 在某些浏览器会误报 error，必须过滤掉，
+       否则会弹「资源加载失败：https://blog-6p3.pages.dev/」这种假横幅。 */
     window.addEventListener('error', function (e) {
+      var t = e && e.target;
+      if (!t) return;
+      var isScript = t.tagName === 'SCRIPT';
+      var isStyle = t.tagName === 'LINK' && /\bstylesheet\b/i.test(t.rel || '');
+      var isCssPreload = t.tagName === 'LINK' && /\bpreload\b/i.test(t.rel || '') && /^style$/i.test(t.as || '');
+      if (!isScript && !isStyle && !isCssPreload) return; // 过滤 canonical/icon 等非关键资源的误报
       var b = document.getElementById('bootFallback');
       if (b && b.style.display !== 'block') {
         b.style.display = 'block';
         var m = document.getElementById('bootMsg');
         if (m) {
-          var t = e && e.target && (e.target.src || e.target.href);
-          m.textContent = t ? ('资源加载失败：' + t) : (e && e.message ? e.message : '未知脚本错误');
+          var url = t.src || t.href || '';
+          m.textContent = url ? ('资源加载失败：' + url) : '关键脚本或样式加载失败';
         }
         var h = document.getElementById('bootHost');
         if (h) h.textContent = location.hostname;
@@ -115,6 +122,8 @@
           var b = document.getElementById('bootFallback');
           if (b) {
             b.style.display = 'block';
+            var m = document.getElementById('bootMsg');
+            if (m) m.textContent = '脚本未能在 6 秒内完成启动，可能网络阻塞或缓存过期。';
             var h = document.getElementById('bootHost');
             if (h) h.textContent = location.hostname;
           }
