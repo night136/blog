@@ -198,9 +198,9 @@
 
   async function fetchAllPosts() {
     // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成，命中即秒回）；
-    // 缺失/失败则降级到 Function 动态接口。两种方式返回结构一致。
+    // 用 cache:"no-cache" 让浏览器能读本地缓存，同时发条件请求校验；304 时回退动态接口。
     try {
-      const sres = await fetch("/generated/posts.json", { credentials: "same-origin", cache: "no-store" });
+      const sres = await fetch("/generated/posts.json", { credentials: "same-origin", cache: "no-cache" });
       // 304 表示本地缓存的静态快照仍有效（但响应体为空），此时回退动态接口；
       // 200 则正常解析。两者都视为「静态命中」，避免把 304 误判为失败导致白屏。
       if (sres.ok || sres.status === 304) {
@@ -375,7 +375,7 @@
         // 静态预渲染优先：CDN 直读 /generated/posts/<slug>.json（含 body，秒回）；
         // 缺失/失败则降级到 Function 动态接口。
         try {
-          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin", cache: "no-store" });
+          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin", cache: "no-cache" });
           // 304 视为静态命中（无 body），回退下方动态接口；200 正常解析
           if (sres.ok || sres.status === 304) {
             if (sres.ok) {
@@ -1863,7 +1863,7 @@
   updateLunar();
   setInterval(updateLunar, 1000);
 
-  // 农历库体积较大(~436KB)，延后到页面空闲再加载，避免阻塞首屏渲染；
+  // 农历库体积较大(~436KB)，用 setTimeout 异步加载避免阻塞首屏；
   // updateLunar 已内置 typeof Lunar 保护，库加载完成前 widget 显示占位，加载后自动生效
   (function loadLunarLib() {
     var done = false;
@@ -1871,11 +1871,12 @@
       if (done) return; done = true;
       var s = document.createElement("script");
       s.src = "assets/vendor/lunar.js";
+      s.async = true;
       s.onload = function () { try { updateLunar(); updateSideClock(); } catch (e) {} };
+      s.onerror = function () { done = false; };
       document.head.appendChild(s);
     }
-    if ("requestIdleCallback" in window) requestIdleCallback(inject, { timeout: 2500 });
-    else window.addEventListener("load", inject);
+    setTimeout(inject, 0);
   })();
   bindInputStates();
   checkSession();
