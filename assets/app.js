@@ -164,7 +164,8 @@
   function formatDate(d) { const [y, m, day] = d.split("-"); return `${y}年${Number(m)}月${Number(day)}日`; }
   function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},46%,68%), hsl(${(h + 38) % 360},44%,54%))`; }
   // 无封面卡片固定奶油玻璃底色（与标题无关，杜绝绿/红等差异色）
-  function glassBg() { return "linear-gradient(135deg, hsl(38,42%,92%), hsl(33,38%,86%))"; }
+  // 用 CSS 变量引用底色，跟随明暗主题；括号里的值是变量缺失时的兜底
+  function glassBg() { return "linear-gradient(135deg, var(--slide-glass-1, hsl(38,42%,92%)), var(--slide-glass-2, hsl(33,38%,86%)))"; }
   function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${glassBg()};`; }
 
   // ===== 数据 =====
