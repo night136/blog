@@ -103,8 +103,8 @@ def replace_logo(base_path, logo_path, out_path, shape="circle"):
     if ey + eh > base.height:
         ey = base.height - eh
 
-    target_w = int(ew * 0.78)
-    target_h = int(eh * 0.78)
+    target_w = ew
+    target_h = eh
     logo.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
 
     canvas = Image.new("RGBA", (ew, eh), (0, 0, 0, 0))
