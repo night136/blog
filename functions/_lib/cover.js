@@ -14,5 +14,6 @@ export function safeCover(c) {
   const s = (c || "").trim();
   if (!s) return "";
   if (/^https?:\/\//i.test(s)) return s; // 外链封面体积小，正常保留
+  if (s.startsWith("/")) return s;       // 站点内相对路径封面（materializeCover 产物，仅 URL 不含图本身，体积小，保留）
   return ""; // data: 等内联图不进列表
 }
