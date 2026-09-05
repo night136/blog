@@ -105,9 +105,14 @@ def replace_logo(base_path, logo_path, out_path, shape="circle"):
 
     # 先裁掉原头像的黑色外圈圆环和四向箭头，只保留内部太极/人物
     lw0, lh0 = logo.size
-    crop_ratio = 0.78
+    crop_ratio = 0.72
+    # 人物在源图圆中偏上，把裁剪中心向上偏移 8%，让人物在输出圆中更居中
+    center_y_offset_ratio = -0.08
     crop_r = int(min(lw0, lh0) * crop_ratio / 2)
-    cx, cy = lw0 // 2, lh0 // 2
+    cx = lw0 // 2
+    cy = int(lh0 * (0.5 + center_y_offset_ratio))
+    # 保证裁剪圆不出源图边界
+    crop_r = min(crop_r, cx, cy, lw0 - cx, lh0 - cy)
     inner_mask = Image.new("L", (lw0, lh0), 0)
     draw = ImageDraw.Draw(inner_mask)
     draw.ellipse((cx - crop_r, cy - crop_r, cx + crop_r, cy + crop_r), fill=255)
@@ -141,4 +146,4 @@ if __name__ == "__main__":
     out1 = os.path.join(OUT_DIR, "logo_replaced_1.png")
     out2 = os.path.join(OUT_DIR, "logo_replaced_2.png")
     replace_logo(OLD1, NEW_LOGO, out1, shape="circle")
-    replace_logo(OLD2, NEW_LOGO, out2, shape="rounded")
+    replace_logo(OLD2, NEW_LOGO, out2, shape="circle")
