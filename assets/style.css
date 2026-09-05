@@ -223,12 +223,14 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .page-head h2 { font-size: 30px; font-weight: 900; }
 .page-head p { color: var(--text-soft); margin-top: 8px; font-size: 15px; }
 
-/* ── 卡片网格：Bento 风格 ── */
-.card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; align-items: start; }
+/* ── 卡片网格：Bento 瀑布流 ── */
+/* 用 CSS columns 实现 masonry：短卡片下方不会留大段空白，后续卡片会自动补上来 */
+.card-grid { columns: 2; column-gap: 24px; }
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
   transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  break-inside: avoid; margin-bottom: 24px;
 }
 .card:hover { transform: translateY(-6px); box-shadow: var(--shadow-hover); border-color: transparent; }
 /* 卡片滚动入场：默认隐藏，进入视口才「从无到有」由小变大淡入；首次进入播放一次后停止观察，避免边界闪动 */
@@ -253,7 +255,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .card p { color: var(--text-soft); font-size: 14px; line-height: 1.65; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-faint); }
 .card-go { color: var(--accent-dark); font-weight: 700; }
-.load-more { grid-column: 1 / -1; justify-self: center; margin: 14px auto 4px; padding: 11px 26px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all .18s; }
+.load-more { column-span: all; display: block; margin: 14px auto 4px; padding: 11px 26px; border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); border-radius: 999px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all .18s; }
 .load-more:hover { color: var(--accent-dark); border-color: var(--accent); box-shadow: var(--shadow-sm); }
 .tag { background: var(--accent-soft); color: var(--accent-dark); padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 
@@ -565,7 +567,7 @@ body.lightbox-open { overflow: hidden; }
   .hero-text { max-width: 100%; }
   .hero { flex-direction: column; align-items: stretch; }
   .hero-actions { align-items: center; text-align: center; }
-  .card-grid { grid-template-columns: 1fr; }
+  .card-grid { columns: 1; }
   .slider { height: 240px; }
   .slide-title { font-size: 20px; }
   .slide-overlay { margin: 0 16px 16px 16px; max-width: none; padding: 16px 18px 18px; border-radius: 16px; }
@@ -917,7 +919,7 @@ body.lightbox-open { overflow: hidden; }
 .hero-avatar { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; font-family: var(--serif); font-weight: 800; font-size: 30px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); margin-bottom: 14px; }
 
 /* ===== 首页错落 Bento 网格（首篇头条大卡） ===== */
-.card.feature { grid-column: span 2; }
+.card.feature { column-span: all; }
 .card.feature .card-cover { height: 320px; }
 .card.feature h3 { font-size: 22px; }
 
