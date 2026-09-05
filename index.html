@@ -116,19 +116,20 @@
           if (r.top < (window.innerHeight || 0) && r.bottom > 0) c.classList.add('in-view');
         });
       }, 1200);
-      /* 6s 后若 app.js 仍未启动（脚本没下下来 / 运行中断），显示诊断横幅 */
+      /* 10s 后若 app.js 仍未启动（脚本没下下来 / 运行中断/被第三方脚本阻塞），显示诊断横幅。
+         时间从 6s 延长到 10s：跨境网络下首次无缓存访问 app.js 偶有抖动，避免误报。 */
       setTimeout(function () {
         if (!window.__APP_BOOTED__) {
           var b = document.getElementById('bootFallback');
           if (b) {
             b.style.display = 'block';
             var m = document.getElementById('bootMsg');
-            if (m) m.textContent = '脚本未能在 6 秒内完成启动，可能网络阻塞或缓存过期。';
+            if (m) m.textContent = '脚本未能在 10 秒内完成启动，可能网络阻塞、缓存过期或被第三方脚本阻塞。';
             var h = document.getElementById('bootHost');
             if (h) h.textContent = location.hostname;
           }
         }
-      }, 6000);
+      }, 10000);
     });
   </script>
   <!-- 完整样式表：恢复阻塞加载。部分浏览器（小米/360 兼容模式等）对 media="print" 的 onload 切换支持不良，会导致样式表永远无法生效，页面只剩关键 CSS 而布局错乱。阻塞加载可确保这些浏览器正常渲染。 -->
@@ -507,11 +508,15 @@
     <span id="bootMsg" style="color:#d9b48a"></span>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
       <button onclick="location.reload(true)" style="cursor:pointer;background:#F0B06E;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">硬刷新</button>
+      <button onclick="if('caches' in window){caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).then(function(){location.reload(true);});}else{location.reload(true);}" style="cursor:pointer;background:#d9b48a;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">清缓存刷新</button>
       <a href="https://blog-6p3.pages.dev/" style="display:inline-block;background:transparent;color:#F0B06E;border:1px solid #F0B06E;border-radius:8px;padding:8px 14px;text-decoration:none;font-weight:600;">改用正确域名 →</a>
     </div>
   </div>
 
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <!-- 顺序很重要：app.js 优先于 Turnstile 加载执行。某些浏览器会把 async defer 的第三方脚本阻塞后续 defer 脚本；
+       如果 Turnstile 跨境加载慢/失败，会导致 app.js 迟迟不启动并触发 6s 检测。app.js 对 Turnstile 是软依赖（运行时检查 window.turnstile），
+       因此把它放在前面先执行，Turnstile 随后异步加载即可。 -->
   <script src="assets/app.js" defer></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </body>
 </html>
