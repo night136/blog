@@ -24,6 +24,12 @@
   const sliderEl = $("slider");
   const backTop = $("backTop");
 
+  // ── 规范化站点源：分享/复制链接一律用 canonical 域名，避免把过期或别名域名传播出去 ──
+  const SITE_ORIGIN = (() => {
+    const c = document.querySelector('link[rel="canonical"]');
+    try { return c ? new URL(c.href).origin : location.origin; } catch { return location.origin; }
+  })();
+
   // ── 认证相关 DOM ──
   const authBtn = $("authBtn");
   const userChip = $("userChip");
@@ -409,7 +415,7 @@
       const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
-      const shareUrl = location.origin + location.pathname + "?post=" + encodeURIComponent(slug);
+      const shareUrl = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(slug);
       const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="native" data-url="${escapeHtml(shareUrl)}" type="button">📤 分享</button></div>`;
       const nav = buildPostNav(slug);
       postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
@@ -436,7 +442,7 @@
     return { words, minutes: Math.max(1, Math.round(words / 300)) };
   }
   function sharePost(post) {
-    const url = location.origin + location.pathname + "?post=" + encodeURIComponent(post.slug);
+    const url = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(post.slug);
     const text = `看看这篇文章：${post.title}`;
     if (navigator.share) {
       navigator.share({ title: post.title, text, url }).catch(() => {});
@@ -458,7 +464,7 @@
   }
 
   function updateMeta(post) {
-    const url = location.origin + location.pathname + "?post=" + encodeURIComponent(post.slug);
+    const url = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(post.slug);
     const rawDesc = (post.summary || "").trim() || (post.body || "").replace(/[#>*`\-!\[\]()]/g, "").replace(/\s+/g, " ").trim().slice(0, 100);
     document.title = post.title + " · 昉昕的博客";
     setMeta("description", rawDesc, false);

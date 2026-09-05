@@ -1,6 +1,6 @@
 # 国内加速方案：静态前端走国内 CDN，动态接口留 Cloudflare
 
-> 背景：经实测，把 `blog.zhongfangxin682.workers.dev` 换成 `blog-6p3.pages.dev` 后，首次加载依旧慢。
+> 背景：经实测，即便把站点落在 `blog-6p3.pages.dev`（Cloudflare Pages 官方域名），首次加载依旧慢。
 > 已确认瓶颈 **不是代码/缓存，而是 Cloudflare 在大陆没有节点**——浏览器请求要跨境到境外边缘（DNS+TLS+RTT 综合 1–3 秒起）。
 > 静态预渲染只解决了"边缘命中后的源站耗时"，消除不了"用户 → 境外边缘"这段跨境延迟。
 > 本方案通过**动静分离**治本：静态资源搬国内 CDN 秒开，动态接口继续走 Cloudflare 异步调用。
