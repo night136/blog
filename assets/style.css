@@ -258,7 +258,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-faint); }
 .card h3 { font-size: 18px; font-weight: 700; line-height: 1.45; transition: color .22s ease; }
 .card:hover h3 { color: var(--accent-dark); }
-.card p { color: var(--text-soft); font-size: 14px; line-height: 1.65; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card p { color: var(--text-soft); font-size: 14px; line-height: 1.65; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-faint); }
 .card-go { color: var(--accent-dark); font-weight: 700; display: inline-block; transition: transform .22s ease; }
 .card:hover .card-go { transform: translateX(5px); }
