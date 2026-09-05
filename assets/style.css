@@ -224,7 +224,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .page-head p { color: var(--text-soft); margin-top: 8px; font-size: 15px; }
 
 /* ── 卡片网格：Bento 风格 ── */
-.card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+.card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; align-items: start; }
 .card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
