@@ -244,6 +244,16 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .card-cover { height: 172px; background-size: cover; background-position: center; position: relative; overflow: hidden; }
 .card-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(61,58,54,.18)); }
+/* 无封面卡片：柔光底纹 + 衬线首字 + 玻璃胶囊标签，避免大块纯色单调 */
+.card-cover.no-img::after { content: none; }
+.cover-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background:
+    radial-gradient(130% 120% at 82% 6%, rgba(255,255,255,.30), transparent 55%),
+    radial-gradient(120% 120% at 6% 104%, rgba(0,0,0,.18), transparent 55%); }
+.cover-char { font-family: "Noto Serif SC", Georgia, "Songti SC", serif; font-size: 76px; font-weight: 700; line-height: 1; color: rgba(255,255,255,.94); text-shadow: 0 3px 14px rgba(0,0,0,.20); user-select: none; }
+.cover-tag { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.82); padding: 4px 14px; border: 1px solid rgba(255,255,255,.55); border-radius: 999px; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.card.feature .cover-char { font-size: 128px; }
+.card.feature .cover-tag { font-size: 13px; }
 .card-body { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-faint); }
 .card h3 { font-size: 18px; font-weight: 700; line-height: 1.45; }

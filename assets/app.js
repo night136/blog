@@ -162,7 +162,8 @@
   }
 
   function formatDate(d) { const [y, m, day] = d.split("-"); return `${y}年${Number(m)}月${Number(day)}日`; }
-  function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},62%,58%), hsl(${(h + 45) % 360},62%,46%))`; }
+  function gradFor(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360; return `linear-gradient(135deg, hsl(${h},52%,63%), hsl(${(h + 38) % 360},50%,50%))`; }
+  function firstChar(s) { const t = (s || "").trim(); return t ? t[0] : "·"; }
   function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${gradFor(p.title)};`; }
 
   // ===== 数据 =====
@@ -280,8 +281,8 @@
   function cardHtml(p, i) {
     return `
       <article class="card ${i === 0 ? "feature" : i === 1 ? "wide" : ""}" data-slug="${escapeHtml(p.slug)}">
-        <div class="card-cover" style="background:${gradFor(p.title)};">
-          ${p.cover ? `<img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt="">` : ""}
+        <div class="card-cover ${p.cover ? "" : "no-img"}" style="background:${gradFor(p.title)};">
+          ${p.cover ? `<img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt="">` : `<div class="cover-empty" aria-hidden="true"><span class="cover-char">${escapeHtml(firstChar(p.title))}</span><span class="cover-tag">${escapeHtml(p.tag || "文章")}</span></div>`}
         </div>
         <div class="card-body">
           <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
