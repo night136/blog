@@ -1923,4 +1923,7 @@
   if (startSlug) {
     setTimeout(() => openPost(decodeURIComponent(startSlug)), 300);
   }
+
+  // 标记启动成功：index.html 的兜底逻辑据此判断脚本是否已正常加载/执行
+  window.__APP_BOOTED__ = true;
 })();

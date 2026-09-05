@@ -84,6 +84,23 @@
   <script>
     /* 标记 JS 可用：仅当 JS 启用时才隐藏卡片（opacity:0 默认），JS 被禁用时卡片直接显示，避免永久空白 */
     document.documentElement.classList.add('js');
+    /* app.js 启动成功后由 IIFE 末尾置 true；本页 6s 内未启动则判定脚本未加载/运行中断 */
+    window.__APP_BOOTED__ = false;
+    /* 全局错误捕获：脚本加载/执行失败（如跨境网络导致 app.js 没下下来、或运行报错）时，
+       显示可见横幅而非静默卡在「加载中」，方便一眼看出是域名问题还是缓存问题。 */
+    window.addEventListener('error', function (e) {
+      var b = document.getElementById('bootFallback');
+      if (b && b.style.display !== 'block') {
+        b.style.display = 'block';
+        var m = document.getElementById('bootMsg');
+        if (m) {
+          var t = e && e.target && (e.target.src || e.target.href);
+          m.textContent = t ? ('资源加载失败：' + t) : (e && e.message ? e.message : '未知脚本错误');
+        }
+        var h = document.getElementById('bootHost');
+        if (h) h.textContent = location.hostname;
+      }
+    }, true);
     /* 兜底：若 1.2s 后仍停留在视口内却未被 observer 点亮（如脚本异常），强制显示，避免卡片消失 */
     window.addEventListener('load', function () {
       setTimeout(function () {
@@ -92,6 +109,17 @@
           if (r.top < (window.innerHeight || 0) && r.bottom > 0) c.classList.add('in-view');
         });
       }, 1200);
+      /* 6s 后若 app.js 仍未启动（脚本没下下来 / 运行中断），显示诊断横幅 */
+      setTimeout(function () {
+        if (!window.__APP_BOOTED__) {
+          var b = document.getElementById('bootFallback');
+          if (b) {
+            b.style.display = 'block';
+            var h = document.getElementById('bootHost');
+            if (h) h.textContent = location.hostname;
+          }
+        }
+      }, 6000);
     });
   </script>
   <!-- 完整样式表：恢复阻塞加载。部分浏览器（小米/360 兼容模式等）对 media="print" 的 onload 切换支持不良，会导致样式表永远无法生效，页面只剩关键 CSS 而布局错乱。阻塞加载可确保这些浏览器正常渲染。 -->
@@ -459,6 +487,18 @@
           <p class="form-msg" id="registerMsg"></p>
         </form>
       </div>
+    </div>
+  </div>
+
+  <!-- 脚本兜底横幅：若 6s 内 app.js 未启动（多因访问旧域名 / 跨境网络导致脚本没下下来），显示当前域名+硬刷新按钮，便于定位 -->
+  <div id="bootFallback" style="display:none;position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:99999;max-width:92vw;background:#2a1f1a;color:#f4ece2;border:1px solid #F0B06E;border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.7;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:system-ui,-apple-system,'PingFang SC',sans-serif;">
+    <strong>⚠️ 页面脚本未能启动</strong><br>
+    多半是网络/缓存问题，或访问到了已废弃的旧域名。<br>
+    当前域名：<code id="bootHost" style="color:#F0B06E"></code><br>
+    <span id="bootMsg" style="color:#d9b48a"></span>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button onclick="location.reload(true)" style="cursor:pointer;background:#F0B06E;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">硬刷新</button>
+      <a href="https://blog-6p3.pages.dev/" style="display:inline-block;background:transparent;color:#F0B06E;border:1px solid #F0B06E;border-radius:8px;padding:8px 14px;text-decoration:none;font-weight:600;">改用正确域名 →</a>
     </div>
   </div>
 

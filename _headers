@@ -5,14 +5,8 @@
 # 静态资源：长缓存 + 后台再验证（stale-while-revalidate）。
 # 跨境网络抖动时浏览器直接命中本地缓存秒开，后台静默校验更新，
 # 避免「刷新后 JS 不跑 / 读不到缓存」的问题（pages.dev 在大陆无节点，每次强校验都会跨境重下）。
+# 注意：不要用更具体的 /assets/app.js 再写一遍，否则两条规则都生效、响应头会被重复拼接。
 /assets/*
-  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
-
-# 业务脚本/样式：同上。改版后靠 stale-while-revalidate 后台更新，无需用户强刷。
-/assets/app.js
-  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
-
-/assets/style.css
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
 /content/*
