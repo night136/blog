@@ -158,7 +158,7 @@
   // ===== 数据 =====
   // 动态列表：直查 D1 的 Function 接口（静态快照不可用或已过期时使用）
   async function fetchDynamicPosts() {
-    const res = await fetch("/api/posts", { credentials: "same-origin" });
+    const res = await fetch("/api/posts", { credentials: "same-origin", cache: "no-store" });
     if (!res.ok) throw new Error("list " + res.status);
     const data = await res.json();
     if (!data.ok) throw new Error("bad list");
@@ -179,7 +179,7 @@
       return;
     }
     try {
-      const r = await fetch("/api/posts/meta", { credentials: "same-origin" });
+      const r = await fetch("/api/posts/meta", { credentials: "same-origin", cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
       if (!d || !d.ok) return;
@@ -194,7 +194,7 @@
     // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成，命中即秒回）；
     // 缺失/失败则降级到 Function 动态接口。两种方式返回结构一致。
     try {
-      const sres = await fetch("/generated/posts.json", { credentials: "same-origin" });
+      const sres = await fetch("/generated/posts.json", { credentials: "same-origin", cache: "no-store" });
       if (sres.ok) {
         const sd = await sres.json();
         if (sd && sd.ok && Array.isArray(sd.posts)) {
@@ -365,7 +365,7 @@
         // 静态预渲染优先：CDN 直读 /generated/posts/<slug>.json（含 body，秒回）；
         // 缺失/失败则降级到 Function 动态接口。
         try {
-          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin" });
+          const sres = await fetch(`/generated/posts/${encodeURIComponent(slug)}.json`, { credentials: "same-origin", cache: "no-store" });
           if (sres.ok) {
             const sd = await sres.json();
             if (sd && sd.ok && sd.post) { post = sd.post; fromStatic = true; }
@@ -1014,7 +1014,7 @@
       u.searchParams.set("limit", "50");
       u.searchParams.set("before", guestNextCursor.before);
       u.searchParams.set("before_id", String(guestNextCursor.before_id));
-      const res = await fetch(u.pathname + u.search, { credentials: "same-origin" });
+      const res = await fetch(u.pathname + u.search, { credentials: "same-origin", cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       guestNextCursor = data.nextCursor || null;
@@ -1105,7 +1105,7 @@
   // 拉取公开配置（仅 Turnstile Site Key，非密钥），成功后渲染各处 widget
   async function loadTurnstileConfig() {
     try {
-      const res = await fetch("/api/config", { credentials: "same-origin" });
+      const res = await fetch("/api/config", { credentials: "same-origin", cache: "no-store" });
       const d = await res.json();
       if (d && d.turnstileSiteKey) turnstileSiteKey = d.turnstileSiteKey;
     } catch (_) { /* 配置拉取失败不阻塞页面 */ }
@@ -1119,7 +1119,7 @@
     const sk = $("guestbookSkeleton");
     if (sk) sk.innerHTML = '<div class="sk-card g-sk"></div>'.repeat(6);
     try {
-      const res = await fetch("/api/guestbook", { credentials: "same-origin" });
+      const res = await fetch("/api/guestbook", { credentials: "same-origin", cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.status);
       guestbookCanDelete = !!data.canDelete;
@@ -1460,7 +1460,7 @@
     if (!q) { renderCards(); return; }
     if (cardGrid) cardGrid.innerHTML = '<p style="color:var(--text-faint);grid-column:1/-1;">正在搜索…</p>';
     try {
-      const res = await fetch(`/api/posts/search?q=${encodeURIComponent(q)}`, { credentials: "same-origin" });
+      const res = await fetch(`/api/posts/search?q=${encodeURIComponent(q)}`, { credentials: "same-origin", cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         console.error("搜索接口异常:", res.status, data);
@@ -1513,7 +1513,7 @@
     }
     if (typeof updateGuestbookAuthHint === "function") updateGuestbookAuthHint();
   }
-  async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
+  async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin", cache: "no-store" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
   function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
   function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
   function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register" && typeof renderRegisterTurnstile === "function") renderRegisterTurnstile(); }
