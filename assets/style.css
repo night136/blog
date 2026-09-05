@@ -147,7 +147,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 34px; }
 .avatar {
-  width: 52px; height: 52px; border-radius: var(--radius-xs);
+  width: 56px; height: 56px; border-radius: 50%;
   object-fit: cover;
   background: transparent;
   display: block; box-shadow: var(--shadow-sm);
