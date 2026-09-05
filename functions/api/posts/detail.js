@@ -1,14 +1,14 @@
 // /api/posts/detail
 //   POST : 取单篇文章（含 body）。slug 通过 JSON body 传递，避免 URL 百分号编码
 //          在部分国产浏览器（如小米浏览器）fetch 中被二次编码/损坏的问题。
-import { json, getCookie, verifyJWT } from "../_lib/auth.js";
+import { json, getCookie, verifyJWT, jwtSecret } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
 
 async function getUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const payload = await verifyJWT(token, env.JWT_SECRET || "dev-secret-change-me");
+    const payload = await verifyJWT(token, jwtSecret(env));
     return payload.username || payload.sub || payload.name || null;
   } catch (e) { return null; }
 }

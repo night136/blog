@@ -1,7 +1,7 @@
 // /api/posts/[slug]/comments
 //   GET  : 取某篇文章的评论列表（按时间升序，含 likes）
 //   POST : action=create 发表 / action=like 点赞 / action=delete 删除（仅楼主）
-import { json, getCookie, verifyJWT } from "../../_lib/auth.js";
+import { json, getCookie, verifyJWT, jwtSecret } from "../../_lib/auth.js";
 
 function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
 
@@ -13,7 +13,7 @@ async function currentUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const secret = env.JWT_SECRET || "dev-secret-change-me";
+    const secret = jwtSecret(env);
     const payload = await verifyJWT(token, secret);
     return payload.name || null;
   } catch (e) { return null; }

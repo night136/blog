@@ -169,13 +169,23 @@
   // 一旦 Deploy Hook 未生效或部署延迟，快照会长期停留在旧版本 —— 新文章进了 D1 却显示不出来。
   // 这里用极轻量的 /api/posts/meta（count + 最新 slug）比对，过期则回调刷新，且不阻塞首屏。
   async function verifyStaticFreshness(meta, onStale) {
-    if (!meta || typeof meta.count !== "number") return;
+    // 旧格式快照没有 count 字段。若在这里直接 return，就等于放弃校验 ——
+    // 结果是一直使用过期列表，新发布的文章永远显示不出来。
+    // 放宽处理：count 缺失就改用 latest 比对；两者都缺失说明快照不可信，直接刷新一次。
+    const hasCount = !!(meta && typeof meta.count === "number");
+    const hasLatest = !!(meta && typeof meta.latest === "string" && meta.latest);
+    if (!hasCount && !hasLatest) {
+      try { await onStale(); } catch (_) {}
+      return;
+    }
     try {
       const r = await fetch("/api/posts/meta", { credentials: "same-origin" });
       if (!r.ok) return;
       const d = await r.json();
       if (!d || !d.ok) return;
-      const stale = d.count !== meta.count || (meta.latest && d.latest && meta.latest !== d.latest);
+      const stale =
+        (hasCount && d.count !== meta.count) ||
+        (hasLatest && d.latest && meta.latest !== d.latest);
       if (stale) await onStale();
     } catch (_) {}
   }

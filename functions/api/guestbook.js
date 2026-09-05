@@ -2,7 +2,7 @@
 //   GET  ：列出最近 200 条便签（按 created_at desc），同时告知前端当前是否站长（用于显示删除按钮）
 //   POST ：公开创建便签 —— 校验长度、按 ip_hash 限频、随机分配颜色
 // 留言墙是公开功能（无需登录），但删除便签需要站长（复用 BLO_OWNER 机制）
-import { json, verifyJWT, getCookie, isOwner } from "./_lib/auth.js";
+import { json, verifyJWT, getCookie, isOwner, jwtSecret } from "./_lib/auth.js";
 import { verifyTurnstile } from "./_lib/turnstile.js";
 
 const MAX_NAME = 20;
@@ -35,7 +35,7 @@ async function getCurrentUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const p = await verifyJWT(token, env.JWT_SECRET || "dev-secret-change-me");
+    const p = await verifyJWT(token, jwtSecret(env));
     return p.username || p.sub || p.name || null;
   } catch (_) { return null; }
 }
@@ -177,7 +177,7 @@ export async function onRequestPost({ request, env }) {
 
   // IP 限频（每天每 IP 最多 5 条；无 IP 信息时不限制 —— 仅出现在极少数本地调试场景）
   const ip = getIp(request);
-  const ipHash = ip ? await hashIp(ip, env.JWT_SECRET || "dev-secret-change-me") : null;
+  const ipHash = ip ? await hashIp(ip, jwtSecret(env)) : null;
   if (ipHash) {
     try {
       const { results } = await env.BLOG_DB.prepare(

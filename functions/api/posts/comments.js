@@ -6,7 +6,7 @@
 //     create -> 发表评论（支持楼中楼 parent_id）
 //     like   -> 点赞
 //     delete -> 删除（仅楼主）
-import { json, getCookie, verifyJWT } from "../_lib/auth.js";
+import { json, getCookie, verifyJWT, jwtSecret } from "../_lib/auth.js";
 
 const MAX_NAME = 40;
 const MAX_CONTENT = 2000;
@@ -16,7 +16,7 @@ async function currentUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const secret = env.JWT_SECRET || "dev-secret-change-me";
+    const secret = jwtSecret(env);
     const payload = await verifyJWT(token, secret);
     return payload.name || null;
   } catch (e) { return null; }

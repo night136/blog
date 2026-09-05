@@ -2,7 +2,7 @@
 //   GET : 取单篇文章（含 body），供前台文章详情页使用
 //   PUT : 会员更新自己写的文章（author 必须 = 当前用户）
 //   DELETE: 会员删除自己写的文章
-import { verifyJWT, getCookie, json, isOwner } from "../_lib/auth.js";
+import { verifyJWT, getCookie, json, isOwner, jwtSecret } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
 
 function decodeSlug(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
@@ -46,7 +46,7 @@ export async function onRequestDelete({ env, params, request }) {
   const token = getCookie(request, "auth");
   let username;
   try {
-    const payload = await verifyJWT(token, env.JWT_SECRET);
+    const payload = await verifyJWT(token, jwtSecret(env));
     username = payload.username || payload.sub || payload.name;
   } catch (e) { return unauthorized(); }
   if (!username) return unauthorized();

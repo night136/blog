@@ -1,6 +1,6 @@
 // /api/guestbook/manage
 //   留言墙管理接口 —— 仅站长（BLOG_OWNER）可删除便签
-import { json, verifyJWT, getCookie, isOwner } from "../_lib/auth.js";
+import { json, verifyJWT, getCookie, isOwner, jwtSecret } from "../_lib/auth.js";
 
 export async function onRequestPost({ request, env }) {
   if (!env.BLOG_DB) return json({ ok: false, error: "服务端未配置数据库" }, 500);
@@ -18,7 +18,7 @@ export async function onRequestPost({ request, env }) {
   let username = null;
   if (token) {
     try {
-      const p = await verifyJWT(token, env.JWT_SECRET || "dev-secret-change-me");
+      const p = await verifyJWT(token, jwtSecret(env));
       username = p.username || p.sub || p.name || null;
     } catch (_) {}
   }

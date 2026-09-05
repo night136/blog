@@ -1,5 +1,5 @@
 // 注册：POST /api/register
-import { hashPassword, json, sessionCookie, signJWT } from "./_lib/auth.js";
+import { hashPassword, json, sessionCookie, signJWT, jwtSecret } from "./_lib/auth.js";
 import { verifyTurnstile, getClientIp } from "./_lib/turnstile.js";
 
 export async function onRequestPost({ request, env }) {
@@ -39,7 +39,7 @@ export async function onRequestPost({ request, env }) {
       "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
     ).bind(username, email || null, salt + ":" + pwHash).run();
 
-    const secret = env.JWT_SECRET || "dev-secret-change-me";
+    const secret = jwtSecret(env);
     const token = await signJWT(
       { sub: username, name: username, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 },
       secret

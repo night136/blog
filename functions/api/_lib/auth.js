@@ -77,6 +77,14 @@ export async function verifyJWT(token, secret) {
   return payload;
 }
 
+// JWT 密钥的唯一来源：优先 env.JWT_SECRET，未配置时回退开发默认值。
+// ⚠️ 所有签发（login/register）与校验（各接口）都必须走这里，否则会出现
+// 「/api/me 显示已登录，但发文章提示请先登录」—— 签发用了 fallback、校验用了 undefined，
+// 两边密钥不同导致验签必然失败。历史 bug 正出在部分接口漏了这个 fallback。
+export function jwtSecret(env) {
+  return (env && env.JWT_SECRET) || "dev-secret-change-me";
+}
+
 export function getCookie(req, name) {
   const c = req.headers.get("Cookie") || "";
   for (const part of c.split(";")) {

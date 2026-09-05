@@ -1,5 +1,5 @@
 // 登录：POST /api/login
-import { verifyPassword, json, sessionCookie, signJWT } from "./_lib/auth.js";
+import { verifyPassword, json, sessionCookie, signJWT, jwtSecret } from "./_lib/auth.js";
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -21,7 +21,7 @@ export async function onRequestPost({ request, env }) {
     const ok = await verifyPassword(password, user.password_hash);
     if (!ok) return json({ error: "密码错误" }, 401);
 
-    const secret = env.JWT_SECRET || "dev-secret-change-me";
+    const secret = jwtSecret(env);
     const token = await signJWT(
       { sub: user.username, name: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 },
       secret

@@ -1,13 +1,13 @@
 // /api/posts/view
 //   POST : 文章阅读数 +1（非作者本人），返回最新 views。
 //          供静态预渲染详情打开时调用，因为静态 JSON 不会执行 Function 的 +1 逻辑。
-import { json, getCookie, verifyJWT } from "../_lib/auth.js";
+import { json, getCookie, verifyJWT, jwtSecret } from "../_lib/auth.js";
 
 async function getUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const payload = await verifyJWT(token, env.JWT_SECRET || "dev-secret-change-me");
+    const payload = await verifyJWT(token, jwtSecret(env));
     return payload.username || payload.sub || payload.name || null;
   } catch (e) { return null; }
 }

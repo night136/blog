@@ -1,5 +1,6 @@
 // /api/posts/search?q=关键词 —— 全文搜索（标题/摘要/正文）
 import { readingTime } from "../../_lib/readingTime.js";
+import { safeCover } from "../../_lib/cover.js";
 
 export async function onRequestGet({ env, request }) {
   const json = (data, status = 200) =>
@@ -39,7 +40,7 @@ export async function onRequestGet({ env, request }) {
         date: row.date,
         tag: row.tag || "未分类",
         summary: row.summary || "",
-        cover: row.cover || "",
+        cover: safeCover(row.cover), // 同列表接口：丢弃 base64 内联封面，避免搜索结果体积爆炸
         author: row.author_username || "昉昕",
         readingMinutes: rt.minutes,
         words: rt.words,

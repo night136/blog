@@ -14,3 +14,16 @@
 
 /content/*
   Cache-Control: public, max-age=3600
+
+# 封面图：文件名带内容哈希（build.mjs 生成），换封面即换文件名，
+# 因此可以安全地设一年 immutable 缓存 —— 二次访问直接命中，不会卡住旧封面。
+/generated/covers/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 列表/详情快照：发布新文章后内容会变，必须每次回源校验（304 未变更成本极低），
+# 保证「发布后刷新就能看到」，同时避免用户看到陈旧列表。
+/generated/posts.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+/generated/posts/*
+  Cache-Control: public, max-age=0, must-revalidate

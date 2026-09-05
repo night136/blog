@@ -1,8 +1,9 @@
 // /api/posts
 //   GET  : 列出全部文章（按 date desc）——供前台首页/归档/会员视图直接 fetch
 //   POST : 会员发文章（验证 JWT → 写入 posts 表）
-import { verifyJWT, getCookie, json } from "./_lib/auth.js";
+import { verifyJWT, getCookie, json, jwtSecret } from "./_lib/auth.js";
 import { readingTime } from "../_lib/readingTime.js";
+import { safeCover } from "../_lib/cover.js";
 
 const MAX_TITLE = 120;
 // 正文允许嵌 base64 图片：D1 单行上限 2,000,000 字节，正文留 1.9MB 余量（其他列也占空间）
@@ -39,7 +40,10 @@ function publicPost(row) {
     date: row.date,
     tag: row.tag || "未分类",
     summary: row.summary || "",
-    cover: row.cover || "",
+    // 列表封面瘦身：data: 内联封面会让列表响应膨胀到 576KB（实测 99.5% 是 3 张 base64 图），
+    // 手机弱网首屏要等 4.6~9.2s。列表丢弃内联封面，前端用标题哈希渐变兜底；
+    // 封面在文章详情页仍会正常显示。详见 _lib/cover.js
+    cover: safeCover(row.cover),
     author: row.author_username || "昉昕",
     readingMinutes: Math.max(1, Math.round(words / 300)),
     words,
@@ -124,7 +128,7 @@ export async function onRequestPost(ctx) {
   const token = getCookie(request, "auth");
   let username;
   try {
-    const payload = await verifyJWT(token, env.JWT_SECRET);
+    const payload = await verifyJWT(token, jwtSecret(env));
     username = payload.username || payload.sub || payload.name;
   } catch (e) {
     return json({ ok: false, error: "请先登录" }, 401);

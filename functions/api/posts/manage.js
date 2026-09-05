@@ -2,7 +2,7 @@
 // 文章管理统一入口（POST body 传 slug，避免国产浏览器对 URL 中文 slug 的编码损坏）
 //   action: "update" → 更新文章（仅作者）
 //   action: "delete" → 删除文章（仅作者）
-import { verifyJWT, getCookie, json, isOwner } from "../_lib/auth.js";
+import { verifyJWT, getCookie, json, isOwner, jwtSecret } from "../_lib/auth.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
 // Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
@@ -35,7 +35,7 @@ async function getUsername(request, env) {
   const token = getCookie(request, "auth");
   if (!token) return null;
   try {
-    const payload = await verifyJWT(token, env.JWT_SECRET);
+    const payload = await verifyJWT(token, jwtSecret(env));
     return payload.username || payload.sub || payload.name;
   } catch (e) { return null; }
 }
