@@ -3,6 +3,7 @@
 //   action: "update" → 更新文章（仅作者）
 //   action: "delete" → 删除文章（仅作者）
 import { verifyJWT, getCookie, json, isOwner, jwtSecret } from "../_lib/auth.js";
+import { readingTime } from "../../_lib/readingTime.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
 // Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
