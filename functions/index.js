@@ -7,6 +7,10 @@
 // 做法：爬虫请求带 ?post= 时，在边缘读取文章数据，把 OG / Twitter Card / JSON-LD
 // 直接内联进 index.html 再返回。正文内容不变（不是 cloaking），只是补上元信息。
 //
+// 封面：D1 里的 cover 可能是 data: base64（爬虫无法引用），构建期已由 build.mjs 抽离成
+// 静态文件并输出 generated/covers.json（slug → 路径）。这里查表换成绝对 URL 作为 og:image；
+// 查不到（外链/相对路径仍可直用，data: 则）退回全站默认图。
+//
 // 安全设计：任何一步失败（无数据库、文章不存在、ASSETS 不可用、HTML 结构异常）
 // 都直接 next() 回退到原来的静态响应，绝不影响正常访问。
 
@@ -61,16 +65,58 @@ async function loadPost(env, slug) {
   return null;
 }
 
-function buildTags(post, slug, origin) {
+// 封面映射表（构建期产物 generated/covers.json：slug → 可直接对外引用的封面路径）。
+// 为什么需要它：D1 里后台上传的封面存的是 data: base64，爬虫无法引用；build.mjs 会把这些
+// 图落成 /generated/covers/<slug>-<内容哈希>.<ext> 静态文件，但哈希边缘侧算不出来，
+// 所以由构建期输出映射表。文件与映射表同一次构建产出 → 表里有的路径文件必定存在。
+const COVER_MANIFEST_PATH = "/generated/covers.json";
+const MANIFEST_TTL_MS = 5 * 60 * 1000;
+let manifestCache = { at: 0, data: null };
+
+async function loadCoverManifest(env, origin) {
+  const now = Date.now();
+  if (manifestCache.data && now - manifestCache.at < MANIFEST_TTL_MS) return manifestCache.data;
+  try {
+    if (!env.ASSETS) return null;
+    const res = await env.ASSETS.fetch(new Request(`${origin}${COVER_MANIFEST_PATH}`, { method: "GET" }));
+    if (!res || !res.ok) return null;
+    const json = await res.json();
+    const covers = json && json.covers && typeof json.covers === "object" ? json.covers : null;
+    if (covers) manifestCache = { at: now, data: covers }; // 同一 isolate 内复用，避免每次请求都取
+    return covers;
+  } catch (_) {
+    return null;
+  }
+}
+
+// 把 D1 里的 cover 解析成爬虫可直接抓取的绝对 URL；解析不出来时返回 ""（调用方用默认图兜底）。
+async function resolveCover(env, origin, slug, raw) {
+  const c = String(raw || "").trim();
+  const manifest = await loadCoverManifest(env, origin);
+  if (manifest && manifest[slug]) {
+    try { return new URL(manifest[slug], origin).toString(); } catch (_) {}
+  }
+  // 映射表缺失/未命中时的兜底（例如文章刚发布、还没重新构建）：
+  // 外链与站内相对路径本身就能直接用，data: base64 则只能退回默认图。
+  if (/^https?:\/\//i.test(c)) return c;
+  if (c.startsWith("/")) {
+    try { return new URL(c, origin).toString(); } catch (_) {}
+  }
+  return "";
+}
+
+function buildTags(post, slug, origin, coverUrl) {
   const title = (post.title || SITE_NAME).trim();
   const author = (post.author_username || "昉昕").trim();
   const summary = plainText(post.summary).slice(0, 160);
   const desc = summary || DEFAULT_DESC;
   const canonical = `${origin}/?post=${encodeURIComponent(slug)}`;
-  const image = post.cover && /^https?:\/\//i.test(post.cover)
-    ? post.cover
-    : new URL(DEFAULT_IMAGE, origin).toString();
+  // coverUrl 由 resolveCover() 解析（已保证是绝对 URL）；空则用全站默认图
+  const defaultImage = new URL(DEFAULT_IMAGE, origin).toString();
+  const image = coverUrl || defaultImage;
   const isLarge = !!image;
+  // 默认图尺寸已知，补上宽高（社媒据此提前排版）；真实封面尺寸不定，交给爬虫自行抓取
+  const isDefault = image === defaultImage;
 
   const og = [
     `<meta property="og:type" content="article" />`,
@@ -79,6 +125,8 @@ function buildTags(post, slug, origin) {
     `<meta property="og:description" content="${esc(desc)}" />`,
     `<meta property="og:url" content="${esc(canonical)}" />`,
     `<meta property="og:image" content="${esc(image)}" />`,
+    isDefault ? `<meta property="og:image:width" content="1200" />` : "",
+    isDefault ? `<meta property="og:image:height" content="630" />` : "",
     `<meta property="og:image:alt" content="${esc(title)}" />`,
     `<meta property="og:locale" content="zh_CN" />`,
     post.date ? `<meta property="article:published_time" content="${esc(post.date)}" />` : "",
@@ -148,7 +196,7 @@ export async function onRequestGet(ctx) {
 
     // 用文章专属 OG 整块替换首页默认 OG（避免重复 meta 导致爬虫取错值）。
     // 若标记缺失则退回「插入到 </head> 前」，保证任何情况下都能注入。
-    const block = buildTags(post, slug, origin);
+    const block = buildTags(post, slug, origin, await resolveCover(env, origin, slug, post.cover));
     let injected = html;
     if (html.includes("<!--OG-DEFAULT-START-->") && html.includes("<!--OG-DEFAULT-END-->")) {
       injected = html.replace(/<!--OG-DEFAULT-START-->[\s\S]*?<!--OG-DEFAULT-END-->/, () => block);

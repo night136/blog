@@ -13,6 +13,10 @@ const OUT_DIR = join(__dirname, "generated");
 const LIST_FILE = join(OUT_DIR, "posts.json");
 const POST_DIR = join(OUT_DIR, "posts");
 const COVER_DIR = join(OUT_DIR, "covers");
+// slug → 对外可用的封面路径。边缘函数（functions/index.js）给爬虫注入 og:image 时需要它：
+// D1 里的封面可能是 data: base64（爬虫无法引用），而抽离后的文件名含内容哈希，边缘侧算不出来。
+const COVER_MANIFEST = join(OUT_DIR, "covers.json");
+const coverMap = {};
 
 const ACCOUNT = process.env.CF_ACCOUNT_ID;
 const DB = process.env.CF_DATABASE_ID;
@@ -41,16 +45,21 @@ function countWords(md) {
 // 好处：列表 JSON 瘦身到几十 KB；图片可被浏览器独立缓存，不再阻塞首屏解析。
 function materializeCover(row) {
   const c = (row.cover || "").trim();
-  if (!c.startsWith("data:")) return c; // 普通 http(s) 链接原样保留
+  // 统一的出口：把最终对外可用的封面路径登记进映射表（og:image 注入依赖它）
+  const record = (v) => {
+    if (v && row.slug) coverMap[row.slug] = v;
+    return v;
+  };
+  if (!c.startsWith("data:")) return record(c); // http(s) 外链 / 站内相对路径原样保留
   const m = c.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/);
-  if (!m) return ""; // 非 base64（如 data:image/svg+xml,xxx）不做处理
+  if (!m) return record(""); // 非 base64（如 data:image/svg+xml,xxx）不做处理
   let buf;
   try {
     buf = Buffer.from(m[2], "base64");
   } catch (_) {
-    return "";
+    return record("");
   }
-  if (!buf.length) return "";
+  if (!buf.length) return record("");
   const ext = (m[1].split("/")[1] || "png").split("+")[0].replace("jpeg", "jpg");
   const safe = String(row.slug || "cover").replace(/[^\w一-龥-]/g, "_").slice(0, 60) || "cover";
   // 文件名带内容哈希：换了封面 → 文件名就变 → 可以安全地给封面设长期 immutable 缓存，
@@ -59,9 +68,9 @@ function materializeCover(row) {
   const name = `${safe}-${hash8}.${ext}`;
   try {
     writeFileSync(join(COVER_DIR, name), buf);
-    return `/generated/covers/${encodeURIComponent(name)}`;
+    return record(`/generated/covers/${encodeURIComponent(name)}`);
   } catch (_) {
-    return ""; // 写失败就丢掉封面，前端会用渐变色兜底，不影响列表
+    return record(""); // 写失败就丢掉封面，前端会用渐变色兜底，不影响列表
   }
 }
 
@@ -173,10 +182,17 @@ async function main() {
   for (const row of rows) {
     writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row) }));
   }
+  // 封面映射表：与上面的文件同一次构建产出 → 表里写了哪个路径，那个文件就一定存在，天然一致。
+  // 边缘函数据此给爬虫注入 og:image（D1 里存 data: base64 时爬虫抓不到，必须换成静态文件地址）。
+  writeFileSync(
+    COVER_MANIFEST,
+    JSON.stringify({ ok: true, generatedAt: new Date().toISOString(), covers: coverMap })
+  );
   // 输出列表体积，便于监控首屏负担（封面抽离后应从数百 KB 降到几十 KB）
   const listBytes = statSync(LIST_FILE).size;
   console.log(
-    `[build] 已生成 ${rows.length} 篇文章静态 JSON → generated/；列表 posts.json = ${(listBytes / 1024).toFixed(1)}KB`
+    `[build] 已生成 ${rows.length} 篇文章静态 JSON → generated/；列表 posts.json = ${(listBytes / 1024).toFixed(1)}KB；` +
+      `封面映射 ${Object.keys(coverMap).length} 条 → generated/covers.json`
   );
 }
 

@@ -16,6 +16,12 @@
 /generated/covers/*
   Cache-Control: public, max-age=31536000, immutable
 
+# 封面映射表（slug → 封面路径，build.mjs 生成，供边缘函数注入 og:image）。
+# 必须短缓存：新部署会换掉封面文件名，长缓存会让边缘拿到旧映射表、指向已删除的文件。
+# 注意这条要写在 /generated/covers/* 之后，且 covers.json 不匹配上面那条通配（它需要多一层路径）。
+/generated/covers.json
+  Cache-Control: public, max-age=60
+
 # 列表/详情快照：长缓存 + 后台再验证（SWR）。
 # 前端用 force-cache 即时读本地缓存秒开首屏；后台 /api/posts/meta 校验新鲜度并静默刷新最新文章。
 /generated/posts.json
