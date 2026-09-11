@@ -67,11 +67,37 @@ async function loadPost(env, slug) {
 
 // 封面映射表（构建期产物 generated/covers.json：slug → 可直接对外引用的封面路径）。
 // 为什么需要它：D1 里后台上传的封面存的是 data: base64，爬虫无法引用；build.mjs 会把这些
-// 图落成 /generated/covers/<slug>-<内容哈希>.<ext> 静态文件，但哈希边缘侧算不出来，
-// 所以由构建期输出映射表。文件与映射表同一次构建产出 → 表里有的路径文件必定存在。
+// 图落成 /generated/covers/<slug哈希>-<内容哈希>.<ext> 静态文件，但哈希边缘侧算不出来，
+// 所以由构建期输出映射表。文件与映射表同一次构建产出，正常情况下表里有的路径文件必定存在。
 const COVER_MANIFEST_PATH = "/generated/covers.json";
 const MANIFEST_TTL_MS = 5 * 60 * 1000;
 let manifestCache = { at: 0, data: null };
+
+// 静态资源存在性复核（同一 isolate 内缓存 5 分钟）。
+// 为什么还要复核：映射表与文件虽是同一次构建产出，但「构建产物 → 边缘上传」这一步并非绝对可靠
+// （实测出现过映射表里有、线上却 404）。一旦把 404 的地址写进 og:image，社交卡片就是坏图，
+// 而且会被 caches.default 缓存 10 分钟。这里花一次内部 ASSETS 读换取「绝不指错图」。
+const existsCache = new Map();
+const EXISTS_TTL_MS = 5 * 60 * 1000;
+const EXISTS_MAX = 512;
+
+async function assetExists(env, origin, pathname) {
+  if (!env.ASSETS || !pathname) return true; // 无法复核时不阻断（宁可相信映射表）
+  const now = Date.now();
+  const hit = existsCache.get(pathname);
+  if (hit && now - hit.at < EXISTS_TTL_MS) return hit.ok;
+  let ok = true; // 复核本身出错时按「存在」处理，退回旧行为而不是误判成无封面
+  try {
+    const res = await env.ASSETS.fetch(new Request(`${origin}${pathname}`, { method: "GET" }));
+    ok = res.status !== 404; // 只有明确的 404 才算缺失，5xx 等瞬态错误不降级
+    try { if (res.body) await res.body.cancel(); } catch (_) {}
+  } catch (_) {
+    ok = true;
+  }
+  if (existsCache.size >= EXISTS_MAX) existsCache.clear();
+  existsCache.set(pathname, { at: now, ok });
+  return ok;
+}
 
 async function loadCoverManifest(env, origin) {
   const now = Date.now();
@@ -93,10 +119,18 @@ async function loadCoverManifest(env, origin) {
 async function resolveCover(env, origin, slug, raw) {
   const c = String(raw || "").trim();
   const manifest = await loadCoverManifest(env, origin);
-  if (manifest && manifest[slug]) {
-    try { return new URL(manifest[slug], origin).toString(); } catch (_) {}
+  const mapped = manifest && manifest[slug];
+  if (mapped) {
+    let abs = "";
+    try { abs = new URL(mapped, origin).toString(); } catch (_) {}
+    // 同一站点内的映射结果要复核文件真的在；外链（跨域）不做存在性检查，避免多打一次外部请求
+    if (abs && new URL(abs).origin === origin) {
+      if (await assetExists(env, origin, new URL(abs).pathname)) return abs;
+    } else if (abs) {
+      return abs;
+    }
   }
-  // 映射表缺失/未命中时的兜底（例如文章刚发布、还没重新构建）：
+  // 映射表缺失/未命中/文件缺失时的兜底（例如文章刚发布、还没重新构建）：
   // 外链与站内相对路径本身就能直接用，data: base64 则只能退回默认图。
   if (/^https?:\/\//i.test(c)) return c;
   if (c.startsWith("/")) {

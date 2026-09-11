@@ -266,6 +266,8 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .card.no-cover .card-body::before { content: "\201C"; position: absolute; right: 20px; top: 4px; z-index: 0; font-family: Georgia, "Songti SC", serif; font-size: 78px; line-height: 1; color: var(--accent); opacity: .13; pointer-events: none; user-select: none; }
 .card.no-cover .card-body > * { position: relative; z-index: 1; }
 .card.no-cover p { -webkit-line-clamp: 4; }
+/* 封面图加载失败（文件缺失 / 重试后仍失败）：隐藏破图容器，卡片退化成无封面样式 */
+.cover-failed { display: none !important; }
 .card-body { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-faint); }
 .card h3 { font-size: 18px; font-weight: 700; line-height: 1.45; transition: color .22s ease; }

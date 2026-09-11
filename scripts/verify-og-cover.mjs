@@ -29,7 +29,9 @@ function check(name, cond, detail) {
   else { fail++; console.log("  ❌ " + name + (detail ? "\n     实际: " + detail : "")); }
 }
 
-function makeEnv(post, manifest) {
+function makeEnv(post, manifest, options = {}) {
+  const missing = new Set(options.missing || []);
+  const errors = new Set(options.errors || []);
   return {
     BLOG_DB: { prepare: () => ({ bind: () => ({ first: async () => post }) }) },
     ASSETS: {
@@ -40,6 +42,10 @@ function makeEnv(post, manifest) {
           if (!manifest) return new Response("nope", { status: 404 }); // 模拟构建期未产出映射表
           return new Response(JSON.stringify({ ok: true, covers: manifest }), { status: 200 });
         }
+        // 封面文件：默认「存在」；errors → 500（瞬态故障），missing → 404（真缺失）
+        if (errors.has(p)) return new Response("boom", { status: 500 });
+        if (missing.has(p)) return new Response("not found", { status: 404 });
+        if (p.startsWith("/generated/covers/") || p.startsWith("/uploads/")) return new Response("img", { status: 200 });
         return new Response("nope", { status: 404 });
       },
     },
@@ -62,13 +68,13 @@ function basePost(over = {}) {
 // 所以先跑「映射表不可用」那组，再跑「映射表可用」那组。
 const mod = await import("../functions/index.js");
 
-async function run(label, post, manifest, ua = BOT_UA) {
+async function run(label, post, manifest, ua = BOT_UA, options = {}) {
   const url = `${ORIGIN}/?post=${encodeURIComponent(post.slug)}`;
   const req = new Request(url, { headers: { "User-Agent": ua } });
   let fellBack = false;
   const res = await mod.onRequestGet({
     request: req,
-    env: makeEnv(post, manifest),
+    env: makeEnv(post, manifest, options),
     next: () => { fellBack = true; return new Response("fallback", { status: 200 }); },
   });
   const html = await res.text();
@@ -96,6 +102,8 @@ console.log("\n[2] 映射表可用时以其为准");
     "p-data": "/generated/covers/p-data-abc12345.jpg",
     "p-http": "https://cdn.example.com/manifest-cover.jpg",
     "p-wins": "/generated/covers/p-wins-newhash.png",
+    "p-gone": "/generated/covers/p-gone-missing.jpg",
+    "p-err": "/generated/covers/p-err-abc12345.jpg",
   };
 
   const a = await run("data 命中映射表", basePost({ slug: "p-data", cover: DATA_COVER }), manifest);
@@ -115,6 +123,18 @@ console.log("\n[2] 映射表可用时以其为准");
 
   const e = await run("新文章 data 封面但未重新构建", basePost({ slug: "p-fresh", cover: DATA_COVER }), manifest);
   check("映射表未命中 + data: 封面 → 默认图", e.img === DEFAULT_IMG, e.img);
+
+  // 线上事故回归（2026-09-11）：covers.json 里登记了某封面，该文件在部署里却 404。
+  // 此时绝不能把 404 地址写进 og:image（卡片会是坏图，且被 caches.default 缓存 10 分钟）。
+  const gone = await run("映射表命中但文件缺失", basePost({ slug: "p-gone", cover: DATA_COVER }), manifest,
+    BOT_UA, { missing: ["/generated/covers/p-gone-missing.jpg"] });
+  check("映射表指向已缺失的文件 → 退回默认图", gone.img === DEFAULT_IMG, gone.img);
+  check("退回默认图时补上宽高", gone.html.includes('property="og:image:width" content="1200"'));
+
+  const err = await run("复核封面时 ASSETS 抛 5xx", basePost({ slug: "p-err", cover: DATA_COVER }), manifest,
+    BOT_UA, { errors: ["/generated/covers/p-err-abc12345.jpg"] });
+  check("复核遇瞬态 5xx → 不降级，仍用映射表地址",
+    err.img === `${ORIGIN}/generated/covers/p-err-abc12345.jpg`, err.img);
 }
 
 console.log("\n[3] 无封面 / 结构正确性");
@@ -178,6 +198,23 @@ console.log("\n[5] 元信息转义 / 完整性");
   check("标题中的 < > 被转义", !tricky.html.includes("<script> 的标题"));
   check("输出含 JSON-LD 结构化数据", tricky.html.includes('application/ld+json'));
   check("canonical 指向文章地址", tricky.html.includes(`${ORIGIN}/?post=p-esc`));
+}
+
+console.log("\n[6] 封面文件名必须纯 ASCII");
+{
+  // 起因：Cloudflare Pages 对「含非 ASCII 字符的静态资源文件名」不可靠 —— 实测线上出现过
+  // covers.json 登记了某封面、部署里该文件却 404（同批其它中文名文件正常）。
+  // 上游同类报告：https://github.com/solidjs/solid-start/issues/1607
+  // 因此封面文件名改为「slug 的 sha256 前 10 位 + 内容哈希」，不再含 slug 原文。
+  const buildSrc = fs.readFileSync(path.join(root, "build.mjs"), "utf8");
+  check("build.mjs 用 slug 哈希做文件名前缀（不含 slug 原文）",
+    /\$\{slugKey\}-\$\{hash8\}/.test(buildSrc) && !/\$\{safe\}/.test(buildSrc),
+    "未找到 `${slugKey}-${hash8}` 模板或仍在使用 `${safe}`");
+  check("build.mjs 含构建期自检（映射表 ↔ 文件存在性）",
+    /coverIssues/.test(buildSrc), "未找到封面映射表自检逻辑");
+
+  const idxSrc = fs.readFileSync(path.join(root, "functions", "index.js"), "utf8");
+  check("边缘函数复核封面文件是否存在", /assetExists/.test(idxSrc), "未找到 assetExists");
 }
 
 console.log("\n" + (fail === 0 ? `✅ 全部通过（${pass} 项）` : `❌ ${fail} 项失败 / 共 ${pass + fail} 项`));

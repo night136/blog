@@ -61,11 +61,16 @@ function materializeCover(row) {
   }
   if (!buf.length) return record("");
   const ext = (m[1].split("/")[1] || "png").split("+")[0].replace("jpeg", "jpg");
-  const safe = String(row.slug || "cover").replace(/[^\w一-龥-]/g, "_").slice(0, 60) || "cover";
-  // 文件名带内容哈希：换了封面 → 文件名就变 → 可以安全地给封面设长期 immutable 缓存，
+  // 文件名必须纯 ASCII：Cloudflare Pages 对「含非 ASCII 字符的静态资源文件名」并不可靠 ——
+  // 实测线上出现过「covers.json 里登记了、文件却 404」的情况（其余同批中文名文件却正常），
+  // 上游同类报告见 https://github.com/solidjs/solid-start/issues/1607 。
+  // 所以不再把 slug 原文写进文件名，改用 slug 的哈希做稳定前缀；
+  // slug → 路径的对应关系一律走 generated/covers.json 映射表，任何一方都不需要从文件名反推 slug。
+  const slugKey = createHash("sha256").update(String(row.slug || "cover")).digest("hex").slice(0, 10);
+  // 内容哈希：换了封面 → 文件名就变 → 可以安全地给封面设长期 immutable 缓存，
   // 不用担心「文章内容更新了但 CDN 还在发旧封面」。
   const hash8 = createHash("sha256").update(buf).digest("hex").slice(0, 8);
-  const name = `${safe}-${hash8}.${ext}`;
+  const name = `${slugKey}-${hash8}.${ext}`;
   try {
     writeFileSync(join(COVER_DIR, name), buf);
     return record(`/generated/covers/${encodeURIComponent(name)}`);
@@ -188,6 +193,22 @@ async function main() {
     COVER_MANIFEST,
     JSON.stringify({ ok: true, generatedAt: new Date().toISOString(), covers: coverMap })
   );
+  // 自检：把「表里有路径、文件却不存在」和「文件名含非 ASCII」这两类问题在构建期就喊出来。
+  // 成因是真实的：线上出现过映射表登记了封面、部署里却没有该文件（Pages 对非 ASCII 资源名不可靠），
+  // 结果社交卡片变成坏图。宁可构建日志里显眼，也不要让爬虫去发现。
+  const coverIssues = [];
+  for (const [slug, p] of Object.entries(coverMap)) {
+    const decoded = decodeURIComponent(p);
+    if (/[^\x20-\x7e]/.test(decoded)) coverIssues.push(`非 ASCII 文件名: ${decoded}`);
+    try {
+      statSync(join(__dirname, decoded.replace(/^\//, "")));
+    } catch (_) {
+      coverIssues.push(`映射表引用了不存在的文件: ${slug} -> ${p}`);
+    }
+  }
+  if (coverIssues.length) {
+    console.warn("[build] ⚠️ 封面映射表自检未通过：\n  " + coverIssues.join("\n  "));
+  }
   // 输出列表体积，便于监控首屏负担（封面抽离后应从数百 KB 降到几十 KB）
   const listBytes = statSync(LIST_FILE).size;
   console.log(

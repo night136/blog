@@ -1922,6 +1922,31 @@
   if (composeSubmit) composeSubmit.addEventListener("click", handlePublish);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && authModal && !authModal.hidden) closeAuth(); });
 
+  // ===== 封面图加载失败降级 =====
+  // 封面是构建期抽离出的静态文件（/generated/covers/...）。实测线上出现过「列表里登记了封面、
+  // 文件却 404」的情况（Cloudflare Pages 对非 ASCII 资源文件名不可靠；现已改为纯 ASCII 命名），
+  // 此时 <img> 会显示一个破图图标。策略：先重试一次（pages.dev 在大陆跨境访问偶发失败，
+  // 不该一次就放弃），仍失败则隐藏封面、让卡片退化成「无封面」排版。
+  // 注意：img 的 error 事件不冒泡，必须在捕获阶段监听才能收到。
+  document.addEventListener("error", (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.classList) return;
+    const isCard = img.classList.contains("card-cover-img");
+    const isHero = img.classList.contains("post-cover");
+    if (!isCard && !isHero) return;
+    if (Number(img.dataset.coverTries || 0) < 1) {
+      // 首次失败：延迟重挂 src。同步重设会立刻再次触发 error，反而没给网络一次机会。
+      img.dataset.coverTries = "1";
+      const src = img.getAttribute("src");
+      if (src) { img.removeAttribute("src"); setTimeout(() => img.setAttribute("src", src), 500); return; }
+    }
+    img.hidden = true;
+    const wrap = img.parentElement;
+    if (wrap) wrap.classList.add("cover-failed");
+    const card = img.closest(".card");
+    if (card) card.classList.add("no-cover"); // 复用无封面卡片的边框与引号排版
+  }, true);
+
   const memberNav = document.querySelector('.nav-link[data-view="member"]');
   if (memberNav) memberNav.addEventListener("click", async () => { const user = await checkSession(); renderMember(user); });
 
