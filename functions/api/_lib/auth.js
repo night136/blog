@@ -77,12 +77,29 @@ export async function verifyJWT(token, secret) {
   return payload;
 }
 
-// JWT 密钥的唯一来源：优先 env.JWT_SECRET，未配置时回退开发默认值。
-// ⚠️ 所有签发（login/register）与校验（各接口）都必须走这里，否则会出现
-// 「/api/me 显示已登录，但发文章提示请先登录」—— 签发用了 fallback、校验用了 undefined，
-// 两边密钥不同导致验签必然失败。历史 bug 正出在部分接口漏了这个 fallback。
+// JWT 密钥的唯一来源。所有签发（login/register）与校验（各接口）都必须走这里，
+// 否则会出现「/api/me 显示已登录，但发文章提示请先登录」—— 签发与校验用了不同密钥。
+//
+// ⚠️ 安全：绝不能在生产环境回退到硬编码默认值。旧版本曾在 env.JWT_SECRET 缺失时
+// 回退到下面这个公开字符串，而代码是公开仓库 —— 等于把签名密钥写在 README 里，
+// 任何人都能自签 token 冒充任意用户（含站长）。因此这里改为「缺失即抛错」，
+// 让配置问题立刻暴露，而不是静默降级到不安全状态。
+const DEV_FALLBACK_SECRET = "dev-secret-change-me";
+const MIN_SECRET_LEN = 16; // 128 bit 起步；建议使用 ≥32 字符的随机串
+
 export function jwtSecret(env) {
-  return (env && env.JWT_SECRET) || "dev-secret-change-me";
+  const secret = env && env.JWT_SECRET;
+  if (typeof secret === "string" && secret.length >= MIN_SECRET_LEN && secret !== DEV_FALLBACK_SECRET) {
+    return secret;
+  }
+  // 显式开发逃生门：仅当环境变量 ALLOW_INSECURE_DEV_JWT=1 时才允许用默认密钥。
+  // 生产环境绝不要设置它 —— 必须显式选择，无法"忘记配置"而被动降级。
+  if (env && env.ALLOW_INSECURE_DEV_JWT === "1") return DEV_FALLBACK_SECRET;
+  throw new Error(
+    "JWT_SECRET 未配置或过短（至少 " + MIN_SECRET_LEN + " 字符）：请在 Cloudflare Pages 项目 " +
+    "Settings → Environment variables 配置一个随机密钥（建议 ≥32 字符）。" +
+    "本地 wrangler 调试可临时设置 ALLOW_INSECURE_DEV_JWT=1。"
+  );
 }
 
 export function getCookie(req, name) {

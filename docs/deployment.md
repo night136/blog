@@ -107,6 +107,9 @@ node build.mjs
 | 发布文章后静态内容没更新 | `DEPLOY_HOOK_URL` 没配或填错 | 检查 Functions 环境变量 `DEPLOY_HOOK_URL` = Deploy Hook URL；Deployments 列表应出现自动部署 |
 | 首页/文章走 Function 而非静态 | `Root directory` 没设为 `blog-site` | 控制台改 Root directory 为 `blog-site` 并重部署 |
 | 静态生成失败但站点仍可用 | `build.mjs` 容错降级 | 看构建日志错误信息（通常是 D1 凭证权限不足），不影响线上运行 |
+| 登录/注册报「JWT_SECRET 未配置或过短」 | Functions 环境变量缺 `JWT_SECRET`（或短于 16 字符） | Settings → Environment variables → Production 补一个 ≥32 字符随机串后重新部署 |
+| 改完密钥后所有人变成未登录 | 旧 token 用旧密钥签发，验签失败 | 正常现象（密钥轮换），重新登录即可 |
+| 留言墙能看但提交后没提示「今天已经写了不少」 | `JWT_SECRET` 缺失导致 IP 限频被跳过 | 配置 `JWT_SECRET` 后限频自动恢复（公开留言本身不受影响） |
 
 ---
 
@@ -114,7 +117,13 @@ node build.mjs
 
 - `CF_API_TOKEN`（`cfut_...`）具有 D1 读写权限，**切勿提交进仓库或明文外传**。仅在 Cloudflare 控制台「Build variables」中设置。
 - 该 Token 一旦不再需要或更换，请到 **My profile → API Tokens** 立即轮换 / 删除，并新建一个**最小权限** Token（仅 Pages + D1 权限）。
-- `JWT_SECRET` 必须设为强随机值且只在 Functions 环境变量中保存，不要写进前端或仓库。
+- `JWT_SECRET` 必须设为强随机值（**至少 16 字符，建议 ≥32 字符随机串**）且只在 Functions 环境变量中保存，不要写进前端或仓库。
+  - **缺失即拒绝服务**：`functions/api/_lib/auth.js` 的 `jwtSecret()` 在 `JWT_SECRET` 缺失/过短/等于旧占位串 `dev-secret-change-me` 时会**直接抛错**，登录、注册会返回 500 并在错误信息里提示原因。这是有意为之——旧版本曾静默回退到这个公开字符串，等于把签名密钥写在公开仓库里，任何人都能自签 token 冒充任意用户（含站长）。
+  - 失败方向是安全的：各鉴权接口会把异常当作「未登录」处理（`/api/me` 返回 `user: null`），不会出现鉴权被绕过的情形。
+  - 生成密钥：`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`。
+  - 轮换密钥会让所有已签发的旧 token 失效（所有人需重新登录），这正是期望行为。
+  - 仅本地 `wrangler pages dev` 调试时可临时设 `ALLOW_INSECURE_DEV_JWT=1` 退回占位串，**生产环境绝不能设**。
+  - 回归测试：`node scripts/verify-jwt-secret.mjs`（18 项断言，含「伪造 token 不再被接受」的端到端验证）。
 - `generated/` 已加入 `.gitignore`，不会进版本库（避免静态快照泄露待发布内容、也减小仓库体积）。
 
 ---

@@ -32,6 +32,10 @@ export async function onRequestPost({ request, env }) {
     ).bind(username).first();
     if (existing) return json({ error: "该用户名已被注册" }, 409);
 
+    // 尽早解析密钥：若 JWT_SECRET 未配置，应在写库之前失败，
+    // 避免「用户已创建但注册返回 500，重试又提示用户名已占用」的半成品状态。
+    const secret = jwtSecret(env);
+
     const salt = crypto.randomUUID();
     const pwHash = await hashPassword(password, salt);
 
@@ -39,7 +43,6 @@ export async function onRequestPost({ request, env }) {
       "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)"
     ).bind(username, email || null, salt + ":" + pwHash).run();
 
-    const secret = jwtSecret(env);
     const token = await signJWT(
       { sub: username, name: username, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600 },
       secret

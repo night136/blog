@@ -176,8 +176,15 @@ export async function onRequestPost({ request, env }) {
   const color = COLORS[Math.floor(Math.random() * COLORS.length)];
 
   // IP 限频（每天每 IP 最多 5 条；无 IP 信息时不限制 —— 仅出现在极少数本地调试场景）
+  // 注意：留言墙是公开功能，不能因为 JWT_SECRET 未配置就整体 500。
+  // 这里的密钥只用于给 IP 做不可逆哈希（限频用，不对外暴露），
+  // 因此取不到密钥时降级为「跳过限频」，而不是让访客写不了便签。
   const ip = getIp(request);
-  const ipHash = ip ? await hashIp(ip, jwtSecret(env)) : null;
+  let ipHash = null;
+  if (ip) {
+    try { ipHash = await hashIp(ip, jwtSecret(env)); }
+    catch (_) { /* JWT_SECRET 未配置：跳过限频，不影响公开留言提交 */ }
+  }
   if (ipHash) {
     try {
       const { results } = await env.BLOG_DB.prepare(
