@@ -86,12 +86,38 @@
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
+  // URL 协议白名单：默认只放行 http/https/mailto/tel，以及站内相对路径（/、#、./、?、纯相对）。
+  // 图片额外允许 data:image 位图（站内后台上传就是 base64）。其余（javascript:、vbscript:、
+  // data:text/html、data:image/svg+xml 等）一律返回空串，由调用方降级为纯文本。
+  // 注意：调用方传入的已经是 HTML 转义后的字符串，这里只做协议判定，不做转义。
+  function safeUrl(raw, allowDataImage) {
+    let url = String(raw == null ? "" : raw).trim();
+    // 剔除控制字符/换行，避免 "java\nscript:" 之类的绕过
+    url = url.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+    if (!url) return "";
+    const m = url.match(/^([a-zA-Z][a-zA-Z0-9+.\-]*):/);
+    if (!m) return url; // 无协议：相对路径 / 锚点 / 站内地址，放行
+    const scheme = m[1].toLowerCase();
+    if (scheme === "http" || scheme === "https" || scheme === "mailto" || scheme === "tel") return url;
+    if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp|avif|bmp)[;,]/i.test(url)) return url;
+    return "";
+  }
+
   function mdToHtml(md) {
-    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // 转义 & < > " '：正文由任何注册用户撰写，必须转义引号否则可闭合属性注入事件处理器
+    const esc = (s) => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     function inline(text) {
       return esc(text)
-        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" decoding="async">')
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, src) => {
+          const url = safeUrl(src, true);
+          return url ? `<img src="${url}" alt="${alt}" loading="lazy" decoding="async">` : alt;
+        })
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) => {
+          const url = safeUrl(href, false);
+          return url ? `<a href="${url}" target="_blank" rel="noopener nofollow">${label}</a>` : label;
+        })
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/\*([^*]+)\*/g, "<em>$1</em>")
         .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -246,8 +272,8 @@
     if (!top.length) { if (sliderEl) sliderEl.style.display = "none"; return; }
     if (sliderEl) sliderEl.style.display = "block";
     slidesEl.innerHTML = top.map((p, i) => `
-      <div class="slide ${i === 0 ? "active" : ""} ${p.cover ? "" : "no-cover"}" data-slug="${p.slug}" style="${coverStyle(p)}">
-        <div class="slide-overlay"><span class="slide-tag">${p.tag}</span><h3 class="slide-title">${p.title}</h3><p class="slide-summary">${p.summary || ""}</p><button class="slide-read" data-slug="${p.slug}">阅读全文 →</button></div>
+      <div class="slide ${i === 0 ? "active" : ""} ${p.cover ? "" : "no-cover"}" data-slug="${escapeHtml(p.slug)}" style="${coverStyle(p)}">
+        <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h3 class="slide-title">${escapeHtml(p.title)}</h3><p class="slide-summary">${escapeHtml(p.summary || "")}</p><button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
       </div>`).join("");
     slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`).join("");
     slidesEl.querySelectorAll(".slide-read").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openPost(b.dataset.slug); }));
@@ -284,7 +310,7 @@
     const hasCover = !!p.cover;
     const cls = [i === 0 ? "feature" : i === 1 ? "wide" : "", hasCover ? "" : "no-cover"].filter(Boolean).join(" ");
     const cover = hasCover
-      ? `<div class="card-cover"><img class="card-cover-img" src="${escapeHtml(p.cover)}" loading="lazy" decoding="async" alt=""></div>`
+      ? `<div class="card-cover"><img class="card-cover-img" src="${escapeHtml(safeUrl(p.cover, true))}" loading="lazy" decoding="async" alt=""></div>`
       : "";
     return `
       <article class="card ${cls}" data-slug="${escapeHtml(p.slug)}">
@@ -433,7 +459,8 @@
         ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
         : "";
       const rt = { minutes: post.readingMinutes || 0, words: post.words || 0 };
-      const hero = post.cover ? `<img class="post-cover" src="${post.cover}" alt="">` : "";
+      const heroCover = post.cover ? safeUrl(post.cover, true) : "";
+      const hero = heroCover ? `<img class="post-cover" src="${escapeHtml(heroCover)}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
       const shareUrl = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(slug);
@@ -454,7 +481,8 @@
   }
 
   // ===== 工具函数 =====
-  function escapeHtml(s) { return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  // 统一转义 & < > " '：既用于文本内容，也用于属性值（含 style 里的 CSS url()）
+  function escapeHtml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
   function readingTime(md) {
     const text = (md || "").replace(/!\[[^\]]*\]\([^)]+\)/g, "").replace(/[#*`\[\](){}|>\-]/g, "");
     const cjkChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
@@ -1693,7 +1721,7 @@
   async function renderMember(user) {
     if (!memberArea) return;
     if (!user) { memberArea.innerHTML = '<div class="member-gate"><p>登录后即可发表文章、查看会员内容。</p><button class="btn-auth" type="button" id="memberLogin">🔐 登录 / 注册</button></div>'; const b = $("memberLogin"); if (b) b.addEventListener("click", () => openAuth("login")); return; }
-    memberArea.innerHTML = `<div class="member-welcome"><div class="member-card"><div class="member-avatar">${user.username.slice(0,1).toUpperCase()}</div><div><h3>欢迎，${user.username} 👋</h3><p class="member-sub">你已登录会员专区。</p></div></div><div class="member-perks"><div class="perk">✍️ 撰写并发布文章</div><div class="perk">📚 会员专享读书笔记合集</div><div class="perk">💬 文章下方专属评论区</div><div class="perk">🔖 收藏你喜欢的文章</div></div><button class="btn-publish" type="button" id="memberPublish">✍️ 现在写一篇文章</button><p class="member-note">更多功能陆续开放。</p></div>`;
+    memberArea.innerHTML = `<div class="member-welcome"><div class="member-card"><div class="member-avatar">${escapeHtml((user.username || "?").slice(0,1).toUpperCase())}</div><div><h3>欢迎，${escapeHtml(user.username)} 👋</h3><p class="member-sub">你已登录会员专区。</p></div></div><div class="member-perks"><div class="perk">✍️ 撰写并发布文章</div><div class="perk">📚 会员专享读书笔记合集</div><div class="perk">💬 文章下方专属评论区</div><div class="perk">🔖 收藏你喜欢的文章</div></div><button class="btn-publish" type="button" id="memberPublish">✍️ 现在写一篇文章</button><p class="member-note">更多功能陆续开放。</p></div>`;
     const pb = $("memberPublish"); if (pb) pb.addEventListener("click", openCompose);
   }
 

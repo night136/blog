@@ -11,6 +11,9 @@ dist/
 # 本地临时文件
 *.log
 
+# 本地生成产物（logo 处理结果、临时图片等）
+/outputs/
+
 # 静态预渲染构建产物（由 build.mjs 在 Cloudflare Pages 构建时生成，不入库）
 /generated/
 
