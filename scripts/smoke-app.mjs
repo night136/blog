@@ -48,6 +48,13 @@ const documentStub = {
   readyState: "complete", title: "", cookie: "", referrer: "",
 };
 
+// ⚠️ 定时器登记：app.js 里有 2 个常驻 setInterval（农历挂件 + 侧边圆盘钟，每秒一次）。
+// 若把原生 setInterval 直接注入沙箱，事件循环永不排空 —— 脚本输出全部结果后仍不退出，
+// 表现为「回归任务一直运行」（曾挂着 10h+）。这里统一登记，跑完在末尾清掉。
+const liveIntervals = new Set();
+const rawSetInterval = globalThis.setInterval;
+const rawClearInterval = globalThis.clearInterval;
+
 const sandbox = {
   document: documentStub,
   navigator: { userAgent: "node", clipboard: { writeText() {} }, language: "zh-CN", maxTouchPoints: 0 },
@@ -55,7 +62,16 @@ const sandbox = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {}, clear() {} },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {}, clear() {} },
   fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true }), text: async () => "", headers: { get: () => null } }),
-  setTimeout, clearTimeout, setInterval, clearInterval, setImmediate,
+  setTimeout, clearTimeout, setImmediate,
+  setInterval: (fn, ms, ...rest) => {
+    const id = rawSetInterval(fn, ms, ...rest);
+    liveIntervals.add(id);
+    return id;
+  },
+  clearInterval: (id) => {
+    liveIntervals.delete(id);
+    return rawClearInterval(id);
+  },
   requestAnimationFrame: (cb) => setTimeout(cb, 0), cancelAnimationFrame: clearTimeout,
   queueMicrotask,
   alert() {}, confirm: () => true, prompt: () => null,
@@ -83,6 +99,8 @@ sandbox.self = sandbox;
 
 // 捕获异步路径逃出的错误（async 函数里的异常）
 let asyncErr = null;
+let hardFail = false; // 出现真引用错误 → 以非 0 退出码结束，方便 CI / 回归串起来判断
+const isRefError = (e) => e instanceof ReferenceError || /is not defined|before initialization/.test((e && e.message) || "");
 process.on("unhandledRejection", (e) => { asyncErr = e; });
 process.on("uncaughtException", (e) => { asyncErr = e; });
 
@@ -91,7 +109,8 @@ try {
   vm.runInContext(code, sandbox, { filename: "app.js" });
   console.log("✅ app.js 顶层同步执行通过：无 ReferenceError / TDZ 中断");
 } catch (e) {
-  if (e instanceof ReferenceError || /is not defined|before initialization/.test(e.message)) {
+  if (isRefError(e)) {
+    hardFail = true;
     console.log("❌ 引用错误（真 bug）：" + e.constructor.name + ": " + e.message);
     console.log((e.stack || "").split("\n").slice(0, 8).join("\n"));
   } else {
@@ -103,9 +122,23 @@ try {
 await new Promise((r) => setTimeout(r, 300));
 if (asyncErr) {
   const e = asyncErr;
-  const isRef = e instanceof ReferenceError || /is not defined|before initialization/.test(e.message || "");
+  const isRef = isRefError(e);
+  if (isRef) hardFail = true;
   console.log((isRef ? "❌ 异步路径引用错误（真 bug）：" : "⚠️  异步路径其他错误：") + (e && e.constructor ? e.constructor.name : "") + ": " + (e && e.message));
   console.log(((e && e.stack) || "").split("\n").slice(0, 8).join("\n"));
 } else {
   console.log("✅ 异步路径（loadPosts / 组件初始化等）也未出现引用错误");
 }
+
+// 收尾：清掉沙箱内注册的常驻定时器，否则 Node 事件循环永不排空、进程不会退出
+for (const id of liveIntervals) rawClearInterval(id);
+liveIntervals.clear();
+
+// 兜底看门狗：万一 app.js 将来又引入别的常驻句柄（长连接 / 递归定时器等），
+// 也保证脚本在 15s 内退出，绝不会再变成「跑一整天」的僵尸任务。
+setTimeout(() => {
+  console.log("⚠️  冒烟测试超时兜底触发（仍有未释放的句柄），强制退出");
+  process.exit(hardFail ? 1 : 0);
+}, 15000).unref();
+
+process.exit(hardFail ? 1 : 0);
