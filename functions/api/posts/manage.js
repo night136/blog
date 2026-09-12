@@ -4,6 +4,7 @@
 //   action: "delete" → 删除文章（仅作者）
 import { verifyJWT, getCookie, json, isOwner, jwtSecret } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
+import { isBuildArtifactCover } from "../../_lib/cover.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
 // Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
@@ -39,6 +40,14 @@ async function getUsername(request, env) {
     const payload = await verifyJWT(token, jwtSecret(env));
     return payload.username || payload.sub || payload.name;
   } catch (e) { return null; }
+}
+
+// 读取该文章当前的封面原始值。老库可能没迁移出 cover 列，取不到就返回 ""。
+async function readCurrentCover(env, slug) {
+  try {
+    const r = await env.BLOG_DB.prepare("SELECT cover FROM posts WHERE slug = ?").bind(slug).first();
+    return (r && r.cover) ? String(r.cover) : "";
+  } catch (e) { return ""; }
 }
 
 export async function onRequestPost(ctx) {
@@ -83,10 +92,28 @@ export async function onRequestPost(ctx) {
     if (!mdBody) return json({ ok: false, error: "正文不能为空" }, 400);
     if (mdBody.length > MAX_BODY) return json({ ok: false, error: "正文过长（图片较多时请减少，单篇上限约 1.9MB）" }, 400);
 
-    let cover = coverInput;
-    if (!cover) {
-      const m = mdBody.match(/!\[[^\]]*\]\(([^)\s]+)\)/);
-      if (m) cover = m[1].slice(0, MAX_COVER);
+    // ── 封面：这里写错会永久毁掉用户的原始图片，必须走「宁可不动」策略 ──
+    // 背景：详情快照（/generated/posts/<slug>.json）里的 cover 是**构建产物路径**
+    // （build.mjs 的 materializeCover 把 data: base64 抽离成了 /generated/covers/<hash>.jpg）。
+    // 编辑器从快照加载文章 → 预填该路径 → 保存时把 D1 里原始的 data: 原文覆盖掉；
+    // 而 generated/ 是构建产物（不入库、每次构建还可能改名/消失）→ 原图无法恢复。
+    // 两道防线：① 前端「用户没动过封面就不提交 cover 字段」；② 这里对产物路径一律拒绝写回。
+    const coverProvided = body.cover !== undefined && body.cover !== null;
+    let cover = "";
+    let coverIgnored = false;
+    if (!coverProvided) {
+      // 未提交 cover（老前端，或前端判定用户未改动）→ 保持 D1 原值，绝不清空
+      cover = await readCurrentCover(env, slug);
+    } else if (isBuildArtifactCover(coverInput, request.url)) {
+      // 提交的是构建产物路径 → 视为「未提供封面」，保留原值并回告前端（不报错，避免整篇文章存不下去）
+      cover = await readCurrentCover(env, slug);
+      coverIgnored = true;
+    } else {
+      cover = coverInput;
+      if (!cover) {
+        const m = mdBody.match(/!\[[^\]]*\]\(([^)\s]+)\)/);
+        if (m) cover = m[1].slice(0, MAX_COVER);
+      }
     }
 
     try {
@@ -95,7 +122,7 @@ export async function onRequestPost(ctx) {
         `UPDATE posts SET title = ?, tag = ?, summary = ?, cover = ?, body = ?, words = ? WHERE slug = ?`
       ).bind(title, tag, summary || null, cover || null, mdBody, words, slug).run();
       await triggerRedeploy(env, ctx); // 重新生成静态预渲染文件
-      return json({ ok: true, slug });
+      return json({ ok: true, slug, coverIgnored, coverKept: !!cover });
     } catch (e) {
       return json({ ok: false, error: "更新失败：" + (e && e.message ? e.message : e) }, 500);
     }

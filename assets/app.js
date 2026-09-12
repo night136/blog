@@ -59,6 +59,9 @@
   const composePreview = $("composePreview");
   const composeSubmit = $("composeSubmit");
   const composeMsg = $("composeMsg");
+  // 编辑器封面是否被用户改动过：没动过就不提交 cover 字段，后端保持 D1 原值。
+  // （快照里的 cover 是构建产物路径，预填后原样提交会把原始图片永久覆盖掉）
+  let composeCoverDirty = false;
 
   // ── 搜索 ──
   const searchInput = $("searchInput");
@@ -101,6 +104,17 @@
     if (scheme === "http" || scheme === "https" || scheme === "mailto" || scheme === "tel") return url;
     if (allowDataImage && /^data:image\/(png|jpe?g|gif|webp|avif|bmp)[;,]/i.test(url)) return url;
     return "";
+  }
+
+  // 构建产物路径（/generated/...）：快照与 og:image 解析都会产出这类 URL，但它不是用户的原始封面。
+  // 它不入版本库、每次构建都可能改名 —— 若被当成封面写回数据库，D1 里的原始 data: 图片会被覆盖，
+  // 原图就永久丢失了（2026-09 真实事故）。编辑器与提交逻辑都要绕开它。
+  function isArtifactCover(raw) {
+    const s = String(raw == null ? "" : raw).trim();
+    if (!s) return false;
+    if (s.startsWith("/generated/")) return true;
+    if (!/^https?:\/\//i.test(s)) return false;
+    try { return new URL(s).pathname.startsWith("/generated/"); } catch (_) { return false; }
   }
 
   function mdToHtml(md) {
@@ -1731,12 +1745,17 @@
   // ===== 全屏写作页 =====
   function openCompose(post) {
     showView("compose");
+    composeCoverDirty = false; // 每次打开都重置「封面是否改动」
     if (post && post.slug) {
       editingSlug = post.slug;
       if (composeTitle) composeTitle.value = post.title || "";
       if (composeTag) composeTag.value = post.tag || "";
       if (composeSummary) composeSummary.value = post.summary || "";
-      if (composeCover) composeCover.value = post.cover || "";
+      // 封面：快照里的 cover 是构建产物路径（/generated/covers/...），不是用户的原始封面。
+      // 预填进去再保存会把它写回 D1，原始 data: 图片就此永久丢失 —— 因此不预填，
+      // 并靠 composeCoverDirty 让「未改动」的文章提交时不带 cover 字段（后端保持原值）。
+      const loadedCover = post.cover || "";
+      if (composeCover) composeCover.value = isArtifactCover(loadedCover) ? "" : loadedCover;
       if (composeBody) composeBody.value = post.body || "";
       if (composeSubmit) composeSubmit.textContent = "保存修改";
     } else {
@@ -1750,6 +1769,12 @@
     }
     if (composePreview) composePreview.innerHTML = mdToHtml((post && post.body) || "") || "<p style='color:var(--text-faint)'>实时预览…</p>";
     if (composeMsg) composeMsg.textContent = "";
+    // 快照里的封面是构建产物路径（不入库、每次构建可能改名），不能预填、更不能写回 ——
+    // 不填就保持数据库原值不变；要换封面则粘贴新的图片地址。
+    if (post && post.slug && isArtifactCover(post.cover) && composeMsg) {
+      composeMsg.textContent = "ℹ️ 封面未预填（快照中的封面是构建产物路径）：保持留空即保留原封面不变，要更换请粘贴新的图片地址。";
+      composeMsg.className = "form-msg";
+    }
   }
 
   // 编辑器工具栏（快捷插入 Markdown 语法）
@@ -1867,6 +1892,9 @@
   // 实时预览
   if (composeBody) composeBody.addEventListener("input", () => { if (composePreview) composePreview.innerHTML = mdToHtml(composeBody.value || "") || "<p style='color:var(--text-faint)'>实时预览…</p>"; });
 
+  // 用户一旦编辑封面输入框，就认为他确实要设置封面（提交时才带上 cover 字段）
+  if (composeCover) composeCover.addEventListener("input", () => { composeCoverDirty = true; });
+
   // 废弃旧弹窗（由全屏写作页替代）
   const composeModal = $("composeModal"); if (composeModal) composeModal.remove();
 
@@ -1878,7 +1906,11 @@
     if (composeSubmit) composeSubmit.disabled = true;
     try {
       let res, data;
-      const payload = { title, tag: (composeTag?.value || "").trim(), summary: (composeSummary?.value || "").trim(), cover: (composeCover?.value || "").trim(), body };
+      const payload = { title, tag: (composeTag?.value || "").trim(), summary: (composeSummary?.value || "").trim(), body };
+      // 编辑且用户没动过封面 → 不提交 cover 字段，后端保持 D1 里的原始值。
+      // 否则快照里的构建产物路径（/generated/covers/...）会被写回，覆盖掉原始 data: 封面。
+      // 新建文章仍按原逻辑提交（留空则后端自动取正文首图）。
+      if (!editingSlug || composeCoverDirty) payload.cover = (composeCover?.value || "").trim();
       if (editingSlug) {
         res = await fetch("/api/posts/manage", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "update", slug: editingSlug, ...payload }) });
       } else {
@@ -1887,7 +1919,12 @@
       data = await res.json();
       if (!res.ok || !data.ok) { if (composeMsg) { composeMsg.textContent = data.error || (editingSlug ? "保存失败" : "发布失败"); composeMsg.className = "form-msg err"; } return; }
       postCache.delete(editingSlug); // 文章有变动，失效详情缓存
-      if (composeMsg) { composeMsg.innerHTML = editingSlug ? "✅ 已保存" : "✅ 已发布"; composeMsg.className = "form-msg ok"; }
+      if (composeMsg) {
+        composeMsg.innerHTML = data.coverIgnored
+          ? "✅ 已保存（提交的封面是构建产物路径，已保留原封面）"
+          : (editingSlug ? "✅ 已保存" : "✅ 已发布");
+        composeMsg.className = data.coverIgnored ? "form-msg" : "form-msg ok";
+      }
       const slugToOpen = editingSlug || data.slug;
       editingSlug = "";
       if (composeSubmit) composeSubmit.textContent = "发布文章";

@@ -17,3 +17,33 @@ export function safeCover(c) {
   if (s.startsWith("/")) return s;       // 站点内相对路径封面（materializeCover 产物，仅 URL 不含图本身，体积小，保留）
   return ""; // data: 等内联图不进列表
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 构建产物封面判定：禁止把 generated/ 下的路径写回数据库
+// ─────────────────────────────────────────────────────────────────────────────
+// 背景（2026-09 线上事故）：build.mjs 会把 data: base64 封面抽离成静态文件
+// /generated/covers/<slug哈希>-<内容哈希>.<ext>，并把**构建产物路径**写进
+// generated/posts.json 与 generated/posts/<slug>.json。而编辑器是从这些快照加载文章的，
+// 于是封面输入框被预填成产物路径；用户只改正文、点一下保存，D1 里的原始 cover
+// （通常是 data: base64 原文）就被这条路径覆盖 —— 而 generated/ 是构建产物：
+// 不入库、每次构建都可能改名甚至消失，原图就此永久丢失（无法恢复，只能重新上传）。
+//
+// 判定规则：站内相对路径以 /generated/ 开头；或绝对 URL 且其 pathname 以 /generated/
+// 开头、且主机属于本站（请求 origin / SITE_URL）或 Cloudflare Pages/Workers 域。
+// 其它站点上的 /generated/ 路径不归我们管（可能是对方 CDN 的正常资源）。
+const ARTIFACT_COVER_PREFIX = "/generated/";
+
+export function isBuildArtifactCover(raw, origin) {
+  const v = String(raw == null ? "" : raw).trim();
+  if (!v) return false;
+  if (v.startsWith(ARTIFACT_COVER_PREFIX)) return true;
+  if (!/^https?:\/\//i.test(v)) return false;
+  let u;
+  try { u = new URL(v); } catch (_) { return false; }
+  if (!u.pathname.startsWith(ARTIFACT_COVER_PREFIX)) return false;
+  const host = u.host.toLowerCase();
+  if (origin) {
+    try { if (host === new URL(origin).host.toLowerCase()) return true; } catch (_) {}
+  }
+  return /(^|\.)pages\.dev$/.test(host) || /(^|\.)workers\.dev$/.test(host);
+}

@@ -3,7 +3,7 @@
 //   POST : 会员发文章（验证 JWT → 写入 posts 表）
 import { verifyJWT, getCookie, json, jwtSecret } from "./_lib/auth.js";
 import { readingTime } from "../_lib/readingTime.js";
-import { safeCover } from "../_lib/cover.js";
+import { safeCover, isBuildArtifactCover } from "../_lib/cover.js";
 
 const MAX_TITLE = 120;
 // 正文允许嵌 base64 图片：D1 单行上限 2,000,000 字节，正文留 1.9MB 余量（其他列也占空间）
@@ -155,7 +155,10 @@ export async function onRequestPost(ctx) {
   if (mdBody.length > MAX_BODY) return json({ ok: false, error: "正文过长（图片较多时请减少，单篇上限约 1.9MB）" }, 400);
 
   // 未手动填封面 → 从正文抽第一张图当封面（支持 data: 与 http(s) 链接）
-  let cover = coverInput;
+  // 注意：构建产物路径（/generated/...）绝不能入库 —— 它不入版本库、每次构建都可能改名，
+  // 存下来等于把封面指向一个随时会消失的文件（详见 _lib/cover.js 顶部注释）。
+  const coverArtifact = isBuildArtifactCover(coverInput, request.url);
+  let cover = coverArtifact ? "" : coverInput;
   if (!cover) {
     const m = mdBody.match(/!\[[^\]]*\]\(([^)\s]+)\)/);
     if (m) cover = m[1].slice(0, MAX_COVER);
