@@ -1353,6 +1353,10 @@
     document.documentElement.setAttribute("data-theme", mode);
     try { localStorage.setItem("blog-theme", mode); } catch (_) {}
     document.querySelectorAll(".theme-toggle").forEach((b) => { b.textContent = mode === "dark" ? "☀️" : "🌙"; });
+    // 同步移动端浏览器 UI 配色（地址栏/状态栏）。用单条 meta 由 JS 管，才能跟随站内主题开关，
+    // 而不是只跟随系统 prefers-color-scheme —— 用户在深色系统里手动切了浅色主题也不会割裂。
+    const tc = document.getElementById("theme-color");
+    if (tc) tc.setAttribute("content", mode === "dark" ? "#2A2621" : "#F5EFE6");
   }
   // ② 主题切换：从按钮位置圆形扩散铺满再换色
   function themeBg(mode) {

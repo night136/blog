@@ -65,7 +65,15 @@
 [hidden] { display: none !important; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  /* 锁定文字缩放：个别安卓浏览器（尤其横屏）会自作主张放大正文字号，页面就会「莫名变大」 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* 去掉点按时系统默认的灰块闪烁 —— 它与奶油玻璃拟态质感冲突。
+     反馈交给 :active / 交互态自己表达。 */
+  -webkit-tap-highlight-color: transparent;
+}
 
 /* ── 背景：暖色渐变 + 柔和光斑 ── */
 body::before {
@@ -126,6 +134,8 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   position: sticky; top: 24px;
   height: calc(100vh - 48px);
   transition: transform .3s ease;
+  /* 抽屉/长侧栏内滚到底时，不要继续把整页带着橡皮筋抖动 */
+  overscroll-behavior: contain;
 }
 .hamburger { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font-size: 20px; cursor: pointer; color: var(--text); margin-left: auto; padding: 6px 10px; }
 .theme-toggle { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 7px 11px; cursor: pointer; font-size: 16px; transition: all .18s; }
@@ -992,7 +1002,9 @@ body.lightbox-open { overflow: hidden; }
 .post-detail.post-anim > .toc { animation-delay: .26s; }
 .post-detail.post-anim > .post-body { animation-delay: .32s; }
 @keyframes postReveal { from { opacity: 0; transform: translateY(22px) scale(.97); } to { opacity: 1; transform: none; } }
-.post-body { font-size: 16px; line-height: 1.9; color: var(--text); }
+/* overflow-wrap: anywhere —— 正文里贴了超长 URL / 连续英文时不会把卡片撑出横向滚动条。
+   纯防御：正常中文段落不受影响（中文本身处处可断），代码块另有 overflow-x:auto 自理。 */
+.post-body { font-size: 16px; line-height: 1.9; color: var(--text); overflow-wrap: anywhere; }
 .post-body h2 { font-family: var(--serif); font-size: 23px; font-weight: 700; margin: 32px 0 14px; padding-left: 14px; border-left: 4px solid var(--accent); scroll-margin-top: 80px; }
 .post-body h3 { font-family: var(--serif); font-size: 19px; font-weight: 700; margin: 24px 0 10px; scroll-margin-top: 80px; }
 .post-body p { margin: 14px 0; }
@@ -1364,10 +1376,17 @@ body.lightbox-open { overflow: hidden; }
 
 /* 移动端：便签两列、表单更紧凑 */
 @media (max-width: 640px) {
-  .g-board-inner { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  /* minmax(0, 1fr) 而不是 1fr —— 1fr 的最小尺寸是 min-content，长英文/长链接会把列撑破 */
+  .g-board-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .guestbook-board { padding: 18px 14px; }
   .guestbook-form { padding: 16px 14px; }
   .guestbook-stats { font-size: 13px; gap: 8px; }
+}
+
+/* 超窄屏（≤380px，如 iPhone SE 一代 / 老安卓）：两列会把每列压到 ~150px 以下，
+   长标题断得很碎反而更难读 → 回落单列。放在 640 块之后才会生效。 */
+@media (max-width: 380px) {
+  .g-board-inner { grid-template-columns: 1fr; }
 }
 
 /* ── 触屏输入框统一 ≥16px ──

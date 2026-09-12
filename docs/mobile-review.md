@@ -9,9 +9,9 @@
 |---|---|
 | P0（#1 农历懒加载 / #2 dvh+安全区 / #3 输入框 16px） | ✅ **已实施**（2026-09-12） |
 | P1（#4 触控尺寸 / #5 弹窗可滚 / #6 手势与 aria / #7 hover 隔离） | ✅ **已实施**（2026-09-12） |
-| P2（#8 ~ #15） | ⬜ 待做 |
+| P2（#8 ~ #15） | ✅ **已实施**（2026-09-12） |
 
-P0 / P1 的落地细节与守护断言见文末「P0 实施记录」「P1 实施记录」。
+P0 / P1 / P2 的落地细节与守护断言见文末「P0 实施记录」「P1 实施记录」「P2 实施记录」。
 
 ---
 
@@ -25,7 +25,7 @@ P0 / P1 的落地细节与守护断言见文末「P0 实施记录」「P1 实施
 | `assets/vendor/lunar.js` | 426KB → br **87KB**，**每次加载都拉** | ⚠️ 有问题 |
 | `assets/vendor/highlight.min.js` | 119KB → br 35KB，**已有代码块才懒加载** | ✅ 已优化 |
 | viewport | `width=device-width, initial-scale=1.0`（无 `viewport-fit=cover`） | 缺 |
-| `dvh` / `safe-area-inset` / `theme-color` / `-webkit-tap-highlight-color` / `overscroll-behavior` | 全站 **0 处** | 缺 |
+| `dvh` / `safe-area-inset` / `theme-color` / `-webkit-tap-highlight-color` / `overscroll-behavior` | 审查时全站 **0 处** | 缺 → 已在 P0/P1/P2 补齐 |
 | `:hover` 规则 | 52 处，**无一被 `@media (hover:hover)` 包裹** | 触屏会粘 |
 | 触摸手势 | **0 处**（全站无 `touchstart`/`pointerdown`） | 缺 |
 
@@ -141,6 +141,8 @@ iOS Safari 对 **<16px** 的输入框会在聚焦时把整页放大，且收起�
 ---
 
 ## P2 — 打磨项
+
+> 8 项均已于 2026-09-12 落地，实施细节与取舍见文末「P2 实施记录」。
 
 8. **缺 `theme-color`**：移动端浏览器地址栏不跟随暖米色主题，深色模式下尤其割裂。
    加 `<meta name="theme-color" content="#FFFAF4" media="(prefers-color-scheme: light)">` 与深色一条。
@@ -272,3 +274,55 @@ iOS Safari 对 **<16px** 的输入框会在聚焦时把整页放大，且收起�
 - 负向验证 **8 个回退场景全部拦住**（弹窗退回居中 / 删触屏块 / 删手势 / aria 不同步 / ESC 不管抽屉 /
   showView 退回手写 / 解开一条 hover / 混合选择器整体包裹）。
 - 全量回归：`og 40 / xss 23 / jwt 18 / manage / cover 35 / asset 14 / frontend 15 / mobile 50 / lunar 9 / smoke`，**9 秒**跑完。
+
+---
+
+## P2 实施记录（2026-09-12）
+
+### #8 `theme-color`
+- `index.html` 加 **单条** `<meta name="theme-color" id="theme-color" content="#F5EFE6">`。
+- 为什么不用文档里最初写的「media 两条（light / dark）」：`theme-color` 多条时 UA 取**第一个 media 匹配**的，
+  而 media 只能看系统 `prefers-color-scheme`，**看不到站内主题开关**。本站有手动切换按钮，
+  系统深色 + 站内浅色就会割裂。改为单条交给 JS 管：
+  `applyTheme()` 里 `setAttribute("content", mode === "dark" ? "#2A2621" : "#F5EFE6")`，
+  与 CSS 的 `--bg`（`#F5EFE6` / `#2A2621`）严格对齐，静态默认值即浅色，JS 未执行也不突兀。
+- `applyTheme` 是主题的唯一出口（初始 `localStorage` 恢复、系统偏好变化都走它），所以只需挂一处。
+
+### #9 `-webkit-tap-highlight-color: transparent`
+- 写在 `html` 规则里（连同 #15），点按不再有系统灰块。
+
+### #10 `overscroll-behavior`
+- 弹窗的 `.modal-mask` 在 P1 已补；本次给 `.sidebar` 补 `contain`（桌面 sticky 侧栏与移动抽屉共用一条基础规则，
+  不是滚动容器时该声明不生效，无副作用）。
+
+### #11 正文长串换行
+- `.post-body` 加 `overflow-wrap: anywhere`。代码块另有 `overflow-x: auto` 自理，不受影响。
+
+### #12 便签墙窄屏列宽
+- **没**采用文档里提的 `auto-fill minmax(150px, 1fr)`：在 640px 屏上它会算出 3 列，
+  直接改变现有观感；≤375px 又会掉到单列，跨度太大。
+- 最终：640px 保持两列但改 `repeat(2, minmax(0, 1fr))`（`1fr` 的最小尺寸是 min-content，
+  长串有撑破列的风险），再加 `@media (max-width: 380px)` 回落单列兜住 iPhone SE 一代 / 老安卓。
+- ⚠️ 顺序：380 块必须写在 640 块**之后**（同特异性靠后来居上），已入断言。
+
+### #13 字体瘦身
+- `Noto Serif SC` 请求从 `400;600;700;900` 收到 **`400;700;900`**。
+- **只砍 600，保留 900**：文档原文「砍到 400/700 两档」与同句「700/900 做标题」自相矛盾；
+  900 是 `.hero h2` / `.page-head h2` / `.post-detail h2` / `.slide-title` / `.auth-title` 的字重，
+  砍了标题会明显变细，破坏 Bento 风格。600 只用于次要小标签，缺档时浏览器按 CSS 规范就近取 700，
+  视觉几乎无差，却能少下整套 CJK 子集。
+
+### #14 `assets/logo.jpg` 残留
+- 已删除（476KB，未被任何 html/css/js 引用，上次 logo 调整遗留）。断言会在「存在但无引用」时报错。
+
+### #15 `-webkit-text-size-adjust`
+- 与 #9 一起写在 `html`：`-webkit-text-size-adjust: 100%; text-size-adjust: 100%;`
+  防个别安卓浏览器横屏自作主张放大正文字号。
+
+### 新增回归（P2）
+- `verify-mobile-guards.mjs` 从 50 → **65 项**，新增 `[10]` 块共 15 条：
+  theme-color 存在 / 带 id / 默认浅色 / `applyTheme` 同步 / 深色值与 `--bg` 一致；
+  text-size-adjust；tap-highlight；`.sidebar` overscroll；`.post-body` overflow-wrap；
+  便签 `minmax(0,1fr)` / ≤380 单列 / 380 在 640 之后；字体 3 档且含 900 不含 600；logo 残留。
+- 负向验证 4 个回退场景（去掉 meta id / 去掉 tap-highlight / 字体加回 600 / 便签退回 `1fr`）**全部拦住**。
+- 全量回归：`og 40 / xss 23 / jwt 18 / manage / cover 35 / asset 14 / frontend 15 / mobile 65 / lunar 9 / smoke`，**8 秒**跑完。

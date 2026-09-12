@@ -236,5 +236,58 @@ console.log("\n[9] hover 效果只在「支持真实悬停」的设备上生效�
     "混合选择器被整体包进去了：触屏上复制按钮的焦点态会失效");
 }
 
+console.log("\n[10] P2 打磨：浏览器 UI 配色 / 点按反馈 / 滚动链 / 长串换行 / 字体瘦身");
+{
+  const themeMeta = htmlSrc.match(/<meta\s+name="theme-color"[^>]*>/);
+  check("存在 theme-color meta（地址栏跟随暖米色主题）",
+    !!themeMeta, "未找到 theme-color");
+  check("theme-color 带 id（供 applyTheme 动态改写，才能跟随站内主题开关）",
+    !!themeMeta && /\bid="theme-color"/.test(themeMeta[0]), themeMeta ? themeMeta[0] : "");
+  check("theme-color 默认值是浅色主题背景（JS 未跑时也不割裂）",
+    !!themeMeta && /content="#F5EFE6"/.test(themeMeta[0]), themeMeta ? themeMeta[0] : "");
+  check("applyTheme 内同步 theme-color（含深色值）",
+    /function applyTheme[\s\S]{0,900}?getElementById\(\s*"theme-color"\s*\)[\s\S]{0,300}?setAttribute\(\s*"content"/.test(appSrc),
+    "applyTheme 未同步 theme-color");
+  check("深色 theme-color 与 CSS 变量 --bg 的深色值一致（#2A2621）",
+    /mode === "dark" \? "#2A2621" : "#F5EFE6"/.test(appSrc),
+    "深色主题色与 [data-theme=dark] 的 --bg 不一致");
+
+  const htmlRule = (cssSrc.match(/(?:^|\n)html\s*\{[^}]*\}/) || [])[0] || "";
+  check("html 锁定文字缩放（-webkit-text-size-adjust: 100%）",
+    /-webkit-text-size-adjust:\s*100%/.test(htmlRule), htmlRule.slice(0, 200));
+  check("html 去掉点按灰块闪烁（-webkit-tap-highlight-color: transparent）",
+    /-webkit-tap-highlight-color:\s*transparent/.test(htmlRule), htmlRule.slice(0, 200));
+
+  const baseSidebar = (cssSrc.match(/\.sidebar\s*\{[^}]*\}/g) || []).find((r) => /position:\s*sticky/.test(r)) || "";
+  check("侧栏/抽屉内滚动不带动整页（overscroll-behavior: contain）",
+    /overscroll-behavior:\s*contain/.test(baseSidebar), baseSidebar.slice(0, 200));
+
+  check("正文长 URL 会就地折行（.post-body overflow-wrap: anywhere）",
+    /\.post-body\s*\{[^}]*overflow-wrap:\s*anywhere/.test(cssSrc), "未找到 overflow-wrap: anywhere");
+
+  check("便签列宽用 minmax(0,1fr)（1fr 的 min-content 下限会被长串撑破）",
+    /\.g-board-inner\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(cssSrc),
+    "窄屏便签列未加 minmax(0,1fr)");
+  const g380 = cssSrc.search(/@media \(max-width: 380px\)/);
+  check("超窄屏（≤380px）便签回落单列",
+    g380 >= 0 && /@media \(max-width: 380px\)\s*\{\s*\.g-board-inner\s*\{\s*grid-template-columns:\s*1fr/.test(cssSrc),
+    "未找到 ≤380px 的单列兜底");
+  const g640 = cssSrc.search(/@media \(max-width: 640px\)\s*\{[\s\S]{0,200}?\.g-board-inner/);
+  check("380 兜底写在 640 之后（否则不生效）",
+    g380 > g640, "640 块位置=" + g640 + "，380 块位置=" + g380);
+
+  const fontLink = (htmlSrc.match(/fonts\.font\.im\/css2\?[^"]+/) || [])[0] || "";
+  check("字体只请求 3 档字重（砍掉 600，视觉靠就近回退）",
+    /wght@400;700;900\b/.test(fontLink) && !/;600\b/.test(fontLink), "字体链接：" + fontLink);
+  check("保留 900（Bento 标题的核心字重，砍了会明显变细）",
+    /wght@[\d;]*900/.test(fontLink), "字体链接：" + fontLink);
+
+  const logoPath = path.join(root, "assets", "logo.jpg");
+  const logoReferenced = /logo\.jpg/.test(htmlSrc + appSrc + cssSrc);
+  check("未被引用的 assets/logo.jpg 残留已清理",
+    !fs.existsSync(logoPath) || logoReferenced,
+    "assets/logo.jpg 存在（476KB）却没有任何页面引用");
+}
+
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
 process.exit(fail === 0 ? 0 : 1);
