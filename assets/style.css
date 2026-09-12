@@ -621,7 +621,8 @@ body.lightbox-open { overflow: hidden; }
   .post-detail .post-meta { flex-wrap: wrap; gap: 8px; font-size: 12px; }
   .post-actions { width: 100%; margin-left: 0; margin-top: 4px; }
   .post-actions button { flex: 1; padding: 5px 8px; font-size: 11px; }
-  .post-cover { max-height: 62vh; border-radius: var(--radius-sm); }
+  /* 移动端同样固定画幅裁剪；16:9 在窄屏约 200px 高，与列表卡片(176px)观感一致 */
+  .post-cover { aspect-ratio: 16 / 9; border-radius: var(--radius-sm); }
   .post-body { font-size: 15px; line-height: 1.8; }
   .post-body h2 { font-size: 20px; padding-left: 11px; }
   .post-body h3 { font-size: 17px; }
@@ -758,10 +759,10 @@ body.lightbox-open { overflow: hidden; }
 }
 
 /* ── 文章封面大图 ── */
-/* 正文封面要「完整展示」而不是裁剪成横幅：object-fit:cover 会把图上下切掉（列表卡片那样切是对的，
-   详情页再切用户就会说「封面显示不全」）。这里 height:auto 保持原始比例，contain 让超高图在
-   78vh 内完整缩放，背景垫底色避免出现空洞。 */
-.post-cover { width: 100%; height: auto; max-height: 78vh; object-fit: contain; background: var(--card); border-radius: var(--radius); margin: 8px 0 20px; box-shadow: var(--shadow); }
+/* 详情页封面与列表缩略图保持**同一种观感**：固定 16:9 画幅 + object-fit:cover 裁掉上下。
+   不用 height:auto / max-height + contain —— 那样图片比例不一，宽高随图浮动、排版跳动，
+   且与列表卡片（.card-cover-img 也是 cover 裁剪）视觉不一致。 */
+.post-cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: center; background: var(--card); border-radius: var(--radius); margin: 8px 0 20px; box-shadow: var(--shadow); }
 
 /* ── 评论区：奶油卡片 + 便签感 ── */
 .comments { margin-top: 44px; padding-top: 28px; border-top: 1px dashed var(--border); }
@@ -985,7 +986,9 @@ body.lightbox-open { overflow: hidden; }
 .post-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
 .post-body :not(pre) > code { background: var(--accent-soft); color: var(--accent-dark); padding: 2px 6px; border-radius: 6px; }
 .post-body img { max-width: 100%; border-radius: var(--radius-sm); margin: 16px 0; box-shadow: var(--shadow-sm); transition: opacity .35s ease; }
-.post-body img.img-lazy, .post-cover.img-lazy { min-height: 160px; background: var(--card); box-shadow: none; opacity: .35; }
+.post-body img.img-lazy { min-height: 160px; }
+/* 占位态只加底色与降透明；详情页封面有 aspect-ratio 定高，不能再被 min-height 撑破比例 */
+.post-body img.img-lazy, .post-cover.img-lazy { background: var(--card); box-shadow: none; opacity: .35; }
 .post-body > p:first-of-type::first-letter { font-family: var(--serif); font-size: 3.1em; font-weight: 800; float: left; line-height: .82; padding: 8px 12px 0 0; color: var(--accent); }
 
 /* ===== 目录 TOC ===== */

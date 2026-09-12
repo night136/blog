@@ -49,19 +49,23 @@ console.log("\n[2] 封面加载失败必须能自愈，不能一次失败就永�
     /tries\s*<\s*2/.test(appSrc), "未找到 tries < 2");
 }
 
-console.log("\n[3] 详情页封面要完整展示，列表卡片才裁剪");
+console.log("\n[3] 详情页封面与列表缩略图保持同一种观感：固定画幅 + 裁剪");
 {
-  // 事故：详情页用 object-fit:cover + max-height:440px 把图上下裁掉，用户反馈"封面显示不全"。
+  // 约定（用户 2026-09-12 明确）：详情页封面要跟列表封面一致 —— 都是固定画幅、object-fit:cover 裁掉上下。
+  // 不要改成 contain / height:auto（宽高随图浮动、排版跳动，且与列表不一致）。
   const postCoverRules = cssSrc.match(/\.post-cover\s*\{[^}]*\}/g) || [];
-  const hasContain = postCoverRules.some((r) => /object-fit:\s*contain/.test(r));
   const hasCoverCrop = postCoverRules.some((r) => /object-fit:\s*cover/.test(r));
-  check("存在 .post-cover 规则且用 object-fit: contain", hasContain, postCoverRules.join(" ") || "未找到 .post-cover 规则");
-  check("没有任何 .post-cover 规则用 object-fit: cover（会裁掉图）", !hasCoverCrop, postCoverRules.join(" "));
-  check("详情页封面保留原始比例（height: auto）",
-    postCoverRules.some((r) => /height:\s*auto/.test(r)), postCoverRules.join(" "));
+  const hasContain = postCoverRules.some((r) => /object-fit:\s*contain/.test(r));
+  const hasFixedFrame = postCoverRules.some((r) => /aspect-ratio\s*:/.test(r) || /(^|[^-])height:\s*\d/.test(r));
+  const hasAutoHeight = postCoverRules.some((r) => /height:\s*auto/.test(r));
+
+  check("存在 .post-cover 规则且用 object-fit: cover", hasCoverCrop, postCoverRules.join(" ") || "未找到 .post-cover 规则");
+  check("没有任何 .post-cover 规则用 object-fit: contain（会完整展示、与列表不一致）", !hasContain, postCoverRules.join(" "));
+  check("详情页封面是固定画幅（aspect-ratio 或固定 height），裁剪可预期", hasFixedFrame, postCoverRules.join(" "));
+  check("详情页封面不再用 height: auto（会让宽高随图浮动）", !hasAutoHeight, postCoverRules.join(" "));
 
   const cardCover = cssSrc.match(/\.card-cover-img\s*\{[^}]*\}/);
-  check("列表卡片仍用 object-fit: cover（缩略图语义，不该改）",
+  check("列表卡片封面同为 object-fit: cover（两者观感一致）",
     !!cardCover && /object-fit:\s*cover/.test(cardCover[0]),
     cardCover ? cardCover[0] : "未找到 .card-cover-img 规则");
 }
