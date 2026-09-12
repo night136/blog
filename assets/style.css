@@ -216,6 +216,13 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 .lunar-clock strong { color: var(--accent-dark); font-weight: 700; }
 .lunar-clock .lunar-time { color: var(--text-faint); font-size: 12px; letter-spacing: .5px; }
+/* 窄屏下这行是「按需加载农历库」的入口（不点就不下载 426KB） */
+.lunar-clock[data-lunar-cta="1"] { cursor: pointer; }
+.lunar-clock[data-lunar-cta="1"]:active { transform: scale(.97); }
+.lunar-clock .lunar-hint {
+  font-size: 12px; letter-spacing: .3px; color: var(--accent-dark);
+  background: var(--accent-soft); border-radius: 999px; padding: 1px 9px;
+}
 
 /* ── 搜索 ── */
 .search-box { margin-top: 18px; }
@@ -523,7 +530,7 @@ body.lightbox-open { overflow: hidden; }
 
 /* ── 全屏写作页 ── */
 .view-compose .back-btn { margin-bottom: 18px; }
-.compose-full { display: flex; flex-direction: column; gap: 16px; height: calc(100vh - 120px); min-height: 500px; }
+.compose-full { display: flex; flex-direction: column; gap: 16px; height: calc(100vh - 120px); height: calc(100dvh - 120px); min-height: 500px; }
 .compose-meta { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
 .compose-meta input { padding: 12px 15px; border: 1px solid var(--border); border-radius: var(--radius-xs); font-size: 15px; background: var(--surface-2); color: var(--text); font-family: inherit; transition: border-color .2s, box-shadow .2s; }
 .compose-meta input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -572,18 +579,24 @@ body.lightbox-open { overflow: hidden; }
 @media (max-width: 980px) {
   .layout { grid-template-columns: 1fr; padding: 0 16px; }
   .rightbar { display: none; }
-  .sidebar { position: fixed; left: 0; top: 0; height: 100vh; width: min(85vw, 320px); transform: translateX(-100%); z-index: 90; border-radius: 0 var(--radius) var(--radius) 0; border: none; border-right: 1px solid var(--border); flex-direction: column; padding: 24px 22px; overflow-y: auto; margin: 0; }
+  /* 100dvh 优先：iOS/安卓地址栏收展时 100vh 恒等于「地址栏展开态」高度，抽屉底部会被切掉 */
+  .sidebar { position: fixed; left: 0; top: 0; height: 100vh; height: 100dvh; width: min(85vw, 320px); transform: translateX(-100%); z-index: 90; border-radius: 0 var(--radius) var(--radius) 0; border: none; border-right: 1px solid var(--border); flex-direction: column; padding: 24px 22px; overflow-y: auto; margin: 0; }
   .sidebar.open { transform: translateX(0); }
   .hamburger { display: block; position: fixed; top: 9px; left: 10px; z-index: 95; }
+  /* 安全区：配合 index.html 的 viewport-fit=cover，避免刘海/挖孔/手势条压住固定按钮 */
+  .hamburger { top: max(9px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); }
   .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(45,40,34,.35); z-index: 89; }
   .sidebar-overlay[hidden] { display: none; }
   .sidebar-footer { margin-top: 20px; }
-  .content { padding: 64px 0 20px; }
+  .content { padding: 64px 0 20px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .hero { padding: 28px 20px; }
   .hero h2 { font-size: 26px; }
   .hero-avatar { width: 60px; height: 60px; }
   .search-box { width: 100%; }
   .topbar-inner { height: 54px; gap: 10px; padding: 0 14px; }
+  /* 安全区：必须写在 padding 简写之后，否则会被它重置（配合 viewport-fit=cover，
+     避免刘海/挖孔/手势条压住顶栏内容）。触屏输入框字号统一在文件末尾的专用块里处理。 */
+  .topbar-inner { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
   .topbar-brand { font-size: 18px; margin-left: 42px; }
   .theme-toggle { width: 34px; height: 34px; font-size: 15px; }
   /* 抽屉里的 widget 稍微放大，方便手机阅读和点击 */
@@ -606,7 +619,7 @@ body.lightbox-open { overflow: hidden; }
   .slider-arrow { top: 14px; transform: none; }
   .slider-arrow.prev { left: auto; right: 54px; }
   .slider-arrow.next { right: 14px; }
-  .compose-full { height: calc(100vh - 100px); min-height: auto; padding-bottom: 12px; }
+  .compose-full { height: calc(100vh - 100px); height: calc(100dvh - 100px); min-height: auto; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .compose-panels { grid-template-columns: 1fr; }
   .compose-preview { max-height: 260px; padding: 16px 18px; }
   .compose-row { flex-direction: column; }
@@ -1348,4 +1361,19 @@ body.lightbox-open { overflow: hidden; }
   .guestbook-board { padding: 18px 14px; }
   .guestbook-form { padding: 16px 14px; }
   .guestbook-stats { font-size: 13px; gap: 8px; }
+}
+
+/* ── 触屏输入框统一 ≥16px ──
+   放在文件最末尾：各组件自己的 `.guestbook-form input{14px}` / `.search-box input{15px}` 等
+   与这里的特异性相同，靠「后来居上」确保生效。
+   原因：iOS Safari 对 font-size < 16px 的输入框会在聚焦时把整页放大，收回键盘后常常不还原。
+   注意 #composeTitle 用 ID 选择器（18px）特意更大，不受影响。 */
+@media (max-width: 980px) {
+  .search-box input,
+  .compose-meta input,
+  .compose-panels input,
+  .compose-panels textarea,
+  .auth-form input,
+  .guestbook-form input,
+  .guestbook-form textarea { font-size: 16px; }
 }

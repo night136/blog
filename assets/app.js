@@ -1391,34 +1391,97 @@
   // ===== 农历 + 时辰 =====
   const DI_ZHI = ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
   const SHICHEN_RANGE = ["23:00–01:00","01:00–03:00","03:00–05:00","05:00–07:00","07:00–09:00","09:00–11:00","11:00–13:00","13:00–15:00","15:00–17:00","17:00–19:00","19:00–21:00","21:00–23:00"];
-  function updateLunar() {
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  // lunar.js 体积 426KB（压缩后约 87KB）。宽屏照旧空闲时自动加载；窄屏（≤980px）右侧栏
+  // 整体 display:none，详细农历与「此刻」时钟都看不到，唯一用到 Lunar 的只有 hero 里这行干支
+  // —— 不值得让每个手机访客都下载 87KB。故窄屏改为「按需加载」：先用本地地支算出时辰 + 时间
+  // （不依赖 lunar.js），用户点那行才加载库并升级为干支/农历月日。
+  let lunarLibState = "idle"; // idle | loading | ready | failed
+  let heroLineKey = "";       // hero 行的渲染签名，避免每秒重建 DOM
+  let lunarDetailDayKey = ""; // 详细农历（节气/整月月历）已渲染的日期，避免每秒重算
+  const narrowMQ = window.matchMedia("(max-width: 980px)");
+  const isNarrow = () => narrowMQ.matches;
+
+  function shichenOf(d) {
+    const idx = Math.floor(((d.getHours() + 1) % 24) / 2);
+    return { idx, name: DI_ZHI[idx] };
+  }
+
+  function loadLunarLib() {
+    if (lunarLibState === "loading" || lunarLibState === "ready") return;
+    lunarLibState = "loading";
+    const s = document.createElement("script");
+    s.src = "assets/vendor/lunar.js";
+    s.async = true;
+    s.onload = function () {
+      lunarLibState = "ready";
+      heroLineKey = ""; lunarDetailDayKey = "";
+      try { tickClock(); renderLunarDetails(); updateSideClock(); } catch (e) {}
+    };
+    s.onerror = function () { lunarLibState = "failed"; heroLineKey = ""; try { tickClock(); } catch (e) {} };
+    document.head.appendChild(s);
+  }
+
+  // hero 那行「时辰 + 时间」：每秒调用，必须极轻 —— 只在「跨日 / 换时辰 / 库状态变化」时重建，
+  // 其余每一拍仅改秒数文本。
+  function tickClock() {
     const el = $("lunarClock");
+    if (!el) return;
     const now = new Date();
-    const shichenIdx = Math.floor(((now.getHours() + 1) % 24) / 2);
-    const shichen = DI_ZHI[shichenIdx];
-    if (typeof Lunar === "undefined") {
-      if (el) el.textContent = "农历组件加载中…";
-      return;
+    const sc = shichenOf(now);
+    const time = pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
+    const ready = typeof Lunar !== "undefined";
+    const dayKey = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
+    const key = (ready ? "ready" : lunarLibState) + "|" + dayKey + "|" + sc.name;
+    if (key === heroLineKey) {
+      const t = el.querySelector(".lunar-time");
+      if (t) { t.textContent = time; return; }
     }
-    const lunar = Lunar.fromDate(now);
-    const gz = lunar.getYearInGanZhi();
-    const shengxiao = lunar.getYearShengXiao();
-    const month = lunar.getMonthInChinese();
-    const day = lunar.getDayInChinese();
-    const pad = (n) => String(n).padStart(2, "0");
-    if (el) {
-      el.innerHTML = `🗓 ${gz}年（${shengxiao}）${month}月${day} · <strong>${shichen}时</strong> <span class="lunar-time">${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}</span>`;
-      el.title = `农历时辰：${shichen}时（${SHICHEN_RANGE[shichenIdx]}）`;
+    heroLineKey = key;
+    if (ready) {
+      const lunar = Lunar.fromDate(now);
+      el.innerHTML = "🗓 " + lunar.getYearInGanZhi() + "年（" + lunar.getYearShengXiao() + "）" +
+        lunar.getMonthInChinese() + "月" + lunar.getDayInChinese() +
+        " · <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>";
+      el.title = "农历时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
+      el.dataset.lunarCta = "0";
+    } else {
+      let hint = "";
+      if (isNarrow()) {
+        hint = lunarLibState === "loading" ? "<span class=\"lunar-hint\">农历加载中…</span>"
+          : lunarLibState === "failed" ? "<span class=\"lunar-hint\">农历加载失败 · 点按重试</span>"
+          : "<span class=\"lunar-hint\">查农历</span>";
+      }
+      el.innerHTML = "🕐 <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>" + hint;
+      el.title = "时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
+      el.dataset.lunarCta = (isNarrow() && lunarLibState !== "loading") ? "1" : "0";
     }
-    // 侧边栏农历挂件：月份 + 日期条 + 24节气
+  }
+
+  // 详细农历挂件（右侧栏）：节气 + 整月月历属于「一天只变一次」的重活，按日缓存。
+  // 原实现把它挂在 1 秒定时器里 —— 等于每秒重算节气并重建 42 个日历格子，必须避免。
+  function renderLunarDetails() {
+    if (typeof Lunar === "undefined") return;
+    const now = new Date();
+    const dayKey = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
+    if (dayKey === lunarDetailDayKey) return;
     const gzEl = $("lunarGanZhi");
     const monthEl = $("lunarMonth");
     const jqEl = $("lunarJieQi");
     const daysEl = $("lunarDays");
     const scEl = $("lunarShiChen");
+    if (!gzEl && !monthEl && !jqEl && !daysEl && !scEl) return; // 窄屏没有这些节点，直接跳过
+    lunarDetailDayKey = dayKey;
+    const lunar = Lunar.fromDate(now);
+    const gz = lunar.getYearInGanZhi();
+    const shengxiao = lunar.getYearShengXiao();
+    const month = lunar.getMonthInChinese();
+    const day = lunar.getDayInChinese();
+    const sc = shichenOf(now);
     if (gzEl) gzEl.textContent = `${gz}年 · ${shengxiao}`;
     if (monthEl) monthEl.textContent = `农历 ${month}月 · ${day}`;
-    if (scEl) scEl.textContent = `${shichen}时（${SHICHEN_RANGE[shichenIdx]}）`;
+    if (scEl) scEl.textContent = `${sc.name}时（${SHICHEN_RANGE[sc.idx]}）`;
 
     // 24节气：今日节气 or 下一个节气倒计时
     if (jqEl) {
@@ -1495,8 +1558,15 @@
     minHand.style.transform = `rotate(${min * 6}deg)`;
     hourHand.style.transform = `rotate(${hour * 30}deg)`;
   }
-  updateSideClock();
-  setInterval(() => { updateLunar(); updateSideClock(); }, 1000);
+  if (!isNarrow()) updateSideClock();
+  // 单一秒级定时器（原来是两个，农历/时钟各被跑了两遍）。窄屏右侧栏整体 display:none，
+  // 直接不跑挂件计算。
+  setInterval(() => {
+    tickClock();
+    if (isNarrow()) return;
+    renderLunarDetails();
+    updateSideClock();
+  }, 1000);
 
   // ===== 全局交互 =====
   const topbarEl = $("topbar");
@@ -2028,31 +2098,34 @@
   if (memberNav) memberNav.addEventListener("click", async () => { const user = await checkSession(); renderMember(user); });
 
   // ===== 启动 =====
-  updateLunar();
-  setInterval(updateLunar, 1000);
+  tickClock();
 
-  // 农历库体积较大(~436KB)，用 setTimeout 异步加载避免阻塞首屏；
-  // updateLunar 已内置 typeof Lunar 保护，库加载完成前 widget 显示占位，加载后自动生效
-  (function loadLunarLib() {
-    var done = false;
-    function inject() {
-      if (done) return; done = true;
-      var s = document.createElement("script");
-      s.src = "assets/vendor/lunar.js";
-      s.async = true;
-      s.onload = function () { try { updateLunar(); updateSideClock(); } catch (e) {} };
-      s.onerror = function () { done = false; };
-      document.head.appendChild(s);
-    }
-    setTimeout(inject, 0);
-  })();
-  // 兜底：若 5s 后农历库仍未加载（极端跨境抖动），把挂件从「加载中」降级为「—」，不再永久卡住
-  setTimeout(() => {
-    if (typeof Lunar === "undefined") {
-      const el = document.getElementById("lunarClock");
-      if (el && /加载中/.test(el.textContent)) el.textContent = "—";
-    }
-  }, 5000);
+  // 农历库（426KB / br 87KB）：宽屏空闲时自动加载；窄屏不自动加载 —— 那里看不到详细农历，
+  // 点 hero 那行才按需拉取（省 87KB）。加载完成前 hero 行显示「时辰 + 时间」，仍然有用。
+  if (!isNarrow()) {
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(loadLunarLib, { timeout: 2000 });
+    else setTimeout(loadLunarLib, 0);
+  }
+  // 窄 → 宽（横竖屏切换 / 桌面缩放窗口）时补加载
+  try {
+    narrowMQ.addEventListener("change", (e) => {
+      heroLineKey = "";
+      if (!e.matches && typeof Lunar === "undefined") loadLunarLib();
+      tickClock();
+      if (!e.matches) updateSideClock();
+    });
+  } catch (_) {}
+  // 窄屏点 hero 那行 → 按需加载
+  const lunarClockEl = $("lunarClock");
+  if (lunarClockEl) {
+    lunarClockEl.addEventListener("click", () => {
+      if (typeof Lunar !== "undefined") return;
+      if (lunarLibState === "failed") lunarLibState = "idle";
+      loadLunarLib();
+      heroLineKey = ""; tickClock();
+    });
+  }
+
   bindInputStates();
   checkSession();
   loadPosts();

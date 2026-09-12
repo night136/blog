@@ -3,6 +3,18 @@
 审查范围：`index.html`、`assets/style.css`(1351 行，6 处媒体查询)、`assets/app.js`、`_headers`。
 所有结论均来自代码实证，未凭印象推断。
 
+## 实施状态
+
+| 批次 | 状态 |
+|---|---|
+| P0（#1 农历懒加载 / #2 dvh+安全区 / #3 输入框 16px） | ✅ **已实施**（2026-09-12） |
+| P1（#4 触控尺寸 / #5 弹窗可滚 / #6 手势与 aria / #7 hover 隔离） | ⬜ 待做 |
+| P2（#8 ~ #15） | ⬜ 待做 |
+
+P0 的落地细节与守护断言见文末「P0 实施记录」。
+
+---
+
 ## 现状基线
 
 | 项 | 实测值 | 评价 |
@@ -158,3 +170,41 @@ iOS Safari 对 **<16px** 的输入框会在聚焦时把整页放大，且收起�
 | 第 3 批（P2） | #8~#15 | 质感与健壮性打磨 |
 
 每批完成后跑 `bash scripts/run-all.sh`，并考虑为 #1（农历不得在移动端自动加载）与 #3（输入框 ≥16px）补守护断言。
+
+---
+
+## P0 实施记录（2026-09-12）
+
+### #1 农历库改为按需加载
+- `app.js`：删除无条件注入的 IIFE；新增 `isNarrow()`（`matchMedia("(max-width: 980px)")`）、
+  `lunarLibState`、`loadLunarLib()`、`tickClock()`、`renderLunarDetails()`。
+- 宽屏：`requestIdleCallback`（超时 2s 兜底）自动加载 —— 与原行为一致，且不再抢首屏。
+- 窄屏：**不加载**。hero 那行先用本地地支推算显示 `🕐 申时 15:04:07`，并挂一枚「查农历」小胶囊；
+  点击才加载库并升级为干支/农历月日。库加载失败时可点按重试。
+- 顺带修掉两个隐藏浪费：
+  - 原 `updateLunar` 被 **两个** 秒级定时器各调一次 → 合并为单一 1s 定时器。
+  - 原实现每秒重算节气并**重建 42 个日历格子**（`Lunar.fromYmd` × 31 + `innerHTML`）→
+    拆出 `renderLunarDetails()`，按日缓存，且窄屏（右侧栏 `display:none`）直接短路。
+- 删掉「5s 后降级为 `—`」的兜底：现在未加载时本来就有意义的时钟，不再需要。
+
+### #2 dvh + 安全区
+- `index.html` viewport 加 `viewport-fit=cover`。
+- `.sidebar` / `.compose-full` 加 `100dvh` 回退（`100vh` 在前）。
+- `.hamburger` 用 `max(9px, env(safe-area-inset-top))`、`.content` 底部补
+  `env(safe-area-inset-bottom)`、`.topbar-inner` 补左右安全区。
+
+### #3 触屏输入框 ≥16px
+- 在 `style.css` **文件末尾**新增 `@media (max-width: 980px)` 专用块，覆盖
+  search / compose / auth / guestbook 全部输入控件。
+
+### ⚠️ 两个顺序陷阱（已写进守护断言）
+1. `.topbar-inner` 的 `padding: 0 14px` 简写会重置安全区 —— 安全区声明必须写在它**之后**。
+2. 触屏字号块必须放在组件自身字号规则**之后**（`style.css` 末尾），
+   否则同特异性下会被 `.guestbook-form input{14px}` 覆盖。
+
+### 新增回归
+- `scripts/verify-mobile-guards.mjs`（**27 项**）：源码级约定守护（含上述两个顺序断言）。
+- `scripts/verify-lunar-boot.mjs`（**9 项**）：**行为级**验证 —— 在 vm 里真跑 app.js，
+  按窄/宽屏与「是否点击」四种组合断言 `lunar.js` 的请求次数、hero 行内容、秒级定时器个数。
+- 两者均做过负向验证（6 + 1 个回退场景，全部能拦住）。
+- 已接入 `scripts/run-all.sh`，全套 **7 秒**跑完。
