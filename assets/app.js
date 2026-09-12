@@ -33,6 +33,12 @@
     const c = document.querySelector('link[rel="canonical"]');
     try { return c ? new URL(c.href).origin : location.origin; } catch { return location.origin; }
   })();
+  // ── 规范化站点路径：同样取 canonical 的 pathname，而不是 location.pathname ──
+  // 从 /index.html?post=x 这类别名路径进来时，location.pathname 会把这个丑路径一起分享出去。
+  const SITE_PATH = (() => {
+    const c = document.querySelector('link[rel="canonical"]');
+    try { return c ? new URL(c.href).pathname : "/"; } catch { return "/"; }
+  })();
 
   // ── 认证相关 DOM ──
   const authBtn = $("authBtn");
@@ -481,10 +487,12 @@
       const hero = heroCover ? `<img class="post-cover" src="${escapeHtml(heroCover)}" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
-      const shareUrl = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(slug);
-      const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="native" data-url="${escapeHtml(shareUrl)}" type="button">📤 分享</button></div>`;
+      const shareUrl = postShareUrl(slug);
+      const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享</button></div>`;
+      // 文末入口：长文读到底想分享时，不必再滚回顶部（两个入口共用同一个面板）
+      const shareBtnsEnd = `<div class="post-share post-share-end"><span class="share-end-label">觉得有用？</span><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享给朋友</button><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button></div>`;
       const nav = buildPostNav(slug);
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       lazyLoadImages(postDetail);
       bindCommentForm(slug);
       loadComments(slug);
@@ -508,14 +516,190 @@
     const words = cjkChars + nonCjkWords;
     return { words, minutes: Math.max(1, Math.round(words / 300)) };
   }
-  function sharePost(post) {
-    const url = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(post.slug);
-    const text = `看看这篇文章：${post.title}`;
-    if (navigator.share) {
-      navigator.share({ title: post.title, text, url }).catch(() => {});
-    } else if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => alert("文章链接已复制到剪贴板")).catch(() => {});
+  // ===== 分享 =====
+  function postShareUrl(slug) { return SITE_ORIGIN + SITE_PATH + "?post=" + encodeURIComponent(slug); }
+
+  // 轻提示：替代 alert —— 不阻塞、不抢焦点、不打断输入
+  let toastTimer = null;
+  function toast(msg) {
+    const el = $("toast");
+    if (!el) { try { alert(msg); } catch (_) {} return; }   // HTML 缺容器时的极端兜底
+    el.textContent = msg;                                   // textContent：天然防注入
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("show"));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.classList.remove("show");
+      setTimeout(() => { if (!el.classList.contains("show")) el.hidden = true; }, 240);
+    }, 2200);
+  }
+
+  // 复制降级链：① 异步剪贴板 → ② execCommand（http / 老浏览器）→ ③ 提示手动复制。
+  // 不能只看 navigator.clipboard 是否存在：非安全上下文里它存在但一定 reject（原来是 .catch(()=>{}) 静默吞掉）。
+  function legacyCopy(text) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return !!ok;
+    } catch (_) { return false; }
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(() => true, () => legacyCopy(text));
     }
+    return Promise.resolve(legacyCopy(text));
+  }
+  function copyShareUrl(url, okMsg) {
+    if (!url) return Promise.resolve(false);
+    return copyText(url).then((ok) => {
+      toast(ok ? (okMsg || "链接已复制，去粘贴吧") : "复制失败，请长按输入框手动复制");
+      return ok;
+    });
+  }
+
+  // ===== 分享面板 =====
+  // 三个环境分支（重点：Web Share 在微信内置浏览器里不可用，桌面也未必有）：
+  //   微信内 → 提示「点右上角 ··· 发送给朋友」，不显示二维码（在微信里扫自己的码没意义）
+  //   支持 Web Share 的手机 → 首项「系统分享」，直接调起原生面板
+  //   桌面 → 走「微信 → 二维码」，手机扫码在微信里打开
+  const IN_WECHAT = /MicroMessenger/i.test(navigator.userAgent || "");
+  let shareCtx = null, shareReturnFocus = null, qrLibLoading = null;
+
+  // 二维码库按需懒加载（56KB）：只有真的要显示二维码才拉，首页与正常阅读都不加载
+  function ensureQrLib() {
+    if (window.qrcode) return Promise.resolve();
+    if (qrLibLoading) return qrLibLoading;
+    qrLibLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "assets/vendor/qrcode.js";
+      s.onload = () => resolve();
+      s.onerror = () => { qrLibLoading = null; reject(new Error("qrcode load failed")); };
+      document.head.appendChild(s);
+    });
+    return qrLibLoading;
+  }
+
+  // 画二维码：固定「白底深码」不跟随主题 —— 深色主题下用主题色会拉低对比度导致扫不出来
+  async function renderShareQr(url) {
+    const canvas = $("shareQr"), wrap = $("shareQrWrap");
+    if (!canvas || !wrap) return;
+    try {
+      await ensureQrLib();
+      const qr = window.qrcode(0, "M");     // 版本 0 = 自动选择，M = 15% 纠错
+      qr.addData(url);
+      qr.make();
+      const n = qr.getModuleCount();
+      const quiet = 4;                      // 静区：扫码规范要求四周留 4 个模块
+      const scale = Math.max(2, Math.floor(160 / (n + quiet * 2)));
+      const px = (n + quiet * 2) * scale;
+      canvas.width = px;
+      canvas.height = px;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, px, px);
+      ctx.fillStyle = "#1A1815";
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          if (qr.isDark(r, c)) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+        }
+      }
+      wrap.hidden = false;
+    } catch (_) {
+      wrap.hidden = true;
+      toast("二维码加载失败，可先复制链接");
+    }
+  }
+
+  function openShare(post) {
+    const host = $("shareModal");
+    if (!host || !post) return;
+    const url = postShareUrl(post.slug);
+    const summary = (post.summary || "").trim() ||
+      (post.body || "").replace(/[#>*`\-!\[\]()]/g, "").replace(/\s+/g, " ").trim().slice(0, 78);
+    shareCtx = { url, title: post.title || "", summary };
+    const setText = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    setText("shareTitle", post.title || "");
+    setText("shareSum", summary);
+    const link = $("shareLink");
+    if (link) link.value = url;
+    const thumb = $("shareThumb");
+    const cover = post.cover ? safeUrl(post.cover, true) : "";
+    if (thumb) {
+      if (cover) { thumb.src = cover; thumb.hidden = false; }
+      else { thumb.removeAttribute("src"); thumb.hidden = true; }
+    }
+    const sysBtn = host.querySelector('[data-channel="system"]');
+    if (sysBtn) sysBtn.hidden = typeof navigator.share !== "function";
+    const tip = $("shareTip");
+    if (tip) {
+      tip.hidden = !IN_WECHAT;
+      if (IN_WECHAT) tip.textContent = "点右上角 ··· → 发送给朋友 / 分享到朋友圈";
+    }
+    const qrWrap = $("shareQrWrap");
+    if (qrWrap) qrWrap.hidden = true;        // 每次打开先收起，避免残留上一篇的二维码
+    host.hidden = false;
+    document.body.style.overflow = "hidden";
+    shareReturnFocus = document.activeElement;
+    const closeBtn = $("shareClose");
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeShare() {
+    const host = $("shareModal");
+    if (!host || host.hidden) return;
+    host.hidden = true;
+    document.body.style.overflow = "";
+    if (shareReturnFocus && typeof shareReturnFocus.focus === "function") { try { shareReturnFocus.focus(); } catch (_) {} }
+    shareReturnFocus = null;
+    shareCtx = null;
+  }
+
+  function bindSharePanel() {
+    const host = $("shareModal");
+    if (!host) return;
+    const closeBtn = $("shareClose");
+    if (closeBtn) closeBtn.addEventListener("click", closeShare);
+    host.addEventListener("click", (e) => { if (e.target === host) closeShare(); });
+    const grid = $("shareGrid");
+    if (grid) grid.addEventListener("click", (e) => {
+      const btn = e.target.closest(".share-item");
+      if (!btn || !shareCtx) return;
+      const ch = btn.dataset.channel;
+      const url = shareCtx.url, title = shareCtx.title;
+      if (ch === "copy") { copyShareUrl(url); return; }
+      if (ch === "wechat") {
+        if (IN_WECHAT) { toast("点右上角 ··· 发送给朋友"); return; }
+        renderShareQr(url);            // 非微信环境：二维码是最通用的「发到手机 / 微信」通道
+        return;
+      }
+      if (ch === "system") {
+        if (typeof navigator.share === "function") navigator.share({ title, url }).catch(() => {});
+        return;
+      }
+      // 官方分享 URL（不做中间跳转，直接开新窗口）
+      const target = {
+        weibo: "https://service.weibo.com/share/share.php?url=" + encodeURIComponent(url) + "&title=" + encodeURIComponent(title),
+        x: "https://twitter.com/intent/tweet?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title),
+        telegram: "https://t.me/share/url?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title),
+      }[ch];
+      if (target) window.open(target, "_blank", "noopener,noreferrer");
+    });
+    const linkCopy = $("shareLinkCopy");
+    if (linkCopy) linkCopy.addEventListener("click", () => copyShareUrl(shareCtx ? shareCtx.url : ""));
+    const copyTitle = $("shareCopyTitle");
+    if (copyTitle) copyTitle.addEventListener("click", () => {
+      if (!shareCtx) return;
+      copyShareUrl(shareCtx.title ? shareCtx.title + "\n" + shareCtx.url : shareCtx.url, "已复制标题和链接");
+    });
+    const linkInput = $("shareLink");
+    if (linkInput) linkInput.addEventListener("click", () => { try { linkInput.select(); } catch (_) {} });
   }
 
   // ===== 动态 meta / OG 标签（分享卡片用）=====
@@ -531,7 +715,8 @@
   }
 
   function updateMeta(post) {
-    const url = SITE_ORIGIN + location.pathname + "?post=" + encodeURIComponent(post.slug);
+    // 与分享按钮共用同一个 URL 构造：同样必须走 canonical 路径（location.pathname 会把 /index.html 写进 og:url）
+    const url = postShareUrl(post.slug);
     const rawDesc = (post.summary || "").trim() || (post.body || "").replace(/[#>*`\-!\[\]()]/g, "").replace(/\s+/g, " ").trim().slice(0, 100);
     document.title = post.title + " · 昉昕的博客";
     setMeta("description", rawDesc, false);
@@ -789,12 +974,19 @@
     const shareBtn = e.target.closest(".share-btn");
     if (shareBtn) {
       e.preventDefault();
-      const url = shareBtn.dataset.url;
-      if (shareBtn.dataset.share === "copy" && navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(() => { shareBtn.textContent = "✅ 已复制"; setTimeout(() => shareBtn.textContent = "📋 复制链接", 1800); }).catch(() => {});
-      } else if (shareBtn.dataset.share === "native" && currentPost) {
-        sharePost(currentPost);
+      // 「分享」打开面板（渠道在里面选）；「复制链接」直连，少一次点击
+      if (shareBtn.dataset.share === "open") {
+        const slug = shareBtn.dataset.slug;
+        if (currentPost && currentPost.slug === slug) openShare(currentPost);
+        return;
       }
+      const url = shareBtn.dataset.url || (currentPost ? postShareUrl(currentPost.slug) : "");
+      if (!shareBtn.dataset.label) shareBtn.dataset.label = shareBtn.textContent.trim();
+      copyShareUrl(url).then((ok) => {
+        if (!ok) return;
+        shareBtn.textContent = "✅ 已复制";
+        setTimeout(() => { shareBtn.textContent = shareBtn.dataset.label; }, 1800);
+      });
       return;
     }
     const navLink = e.target.closest(".post-nav-item[data-slug], .post-related-item[data-slug]");
@@ -2056,15 +2248,18 @@
   if (authBtn) authBtn.addEventListener("click", () => openAuth("login"));
   if (logoutBtn) logoutBtn.addEventListener("click", handleLogout);
   if (authClose) authClose.addEventListener("click", closeAuth);
+  bindSharePanel();
   if (authModal) authModal.addEventListener("click", (e) => { if (e.target === authModal) closeAuth(); });
   document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
   if (loginForm) loginForm.addEventListener("submit", handleLogin);
   if (registerForm) registerForm.addEventListener("submit", handleRegister);
   if (publishBtnChip) publishBtnChip.addEventListener("click", openCompose);
   if (composeSubmit) composeSubmit.addEventListener("click", handlePublish);
-  // ESC 逐层关闭：抽屉 → 登录弹窗（灯箱另有独立监听，见上方）
+  // ESC 逐层关闭：分享面板 → 抽屉 → 登录弹窗（灯箱另有独立监听，见上方）
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    const shareHost = $("shareModal");
+    if (shareHost && !shareHost.hidden) { closeShare(); return; }
     if (sidebar && sidebar.classList.contains("open")) { setSidebar(false); return; }
     if (authModal && !authModal.hidden) closeAuth();
   });

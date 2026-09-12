@@ -397,6 +397,43 @@
     <img id="lightboxImg" src="" alt="" />
   </div>
 
+  <!-- 分享面板：内容由 app.js 按当前文章填充，渠道按环境分支（微信内引导 / 系统分享 / 二维码）
+       刻意放在 HTML 而不是 JS 动态生成 —— 结构与文案可被静态断言守护，也便于直接改文案。 -->
+  <div class="modal-mask" id="shareModal" hidden>
+    <div class="modal share-panel" role="dialog" aria-modal="true" aria-labelledby="shareHeading">
+      <button class="modal-close" id="shareClose" type="button" aria-label="关闭分享面板">×</button>
+      <h3 class="share-heading" id="shareHeading">分享这篇文章</h3>
+      <div class="share-post">
+        <img class="share-thumb" id="shareThumb" src="" alt="" hidden />
+        <div class="share-post-text">
+          <div class="share-post-title" id="shareTitle"></div>
+          <div class="share-post-sum" id="shareSum"></div>
+        </div>
+      </div>
+      <p class="share-tip" id="shareTip" hidden></p>
+      <div class="share-grid" id="shareGrid">
+        <button class="share-item" type="button" data-channel="system" hidden><span class="share-ico share-ico-sys">享</span>系统分享</button>
+        <button class="share-item" type="button" data-channel="wechat"><span class="share-ico share-ico-wx">微</span>微信</button>
+        <button class="share-item" type="button" data-channel="weibo"><span class="share-ico share-ico-wb">博</span>微博</button>
+        <button class="share-item" type="button" data-channel="x"><span class="share-ico share-ico-x">X</span>X</button>
+        <button class="share-item" type="button" data-channel="telegram"><span class="share-ico share-ico-tg">TG</span>Telegram</button>
+        <button class="share-item" type="button" data-channel="copy"><span class="share-ico share-ico-cp">链</span>复制链接</button>
+      </div>
+      <div class="share-qr-wrap" id="shareQrWrap" hidden>
+        <canvas class="share-qr" id="shareQr" width="160" height="160" role="img" aria-label="文章链接二维码"></canvas>
+        <p class="share-qr-tip">用微信「扫一扫」或长按识别</p>
+      </div>
+      <div class="share-link-row">
+        <input class="share-link" id="shareLink" type="text" readonly aria-label="文章链接" />
+        <button class="share-link-copy" id="shareLinkCopy" type="button">复制</button>
+      </div>
+      <button class="share-copy-title" id="shareCopyTitle" type="button">复制标题 + 链接</button>
+    </div>
+  </div>
+
+  <!-- 轻提示：替代 alert（不阻塞、不抢焦点、不打断输入） -->
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
   <!-- 登录/注册弹窗（含卡通角色互动） -->
   <div class="modal-mask" id="authModal" hidden>
     <div class="modal modal-auth" role="dialog" aria-modal="true" data-state="idle">
