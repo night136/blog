@@ -120,22 +120,30 @@ async function resolveCover(env, origin, slug, raw) {
   const c = String(raw || "").trim();
   const manifest = await loadCoverManifest(env, origin);
   const mapped = manifest && manifest[slug];
+
+  // 站内地址一律复核文件真的在（同一 isolate 内缓存）。
+  // 宁可退回默认图，也不要把 404 地址写进 og:image —— 坏图会被社交平台与 caches.default 长期缓存。
+  // 只放行 http(s)；跨域外链不复核，避免为别人的图多打一次外部请求。
+  const accept = async (p) => {
+    let u = null;
+    try { u = new URL(p, origin); } catch (_) { return ""; }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    if (u.origin !== origin) return u.toString();
+    return (await assetExists(env, origin, u.pathname)) ? u.toString() : "";
+  };
+
+  // 1) 映射表优先（构建期与封面文件同批产出）
   if (mapped) {
-    let abs = "";
-    try { abs = new URL(mapped, origin).toString(); } catch (_) {}
-    // 同一站点内的映射结果要复核文件真的在；外链（跨域）不做存在性检查，避免多打一次外部请求
-    if (abs && new URL(abs).origin === origin) {
-      if (await assetExists(env, origin, new URL(abs).pathname)) return abs;
-    } else if (abs) {
-      return abs;
-    }
+    const abs = await accept(mapped);
+    if (abs) return abs;
   }
-  // 映射表缺失/未命中/文件缺失时的兜底（例如文章刚发布、还没重新构建）：
-  // 外链与站内相对路径本身就能直接用，data: base64 则只能退回默认图。
+  // 2) 外链直接用（D1 里本就是 http(s) 封面）
   if (/^https?:\/\//i.test(c)) return c;
-  if (c.startsWith("/")) {
-    try { return new URL(c, origin).toString(); } catch (_) {}
-  }
+  // 3) 站内相对路径兜底。
+  //    ⚠️ 这里必须同样做存在性复核。线上事故（2026-09-12）：映射表里登记的是失效路径，
+  //    而 D1 的 cover 也被后台回存成了同一条失效路径；旧代码在复核失败后立刻把这条路径
+  //    原样返回，等于复核白做 —— og:image 依旧指向 404，分享卡片是坏图。
+  if (c.startsWith("/")) return await accept(c);
   return "";
 }
 

@@ -3,7 +3,7 @@
 //   generated/posts.json              → 列表（不含 body）
 //   generated/posts/<slug>.json       → 单篇详情（含 body）
 // 容错：任何异常都不抛出，保证 Pages 部署不因构建失败而中断；前端在静态缺失时降级到 Function。
-import { mkdirSync, writeFileSync, statSync, readFileSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, existsSync, readFileSync, copyFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,7 @@ const OUT_DIR = join(__dirname, "generated");
 const LIST_FILE = join(OUT_DIR, "posts.json");
 const POST_DIR = join(OUT_DIR, "posts");
 const COVER_DIR = join(OUT_DIR, "covers");
+const COVER_PREFIX = "/generated/covers/"; // 封面静态文件的对外路径前缀（判断 cover 是否为本站构建产物）
 // slug → 对外可用的封面路径。边缘函数（functions/index.js）给爬虫注入 og:image 时需要它：
 // D1 里的封面可能是 data: base64（爬虫无法引用），而抽离后的文件名含内容哈希，边缘侧算不出来。
 const COVER_MANIFEST = join(OUT_DIR, "covers.json");
@@ -50,7 +51,24 @@ function materializeCover(row) {
     if (v && row.slug) coverMap[row.slug] = v;
     return v;
   };
-  if (!c.startsWith("data:")) return record(c); // http(s) 外链 / 站内相对路径原样保留
+  // 站内相对路径的 cover：若指向 /generated/covers/ 下的构建产物，必须确认文件真的存在再登记。
+  // 为什么：后台编辑「回存」会把上一轮构建产出的路径写回 D1，而上一轮可能用的是别的命名
+  // （历史版本文件名含非 ASCII 的 slug）。原样登记就会造出一条「表里有、文件却没有」的死链 ——
+  // 线上事故（2026-09-12）：该文章的 og:image 因此指向 404，社交分享卡片是坏图。
+  if (!c.startsWith("data:")) {
+    if (c.startsWith(COVER_PREFIX)) {
+      let ok = false;
+      try {
+        const rel = decodeURIComponent(c).slice(COVER_PREFIX.length);
+        ok = !rel.includes("..") && existsSync(join(COVER_DIR, rel));
+      } catch (_) {}
+      if (!ok) {
+        console.warn(`[build] ⚠️ 丢弃失效的历史封面路径（文件不存在，改用默认图）：${row.slug} -> ${c}`);
+        return record("");
+      }
+    }
+    return record(c); // http(s) 外链 / 确认存在的站内相对路径原样保留
+  }
   const m = c.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]*)$/);
   if (!m) return record(""); // 非 base64（如 data:image/svg+xml,xxx）不做处理
   let buf;

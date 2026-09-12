@@ -137,6 +137,46 @@ console.log("\n[2] 映射表可用时以其为准");
     err.img === `${ORIGIN}/generated/covers/p-err-abc12345.jpg`, err.img);
 }
 
+console.log("\n[2b] 站内相对路径兜底也必须复核存在性");
+{
+  // 线上事故回归（2026-09-12）：映射表登记的是失效路径，而 D1 的 cover 被后台「回存」
+  // 成了同一条失效路径（历史构建的文件名含非 ASCII，Cloudflare 上取不到）。
+  // 旧逻辑复核失败后立刻把这条路径原样返回 → og:image 依旧 404，分享卡片是坏图。
+  const LEGACY = "/generated/covers/%E4%B8%AD%E6%96%87-abc12345.jpg";
+  const stale = await run(
+    "映射表与 D1 原值是同一条失效路径",
+    basePost({ slug: "p-stale", cover: LEGACY }),
+    { "p-stale": LEGACY },
+    BOT_UA,
+    { missing: [LEGACY] }
+  );
+  check("映射表+D1 同一条失效相对路径 → 退回默认图（不再原样返回 404）", stale.img === DEFAULT_IMG, stale.img);
+  check("此时 twitter:image 也同步为默认图", stale.tw === DEFAULT_IMG, stale.tw);
+
+  const staleNoMap = await run(
+    "映射表未命中且相对路径文件缺失",
+    basePost({ slug: "p-stale2", cover: "/generated/covers/gone-legacy.jpg" }),
+    {},
+    BOT_UA,
+    { missing: ["/generated/covers/gone-legacy.jpg"] }
+  );
+  check("映射表未命中 + 相对路径文件缺失 → 默认图", staleNoMap.img === DEFAULT_IMG, staleNoMap.img);
+
+  const okRel = await run(
+    "相对路径文件确实存在",
+    basePost({ slug: "p-okrel", cover: "/generated/covers/exists.jpg" }),
+    {}
+  );
+  check("相对路径文件存在 → 照常使用", okRel.img === `${ORIGIN}/generated/covers/exists.jpg`, okRel.img);
+
+  const jsUrl = await run("cover 为 javascript: 伪协议", basePost({ slug: "p-js", cover: "javascript:alert(1)" }), {});
+  check("非 http(s) 协议 → 退回默认图，不写进 og:image", jsUrl.img === DEFAULT_IMG, jsUrl.img);
+
+  const extRel = await run("外链相对协议 //evil", basePost({ slug: "p-proto", cover: "//evil.example.com/x.jpg" }), {});
+  check("协议相对外链 → 仍作为外链放行（不误判为本站文件）",
+    extRel.img === "https://evil.example.com/x.jpg", extRel.img);
+}
+
 console.log("\n[3] 无封面 / 结构正确性");
 {
   const manifest = { "p-data": "/generated/covers/p-data-abc12345.jpg" };
@@ -212,9 +252,15 @@ console.log("\n[6] 封面文件名必须纯 ASCII");
     "未找到 `${slugKey}-${hash8}` 模板或仍在使用 `${safe}`");
   check("build.mjs 含构建期自检（映射表 ↔ 文件存在性）",
     /coverIssues/.test(buildSrc), "未找到封面映射表自检逻辑");
+  check("build.mjs 丢弃「指向不存在文件」的历史站内封面路径（不污染映射表）",
+    /COVER_PREFIX/.test(buildSrc) && /existsSync\(join\(COVER_DIR/.test(buildSrc),
+    "未找到站内相对路径的存在性校验");
 
   const idxSrc = fs.readFileSync(path.join(root, "functions", "index.js"), "utf8");
   check("边缘函数复核封面文件是否存在", /assetExists/.test(idxSrc), "未找到 assetExists");
+  check("边缘函数的相对路径兜底同样复核存在性（不原样返回已判定 404 的地址）",
+    /if \(c\.startsWith\("\/"\)\) return await accept\(c\)/.test(idxSrc),
+    "兜底分支未走 accept()：会把已复核为 404 的相对路径原样写进 og:image");
 }
 
 console.log("\n" + (fail === 0 ? `✅ 全部通过（${pass} 项）` : `❌ ${fail} 项失败 / 共 ${pass + fail} 项`));
