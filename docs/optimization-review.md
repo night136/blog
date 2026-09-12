@@ -192,6 +192,11 @@ const image = post.cover && /^https?:\/\//i.test(post.cover)
 - 构建前先清理 `assets/` 下旧的 `*.{10位hex}.js|css` 产物，只保留本次生成的。
 - 把哈希化做成「读源码 → 写产物 + 写 `dist/index.html`」的形式，不改动仓库里的 `index.html`（源头保持干净，`git status` 不再被构建污染）。
 
+**✅ 已修（2026-09-12，commit 见当日提交）**：改为「稳定文件名 + `?v=<内容哈希>`」，
+不再生成任何哈希副本文件，因此也不存在清理/累积问题；`index.html` 仍会被就地改写，
+但只改查询串、可重复执行且幂等（`scripts/verify-asset-versioning.mjs` 覆盖）。
+根因优先级其实比"产物累积"高得多：哈希文件名 + 可陈旧的 HTML 外壳 = 线上必现 404 白屏。
+
 **涉及**：`build.mjs`、`.gitignore`
 
 ---

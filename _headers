@@ -23,13 +23,20 @@
   Cache-Control: public, max-age=60
 
 # 列表/详情快照：长缓存 + 后台再验证（SWR）。
-# 前端用 force-cache 即时读本地缓存秒开首屏；后台 /api/posts/meta 校验新鲜度并静默刷新最新文章。
+# 前端用 cache:"default" 交给这套头（先命中本地缓存秒开，后台再校验更新）；
+# 另由 /api/posts/meta 比对 count/latest 做新鲜度自检并静默补最新文章。
 /generated/posts.json
   Cache-Control: public, max-age=300, stale-while-revalidate=86400
 
 /generated/posts/*
   Cache-Control: public, max-age=300, stale-while-revalidate=86400
 
-# 首页 HTML 外壳：SWR，跨境刷新也能秒开旧壳，后台校验更新（1 分钟内自更新，避免手机端长期缓存旧壳）。
+# 首页 HTML 外壳：必须「每次都校验」，绝不能让旧壳长期生效。
+# 事故（2026-09-12 实测）：这里原本是 max-age=60 + stale-while-revalidate=86400，
+# 浏览器/边缘可以端着近一天的旧壳，而旧壳里引用的资源文件名是按内容哈希生成的构建产物，
+# 下次部署后就没了 → app.js 404 → 整站 JS 全废（列表空白、骨架屏永远不动）。
+# 现在 build.mjs 改为「稳定文件名 + ?v=内容哈希」，旧壳最多加载上一版资源、不会再 404；
+# 但 HTML 仍必须及时换新，所以 max-age=0：每次导航都条件请求（有 ETag，命中就是 304，很便宜），
+# 只给 300 秒 SWR 兜住跨境抖动时的「先显示旧壳、后台静默更新」。
 /
-  Cache-Control: public, max-age=60, stale-while-revalidate=86400
+  Cache-Control: public, max-age=0, stale-while-revalidate=300

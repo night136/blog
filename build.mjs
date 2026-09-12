@@ -3,7 +3,7 @@
 //   generated/posts.json              → 列表（不含 body）
 //   generated/posts/<slug>.json       → 单篇详情（含 body）
 // 容错：任何异常都不抛出，保证 Pages 部署不因构建失败而中断；前端在静态缺失时降级到 Function。
-import { mkdirSync, writeFileSync, statSync, existsSync, readFileSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,40 +135,44 @@ function publicDetail(row) {
   };
 }
 
-// 资源内容哈希化：给 app.js / style.css / vendor/lunar.js 加「内容哈希」文件名。
-// 部署后文件名随内容变化而变 → 浏览器视为全新资源自动拉取，无需手动硬刷新/清缓存。
-// 失败仅 warn 不影响部署（前端仍可正常降级到未哈希的旧路径语义）。
+// 资源版本化：给 app.js / style.css 的引用加 ?v=<内容哈希>（**不改文件名**）。
+// 内容变 → URL 变 → 浏览器视为全新资源自动拉取，无需手动硬刷新/清缓存。
+// 为什么不用「哈希文件名」：那种文件是构建产物、只存在于当次部署，而 HTML 外壳可能被
+// 缓存一段时间，旧壳会引用到已删除的文件 → 404 → 整站 JS 全废（线上实测见函数内注释）。
+// 失败仅 warn 不影响部署（前端仍可正常降级到未带版本的旧路径语义）。
 function hashAssets() {
   const assetsDir = join(__dirname, "assets");
-  // 返回「带 assets/ 前缀的相对路径」，便于直接替换 index.html 与 app.js 内部引用
-  function hashCopy(relPath) {
-    const abs = join(assetsDir, relPath);
-    const buf = readFileSync(abs);
-    const h = createHash("sha256").update(buf).digest("hex").slice(0, 10);
-    const dot = relPath.lastIndexOf(".");
-    const hashedRel = relPath.slice(0, dot) + "." + h + relPath.slice(dot);
-    // 保留原文件作兜底，新增一份哈希副本（部署后旧哈希文件仍在 CDN，不会出现 404）
-    copyFileSync(abs, join(assetsDir, hashedRel));
-    return "assets/" + hashedRel;
-  }
-  // 1) lunar 先哈希：app.js 内部动态引用它，需先拿到哈希名
-  const lunarHashed = hashCopy("vendor/lunar.js");
-  // 2) app.js：把内部 lunar 引用替换为哈希名，再对自身内容哈希
-  const appAbs = join(assetsDir, "app.js");
-  let appSrc = readFileSync(appAbs, "utf8");
-  appSrc = appSrc.split("assets/vendor/lunar.js").join(lunarHashed);
-  const appH = createHash("sha256").update(appSrc).digest("hex").slice(0, 10);
-  const appName = `assets/app.${appH}.js`;
-  writeFileSync(join(assetsDir, `app.${appH}.js`), appSrc);
-  // 3) style.css
-  const styleHashed = hashCopy("style.css");
-  // 4) 最后一步改写 index.html 引用（务必等上述全部成功后再动 html，避免半残状态）
+  const versionOf = (rel) => createHash("sha256").update(readFileSync(join(assetsDir, rel))).digest("hex").slice(0, 10);
+
+  // ⚠️ 只改「查询串版本」，绝不改文件名 —— 线上事故（2026-09-12 实测）：
+  // 原实现把 app/style 复制成带内容哈希的**新文件名**（assets/app.<hash>.js）并写进 index.html，
+  // 而这类文件是 .gitignore 的构建产物、只存在于当次部署。于是任何一份陈旧 HTML
+  // （/ 的策略原本是 max-age=60 + stale-while-revalidate=86400，浏览器/边缘可端着旧壳近一天）
+  // 在下次部署后都会指向一个已被删除的文件 → app.js 404 → 整站 JS 全废（列表空白、骨架屏不动）。
+  // 实测：不带 cache-buster 请求首页时拿到的就是引用了已删除哈希的旧壳，4/4 次 404。
+  // 现在文件名固定为仓库里提交的 assets/app.js（每次部署必然存在），版本走 ?v=<内容哈希>：
+  // 内容变则 URL 变、缓存自然失效；HTML 再陈旧也只会加载「上一版资源」，永远不会 404。
+  // Cloudflare 的 _headers 匹配忽略查询串，所以 /assets/* 的长缓存策略依然生效（已实测）。
+  const appVersion = versionOf("app.js");
+  const styleVersion = versionOf("style.css");
+
   const htmlAbs = join(__dirname, "index.html");
   let html = readFileSync(htmlAbs, "utf8");
-  html = html.split("assets/app.js").join(appName);
-  html = html.split("assets/style.css").join(styleHashed);
+  // 兼容三种历史形态：仓库里的源码引用、旧实现留下的哈希文件名、本函数重跑时已带 ?v=
+  html = html.replace(/assets\/app(?:\.[a-f0-9]{6,64})?\.js(?:\?v=[a-z0-9]+)?/g, `assets/app.js?v=${appVersion}`);
+  html = html.replace(/assets\/style(?:\.[a-f0-9]{6,64})?\.css(?:\?v=[a-z0-9]+)?/g, `assets/style.css?v=${styleVersion}`);
   writeFileSync(htmlAbs, html);
-  console.log(`[build] 资源哈希化完成 → app:${appName}, style:${styleHashed}, lunar:${lunarHashed}`);
+
+  // 自检：HTML 里引用的站内资源（去掉查询串后）必须真实存在，防止再产出「引用了不存在文件」的壳
+  const missing = [];
+  for (const m of html.matchAll(/(?:src|href)="(assets\/[^"?#]+)/g)) {
+    if (!existsSync(join(__dirname, m[1]))) missing.push(m[1]);
+  }
+  if (missing.length) {
+    console.warn("[build] ⚠️ index.html 引用了不存在的资源（会导致页面直接挂掉）：\n  " + missing.join("\n  "));
+  }
+
+  console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}（稳定文件名，不再生成哈希副本）`);
 }
 
 async function main() {
