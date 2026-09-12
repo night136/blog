@@ -141,5 +141,100 @@ console.log("\n[5] 按需加载的交互样式");
     "未找到 dataset.lunarCta 赋值");
 }
 
+console.log("\n[6] 弹窗：矮屏 / 横屏 / 键盘弹出时必须能滚到顶部");
+{
+  const maskRule = (cssSrc.match(/\.modal-mask\s*\{[^}]*\}/g) || []).find((r) => /position:\s*fixed/.test(r)) || "";
+  check(".modal-mask 可纵向滚动（overflow-y: auto）",
+    /overflow-y:\s*auto/.test(maskRule), maskRule.slice(0, 160));
+  check(".modal-mask 不再用 align-items:center 居中（向上溢出的部分永远滚不到）",
+    !/align-items:\s*center/.test(maskRule), maskRule.slice(0, 160));
+  check("子项用 margin:auto 做安全居中（无富余时自动归零、从顶部起可滚）",
+    /\.modal,\s*\.modal-auth\s*\{\s*margin:\s*auto;?\s*\}/.test(cssSrc),
+    "未找到 `.modal, .modal-auth { margin: auto; }`");
+  check("弹窗内滚动不把整页带着滚（overscroll-behavior: contain）",
+    /overscroll-behavior:\s*contain/.test(maskRule), maskRule.slice(0, 160));
+}
+
+console.log("\n[7] 触控目标 ≥44×44 与正文操作字号");
+{
+  const coarseIdx = cssSrc.indexOf("@media (pointer: coarse)");
+  check("存在触屏专用块（pointer: coarse，而非只按宽度断点）",
+    coarseIdx >= 0, "未找到 @media (pointer: coarse)");
+  const coarse = coarseIdx >= 0 ? cssSrc.slice(coarseIdx) : "";
+  check("块内用 ::after 提供 44×44 热区（视觉尺寸不变）",
+    /width:\s*max\(100%,\s*44px\)/.test(coarse), "未找到 max(100%, 44px) 热区");
+  check("给 .modal-close 加了 44 热区、但没有给它 position:relative（会脱出弹窗定位）",
+    /\.modal-close::after\s*\{[^}]*44px/.test(coarse) &&
+    !/\.modal-close[^{]*\{[^}]*position:\s*relative/.test(coarse),
+    "modal-close 的 44 热区 / 定位处理有误");
+  check("正文操作按钮字号在触屏下 ≥13px（原来是 11px，已低于可读下限）",
+    /\.post-actions button[^{]*\{[^}]*font-size:\s*13px/.test(coarse),
+    "未在触屏块里提升 .post-actions 字号");
+  check("编辑器工具按钮在触屏下 ≥40px（原来是 32px）",
+    /\.editor-toolbar button[^{]*\{[^}]*width:\s*40px/.test(coarse),
+    "未提升工具栏按钮尺寸");
+  check("触屏块位于文件末尾（靠「后来居上」覆盖组件自身的 32px / 11px）",
+    coarseIdx > cssSrc.indexOf(".guestbook-form input"),
+    "触屏块位置=" + coarseIdx);
+  check("复制按钮在触屏下常显（原来只靠 pre:hover 揭示，触屏无法触发）",
+    /\.code-copy\s*\{[^}]*opacity:\s*1/.test(coarse), ".code-copy 未常显");
+  check("便签删除按钮在触屏下常显（原来只靠 .g-card:hover 揭示）",
+    /\.g-del\s*\{[^}]*opacity:\s*1/.test(coarse), ".g-del 未常显");
+}
+
+console.log("\n[8] 抽屉：手势 / aria-expanded / ESC 三者齐备");
+{
+  check("存在统一的 setSidebar(open)（class / 遮罩 / 滚动锁 / aria 一处收口）",
+    /function setSidebar\s*\(\s*open\s*\)/.test(appSrc), "未找到 setSidebar");
+  check("setSidebar 内同步 aria-expanded",
+    /function setSidebar[\s\S]{0,700}?setAttribute\(\s*"aria-expanded"/.test(appSrc),
+    "setSidebar 未同步 aria-expanded");
+  check("存在右滑关闭手势（touchstart → touchmove）",
+    /addEventListener\(\s*"touchstart"[\s\S]{0,300}?addEventListener\(\s*"touchmove"/.test(appSrc),
+    "未找到滑动关闭手势");
+  check("手势要求横向位移占主导（不与抽屉纵向滚动打架）",
+    /Math\.abs\(\s*dx\s*\)\s*>\s*Math\.abs\(\s*dy\s*\)\s*\*/.test(appSrc),
+    "未找到「横向主导」判定");
+  check("手势监听是 passive（不阻塞滚动）",
+    /\{\s*passive:\s*true\s*\}/.test(appSrc), "未找到 passive 监听");
+  check("ESC 逐层关闭里包含抽屉",
+    /e\.key\s*!==\s*"Escape"[\s\S]{0,400}?classList\.contains\(\s*"open"\s*\)[\s\S]{0,160}?setSidebar\(false\)/.test(appSrc),
+    "ESC 未覆盖抽屉");
+  const showView = appSrc.match(/function showView[\s\S]{0,1200}?\n  \}/);
+  check("showView 收起抽屉时统一走 setSidebar（不再手写三件套，避免漏掉 aria/滚动锁）",
+    !!showView && /setSidebar\(false\)/.test(showView[0]) && !/sidebar\.classList\.remove/.test(showView[0]),
+    showView ? showView[0].replace(/\s+/g, " ").slice(0, 200) : "未找到 showView");
+  check("index.html 两个汉堡按钮都带 aria-expanded / aria-controls",
+    (htmlSrc.match(/aria-expanded="false"/g) || []).length >= 2 &&
+    (htmlSrc.match(/aria-controls="sidebar"/g) || []).length >= 2,
+    "汉堡按钮的 aria 属性不完整");
+}
+
+console.log("\n[9] hover 效果只在「支持真实悬停」的设备上生效（消除触屏粘住的高亮）");
+{
+  const MQ = "@media (hover: hover) and (pointer: fine) {";
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "");
+  let s = stripComments(cssSrc), wrapped = 0;
+  for (;;) {
+    const i = s.indexOf(MQ);
+    if (i < 0) break;
+    let depth = 0, end = -1;
+    for (let j = i + MQ.length - 1; j < s.length; j++) {
+      if (s[j] === "{") depth++;
+      else if (s[j] === "}") { depth--; if (depth === 0) { end = j; break; } }
+    }
+    s = s.slice(0, i) + s.slice(end + 1);
+    wrapped++;
+  }
+  const bare = (s.match(/:hover/g) || []).length;
+  check("没有任何裸 :hover 规则（全部在 hover 能力媒体查询内）",
+    bare === 0, "仍有 " + bare + " 处裸 :hover");
+  check("包裹块数量与 hover 规则数一致（≥40）",
+    wrapped >= 40, "包裹块仅 " + wrapped + " 个");
+  check("非 hover 选择器留在媒体查询之外（:focus / .copied 在触屏上仍生效）",
+    /\.code-copy:focus,\s*\.code-copy\.copied\s*\{/.test(cssSrc),
+    "混合选择器被整体包进去了：触屏上复制按钮的焦点态会失效");
+}
+
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
 process.exit(fail === 0 ? 0 : 1);

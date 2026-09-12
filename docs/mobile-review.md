@@ -8,10 +8,10 @@
 | 批次 | 状态 |
 |---|---|
 | P0（#1 农历懒加载 / #2 dvh+安全区 / #3 输入框 16px） | ✅ **已实施**（2026-09-12） |
-| P1（#4 触控尺寸 / #5 弹窗可滚 / #6 手势与 aria / #7 hover 隔离） | ⬜ 待做 |
+| P1（#4 触控尺寸 / #5 弹窗可滚 / #6 手势与 aria / #7 hover 隔离） | ✅ **已实施**（2026-09-12） |
 | P2（#8 ~ #15） | ⬜ 待做 |
 
-P0 的落地细节与守护断言见文末「P0 实施记录」。
+P0 / P1 的落地细节与守护断言见文末「P0 实施记录」「P1 实施记录」。
 
 ---
 
@@ -171,6 +171,8 @@ iOS Safari 对 **<16px** 的输入框会在聚焦时把整页放大，且收起�
 
 每批完成后跑 `bash scripts/run-all.sh`，并考虑为 #1（农历不得在移动端自动加载）与 #3（输入框 ≥16px）补守护断言。
 
+**进展**：第 1 批（P0）与第 2 批（P1）均已完成，守护断言已并入 `verify-mobile-guards.mjs`。
+
 ---
 
 ## P0 实施记录（2026-09-12）
@@ -208,3 +210,65 @@ iOS Safari 对 **<16px** 的输入框会在聚焦时把整页放大，且收起�
   按窄/宽屏与「是否点击」四种组合断言 `lunar.js` 的请求次数、hero 行内容、秒级定时器个数。
 - 两者均做过负向验证（6 + 1 个回退场景，全部能拦住）。
 - 已接入 `scripts/run-all.sh`，全套 **7 秒**跑完。
+
+---
+
+## P1 实施记录（2026-09-12）
+
+### #4 触控目标 ≥44×44
+- `style.css` **文件末尾**新增 `@media (pointer: coarse)` 块（用**指针能力**而不是宽度断点：
+  iPad、横屏手机、触屏笔记本同样适用；放末尾才能靠「后来居上」覆盖组件自身的 32px / 11px）。
+- 两类处理，避免无脑放大破坏布局：
+  - **只扩热区、视觉不变**：`.theme-toggle` / `.social-link` / `.modal-close` 用
+    `::after { width: max(100%, 44px); height: max(100%, 44px) }` 撑出 44×44。
+    `.theme-toggle` 与 `.social-link` 需补 `position: relative`；`.modal-close` **本身已是
+    absolute，绝不能改 position**（会脱出弹窗定位）—— 这条写进了断言。
+  - **直接放大真实尺寸**：编辑器工具按钮 32→**40px**（`gap` 同时 6→8px），
+    `.theme-toggle` 42px、`.social-link` 40px。
+- 正文/评论操作按钮：`.post-actions button` 等 11~12px → **13px**，
+  并给 `.post-actions button / .comment-like / .comment-reply / .share-btn / .back-btn` 加 `min-height: 40px`。
+- **便签删除按钮刻意不做 44 热区**：`.g-del` 提到 30px 即可。便签是密集网格，
+  44px 的隐形热区会溢出到相邻便签 → 容易误删。
+
+### #5 弹窗矮屏可滚
+- `.modal-mask` 去掉 `align-items: center`（flex 居中会让溢出**同时向上下**发生，
+  向上那部分**永远滚不到**），改为 `overflow-y: auto` + 子项 `.modal, .modal-auth { margin: auto }`
+  —— auto 外边距「有富余才吸收、没富余归零」，等价于**安全居中**。
+- 顺带补 `overscroll-behavior: contain`（弹窗滚到底不带着整页橡皮筋）。
+- **坑**：水平内边距只能给 0 —— `.modal-auth` 宽度已是 `96vw`，加左右 padding 会横向溢出
+  （`overflow-y:auto` 会把 `overflow-x` 一并算成 auto，直接出横向滚动条）。最终用 `padding: 16px 0`。
+
+### #6 抽屉手势 / aria-expanded / ESC
+- 新增 `setSidebar(open)` 作为**唯一出口**：class、遮罩、`body` 滚动锁、两个汉堡按钮的
+  `aria-expanded` 全部在此同步；`toggleSidebar` 改为它的薄封装。
+  `showView()` 里原先手写的三件套也收敛到 `setSidebar(false)`（避免漏掉 aria / 滚动锁）。
+- 右滑关闭手势：`touchstart` 记起点 → `touchmove` 判定「右移 > 60px 且横向位移 > 纵向 ×1.5」才关，
+  纵向位移一旦 > 40px 立即放弃（让位给抽屉自身滚动）；四个监听全部 `{ passive: true }`。
+- ESC 改为逐层关闭：**抽屉 → 登录弹窗**（灯箱另有独立监听）。
+- `index.html`：两个汉堡按钮补 `aria-controls="sidebar"` + `aria-expanded="false"`。
+- 附带：`hamburgerTop` 的元素引用从 CSS 选择器段上移到顶部统一声明，避免函数作用域 TDZ 隐患。
+
+### #7 hover 触屏隔离（52 条规则）
+- **做法**：把所有 `:hover` 规则**原地**包进 `@media (hover: hover) and (pointer: fine)`。
+  「原地」是关键 —— 不改变规则在源码中的相对顺序，因此**层叠顺序与特异性完全不变**，
+  不会出现「hover 被挪到末尾后压过原本该赢的规则」这类隐蔽回归。
+- 用一次性脚本完成（解析顶层/嵌套块、按顶层逗号切分选择器、括号配对），
+  执行后自检：括号平衡 + `:hover` 总数不变（53 处）。
+- **混合选择器必须拆分**：`pre:hover .code-copy, .code-copy:focus, .code-copy.copied { opacity: 1 }`
+  → 前段进媒体查询，`:focus` / `.copied` 留在外面（否则触屏上复制按钮的焦点态会一起失效）。
+- ⚠️ **连带可达性兜底**：原有两个按钮**只靠 hover 揭示**，隔离后在触屏上永远不可达，
+  已在 `pointer: coarse` 块里常显：
+  - `.code-copy { opacity: 1 }`（原 `pre:hover .code-copy`）
+  - `.g-del { opacity: 1 }`（原 `.g-card:hover .g-del`）
+  这两条是断言里的必查项 —— 以后新增「hover 才显示」的交互元素，必须同步补触屏兜底。
+
+### 新增回归（P1）
+- `verify-mobile-guards.mjs` 从 27 → **50 项**，新增 4 组：
+  - `[6]` 弹窗：必须 `overflow-y:auto`、**不得**再有 `align-items:center`、子项 `margin:auto`、`overscroll-behavior`。
+  - `[7]` 触控：`pointer:coarse` 块存在且在文件末尾、44 热区、`.modal-close` 不得被改成 `position:relative`、
+    13px/40px 提升、两个 hover 揭示按钮必须常显。
+  - `[8]` 抽屉：`setSidebar` 单出口 + aria 同步 + 手势的横向主导判定 + `passive` + ESC 覆盖 + `showView` 收敛 + HTML aria 属性。
+  - `[9]` hover：**剥离所有 hover 媒体块后不得残留裸 `:hover`**（含去注释步骤，避免注释里的 `:hover` 误报）。
+- 负向验证 **8 个回退场景全部拦住**（弹窗退回居中 / 删触屏块 / 删手势 / aria 不同步 / ESC 不管抽屉 /
+  showView 退回手写 / 解开一条 hover / 混合选择器整体包裹）。
+- 全量回归：`og 40 / xss 23 / jwt 18 / manage / cover 35 / asset 14 / frontend 15 / mobile 50 / lunar 9 / smoke`，**9 秒**跑完。

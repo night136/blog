@@ -71,6 +71,7 @@
 
   // ── 移动端 ──
   const hamburger = $("hamburger");
+  const hamburgerTop = $("hamburgerTop");
   const sidebar = $("sidebar");
   const sidebarOverlay = $("sidebarOverlay");
   const mainNav = $("mainNav");
@@ -866,10 +867,8 @@
     Object.values(views).forEach((v) => v.classList.remove("active"));
     if (views[name]) views[name].classList.add("active");
     navLinks.forEach((l) => l.classList.toggle("active", l.dataset.view === name));
-    // close mobile sidebar on nav
-    if (sidebar) sidebar.classList.remove("open");
-    if (sidebarOverlay) sidebarOverlay.hidden = true;
-    document.body.style.overflow = "";
+    // 切视图时收起移动端抽屉（统一走 setSidebar，保证遮罩/滚动锁/aria 同步）
+    setSidebar(false);
   }
 
   // 用新列表静默重渲染首页（静态快照过期后补上最新文章，不打断用户浏览、不显示加载态）
@@ -1616,7 +1615,6 @@
   if (themeToggle) themeToggle.addEventListener("click", toggleTheme);
   const themeToggleTop = $("themeToggleTop");
   if (themeToggleTop) themeToggleTop.addEventListener("click", toggleTheme);
-  const hamburgerTop = $("hamburgerTop");
   if (hamburgerTop) hamburgerTop.addEventListener("click", toggleSidebar);
 
   // 搜索防抖 + Enter 触发 + 错误提示
@@ -2015,10 +2013,40 @@
   }
 
   // ===== 移动端汉堡菜单 =====
-  function toggleSidebar() { const open = sidebar?.classList.toggle("open"); if (sidebarOverlay) sidebarOverlay.hidden = !open; document.body.style.overflow = open ? "hidden" : ""; }
+  // 抽屉开合集中在一处：class / 遮罩 / 滚动锁 / aria-expanded 必须同步，
+  // 否则会出现「抽屉关了但 body 还锁着滚动」或「读屏软件不知道菜单已展开」。
+  function setSidebar(open) {
+    if (sidebar) sidebar.classList.toggle("open", !!open);
+    if (sidebarOverlay) sidebarOverlay.hidden = !open;
+    document.body.style.overflow = open ? "hidden" : "";
+    if (hamburger) hamburger.setAttribute("aria-expanded", String(!!open));
+    if (hamburgerTop) hamburgerTop.setAttribute("aria-expanded", String(!!open));
+  }
+  function toggleSidebar() { setSidebar(!(sidebar && sidebar.classList.contains("open"))); }
   if (hamburger) hamburger.addEventListener("click", toggleSidebar);
   if (sidebarOverlay) sidebarOverlay.addEventListener("click", toggleSidebar);
-  if (mainNav) mainNav.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => { if (sidebar) sidebar.classList.remove("open"); if (sidebarOverlay) sidebarOverlay.hidden = true; document.body.style.overflow = ""; }));
+  if (mainNav) mainNav.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => setSidebar(false)));
+
+  // 抽屉右滑关闭：手机上的肌肉记忆是从左缘往右划。
+  // 只在抽屉已打开时跟踪；判定「右移 > 60px 且横向位移主打」才关，
+  // 一旦纵向位移变大就放弃（让位给抽屉自身的滚动），全部 passive 不阻塞滚动。
+  (function enableSidebarSwipe() {
+    let startX = 0, startY = 0, tracking = false;
+    document.addEventListener("touchstart", (e) => {
+      if (!sidebar || !sidebar.classList.contains("open")) return;
+      const t = e.touches && e.touches[0]; if (!t) return;
+      startX = t.clientX; startY = t.clientY; tracking = true;
+    }, { passive: true });
+    document.addEventListener("touchmove", (e) => {
+      if (!tracking) return;
+      const t = e.touches && e.touches[0]; if (!t) return;
+      const dx = t.clientX - startX, dy = t.clientY - startY;
+      if (dx > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) { tracking = false; setSidebar(false); }
+      else if (Math.abs(dy) > 40) { tracking = false; } // 变成了纵向滚动，本次不再判定
+    }, { passive: true });
+    document.addEventListener("touchend", () => { tracking = false; }, { passive: true });
+    document.addEventListener("touchcancel", () => { tracking = false; }, { passive: true });
+  })();
 
   // ===== 事件绑定 =====
   if (authBtn) authBtn.addEventListener("click", () => openAuth("login"));
@@ -2030,7 +2058,12 @@
   if (registerForm) registerForm.addEventListener("submit", handleRegister);
   if (publishBtnChip) publishBtnChip.addEventListener("click", openCompose);
   if (composeSubmit) composeSubmit.addEventListener("click", handlePublish);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && authModal && !authModal.hidden) closeAuth(); });
+  // ESC 逐层关闭：抽屉 → 登录弹窗（灯箱另有独立监听，见上方）
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (sidebar && sidebar.classList.contains("open")) { setSidebar(false); return; }
+    if (authModal && !authModal.hidden) closeAuth();
+  });
 
   // ===== 封面图加载失败降级 =====
   // 封面是构建期抽离出的静态文件（/generated/covers/...）。实测线上出现过「列表里登记了封面、
