@@ -240,11 +240,13 @@
 
   async function fetchAllPosts() {
     // 静态预渲染优先：CDN 直读 /generated/posts.json（构建时生成）。
-    // 用 cache:"force-cache" 让浏览器直接命中本地缓存秒开首屏（跨境刷新也不依赖网络）；
-    // 后台再由 verifyStaticFreshness 用 /api/posts/meta 校验新鲜度并静默补最新文章。
+    // 用 cache:"default" 走 HTTP 缓存策略（_headers 里配的是 SWR：先命中本地缓存秒开，
+    // 后台再验证）。⚠️ 不要改回 "force-cache"：那是「无条件用本地缓存、永不校验」——
+    // 构建会更换封面文件名（命名规则变更 / 换图），旧快照会一直指向已删除的文件，
+    // 表现就是「列表里的图全部不显示」，而且刷新也永远修不回来。
     // 304（本地缓存有效、响应体为空）也视为命中、安全回退动态接口，避免白屏。
     try {
-      const sres = await fetchJSON("/generated/posts.json", { cache: "force-cache", timeout: 8000 });
+      const sres = await fetchJSON("/generated/posts.json", { cache: "default", timeout: 8000 });
       // 304 表示本地缓存的静态快照仍有效（但响应体为空），此时回退动态接口；
       // 200 则正常解析。两者都视为「静态命中」，避免把 304 误判为失败导致白屏。
       if (sres.ok || sres.status === 304) {
@@ -421,8 +423,9 @@
       if (!post) {
         // 静态预渲染优先：CDN 直读 /generated/posts/<slug>.json（含 body，秒回）；
         // 缺失/失败则降级到 Function 动态接口。
+        // 同样用 cache:"default" 遵守 SWR：封面文件名会随构建变化，force-cache 会拿到旧路径。
         try {
-          const sres = await fetchJSON(`/generated/posts/${encodeURIComponent(slug)}.json`, { cache: "force-cache", timeout: 8000 });
+          const sres = await fetchJSON(`/generated/posts/${encodeURIComponent(slug)}.json`, { cache: "default", timeout: 8000 });
           // 304 视为静态命中（无 body），回退下方动态接口；200 正常解析
           if (sres.ok || sres.status === 304) {
             if (sres.ok) {
@@ -1924,27 +1927,64 @@
 
   // ===== 封面图加载失败降级 =====
   // 封面是构建期抽离出的静态文件（/generated/covers/...）。实测线上出现过「列表里登记了封面、
-  // 文件却 404」的情况（Cloudflare Pages 对非 ASCII 资源文件名不可靠；现已改为纯 ASCII 命名），
-  // 此时 <img> 会显示一个破图图标。策略：先重试一次（pages.dev 在大陆跨境访问偶发失败，
-  // 不该一次就放弃），仍失败则隐藏封面、让卡片退化成「无封面」排版。
+  // 文件却 404」的情况，成因有两类：
+  //   ① 浏览器拿到了**过期的列表快照**，里面指向的文件已被新一次构建改名删除；
+  //   ② pages.dev 在大陆跨境访问偶发失败（不该一次就放弃）。
+  // 策略：先带 cache-buster 重试两次；仍失败且是卡片封面 → 拉一次最新的快照并重渲染
+  // （自愈，避免「图全没了而且怎么刷都回不来」）；最后才隐藏，退化成「无封面」排版。
   // 注意：img 的 error 事件不冒泡，必须在捕获阶段监听才能收到。
+  let snapshotRefreshTried = false;
+  async function tryRefreshSnapshotForCovers() {
+    if (snapshotRefreshTried) return false;
+    snapshotRefreshTried = true;
+    try {
+      // reload 强制绕过本地缓存，拿服务端当前快照
+      const r = await fetchJSON("/generated/posts.json", { cache: "reload", timeout: 8000 });
+      if (!r.ok) return false;
+      const d = await r.json();
+      if (!d || !d.ok || !Array.isArray(d.posts) || !d.posts.length) return false;
+      // 封面路径没变说明不是快照过期（可能纯属网络抖动），不做无谓重渲染
+      const changed = JSON.stringify(d.posts.map((p) => p.slug + "|" + (p.cover || ""))) !==
+        JSON.stringify(posts.map((p) => p.slug + "|" + (p.cover || "")));
+      if (!changed) return false;
+      refreshHomeList(d.posts);
+      return true;
+    } catch (_) { return false; }
+  }
   document.addEventListener("error", (e) => {
     const img = e.target;
     if (!img || img.tagName !== "IMG" || !img.classList) return;
     const isCard = img.classList.contains("card-cover-img");
     const isHero = img.classList.contains("post-cover");
     if (!isCard && !isHero) return;
-    if (Number(img.dataset.coverTries || 0) < 1) {
-      // 首次失败：延迟重挂 src。同步重设会立刻再次触发 error，反而没给网络一次机会。
-      img.dataset.coverTries = "1";
+    const tries = Number(img.dataset.coverTries || 0);
+    if (tries < 2) {
+      // 失败重挂 src，并加 cache-buster（避免命中此前那条失败的缓存条目）。
+      // 同步重设会立刻再次触发 error，反而没给网络一次机会，所以延迟重试。
+      img.dataset.coverTries = String(tries + 1);
       const src = img.getAttribute("src");
-      if (src) { img.removeAttribute("src"); setTimeout(() => img.setAttribute("src", src), 500); return; }
+      if (src) {
+        img.removeAttribute("src");
+        const busted = src + (src.includes("?") ? "&" : "?") + "retry=" + (tries + 1);
+        setTimeout(() => img.setAttribute("src", busted), 400 * (tries + 1));
+        return;
+      }
+    }
+    if (isCard) {
+      // 走到这里说明重试也没救回来：很可能是本地快照过期（封面文件名已变），尝试自愈
+      tryRefreshSnapshotForCovers().then((healed) => {
+        if (healed) return; // 重渲染后是新的一批 <img>，交给它们自己加载
+        img.hidden = true;
+        const wrap = img.parentElement;
+        if (wrap) wrap.classList.add("cover-failed");
+        const card = img.closest(".card");
+        if (card) card.classList.add("no-cover"); // 复用无封面卡片的边框与引号排版
+      });
+      return;
     }
     img.hidden = true;
     const wrap = img.parentElement;
     if (wrap) wrap.classList.add("cover-failed");
-    const card = img.closest(".card");
-    if (card) card.classList.add("no-cover"); // 复用无封面卡片的边框与引号排版
   }, true);
 
   const memberNav = document.querySelector('.nav-link[data-view="member"]');
