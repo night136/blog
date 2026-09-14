@@ -1539,3 +1539,31 @@ body.lightbox-open { overflow: hidden; }
   .share-ico { width: 46px; height: 46px; }
   .share-link-copy, .share-copy-title { min-height: 44px; }
 }
+
+/* ===== 键盘可达性：全局可见焦点 ===== */
+/* 站内大量可点元素（.card / .nav-link / .chip / .share-item / .comment-like …）此前
+   没有可见的聚焦样式，纯键盘用户在页面上"看不见自己在哪"。输入框类的 :focus 已用
+   box-shadow 表达焦点并配 outline:none，这里用 :focus-visible 只针对**键盘**导航
+   补一圈轮廓 —— 鼠标点击不会触发，不影响现有观感。
+   用 :focus-visible 而非 :focus，避免鼠标点击时出现多余轮廓。 */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* 深色底/强调底上的焦点用白色轮廓，保证对比度 */
+.btn-submit:focus-visible,
+.nav-link.active:focus-visible {
+  outline-color: var(--text);
+}
+/* 卡片是块级可点区域，轮廓贴着圆角走，避免看起来像多出一个边框 */
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

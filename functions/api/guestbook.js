@@ -82,8 +82,13 @@ export async function onRequestGet({ env, request }) {
   const canDelete = isOwner(username, env);
 
   // 边缘缓存 30s（公开只读，IP 限频靠前端 short-poll 与云端错峰足够）
+  // ⚠️ 缓存键必须带上登录态：响应体含 canDelete / currentUser（都随会话变化）。
+  // 若只按 request.url 做键，站长访问后会把 canDelete:true 缓存 30s，
+  // 随后所有匿名访客命中同一份缓存 → 人人看到删除按钮（越权仍由 manage.js 拦截，但属 UI 泄露）。
   const cache = caches.default;
-  const cacheKey = new Request(request.url);
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set("_u", username || "-");
+  const cacheKey = new Request(cacheUrl.toString());
   try {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;

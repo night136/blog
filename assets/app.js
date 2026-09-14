@@ -88,11 +88,22 @@
   let currentSlide = 0, totalSlides = 0, slideTimer = null, hoverPaused = false;
   let searchQuery = "";
   let tocScrollHandler = null;
-  // 当前登录用户（含 username），用于判断楼主 / 留言墙署名。
-  // 注意：必须在此处声明（IIFE 顶部），否则 bindGuestbookForm() 等早期执行的代码
-  // 会因 let 的暂时性死区（TDZ）抛 ReferenceError，中断整个脚本初始化。
+  // ⚠️ 以下状态变量必须全部声明在 IIFE 顶部。
+  // 原因：openPost()（约 435 行）等**函数体内的赋值**会写这些变量，而它们若在文件后半段
+  // 才用 let 声明，函数一旦被调用就落在暂时性死区（TDZ）里 → ReferenceError。
+  // 更隐蔽的是 openPost 外层有 `catch(_)`，异常被静默吞掉，用户只看到「文章加载失败」，
+  // 控制台一片安静。历史上只修了 currentUser，其余 6 个漏了，导致打开任何文章都失败。
+  // 排查方法：node scripts/verify-no-tdz.mjs（已纳入全量回归）。
   let currentUser = null;
   let sessionReady = false;       // 会话已校验过则不再每次打开文章都请求 /api/me
+  let currentPostAuthor = "";     // 当前打开文章的作者
+  let currentSlug = "";           // 当前打开文章的 slug
+  let currentPost = null;         // 当前打开文章的完整数据（用于编辑）
+  let editingSlug = "";           // 非空表示正在编辑该 slug 的文章
+  let commentSort = "new";        // 评论排序：new 最新 / hot 最热
+  let replyTo = 0;                // 正在回复的父评论 id（0 = 顶层新评）
+  let openSeq = 0;                // openPost 请求序号：用于丢弃过期响应（快速切文章防串内容）
+  let progressHandler = null;     // 阅读进度 scroll 监听：每次打开文章前先移除旧的，避免叠加
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
@@ -434,6 +445,10 @@
 
   async function openPost(slug) {
     // 列表不含 body（避免 base64 图片拖慢首页），详情按需拉取单篇
+    // 竞态保护：每次进入取一个自增序号，任何 await 之后若发现序号已变（用户又点了别的文章），
+    // 立即放弃本次渲染，避免「后发先至」的旧响应覆盖新文章，出现标题与正文错配。
+    const seq = ++openSeq;
+    const stale = () => seq !== openSeq;
     const p = posts.find((x) => x.slug === slug);
     if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h2>${p.title}</h2><p style="color:var(--text-faint)">加载中…</p>`;
     showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
@@ -447,24 +462,30 @@
         // 同样用 cache:"default" 遵守 SWR：封面文件名会随构建变化，force-cache 会拿到旧路径。
         try {
           const sres = await fetchJSON(`/generated/posts/${encodeURIComponent(slug)}.json`, { cache: "default", timeout: 8000 });
+          if (stale()) return;
           // 304 视为静态命中（无 body），回退下方动态接口；200 正常解析
           if (sres.ok || sres.status === 304) {
             if (sres.ok) {
               const sd = await sres.json();
+              if (stale()) return;
               if (sd && sd.ok && sd.post) { post = sd.post; fromStatic = true; }
             }
           }
         } catch (_) {}
+        if (stale()) return;
         if (!post) {
           const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
           const data = await res.json();
+          if (stale()) return;
           if (!res.ok || !data.ok || !data.post) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败：${(data && data.error) || res.status}</p>`; return; }
           post = data.post;
         }
         postCache.set(slug, post);
       }
+      if (stale()) return;
       updateMeta(post);
       if (!sessionReady) { currentUser = await checkSession(); sessionReady = true; }
+      if (stale()) return;
       // 静态快照无法判断作者，按当前会话修正，保证作者看到编辑/删除按钮
       post.isAuthor = !!(currentUser && currentUser.username && post.author && (currentUser.username === post.author || currentUser.isOwner));
       // 静态加载未经过 detail.js 的 +1 逻辑，这里补一次实时阅读数（非作者才 +1）
@@ -472,9 +493,11 @@
         try {
           const vres = await fetch("/api/posts/view", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
           const vd = await vres.json();
+          if (stale()) return;
           if (vd && vd.ok) post.views = vd.views;
         } catch (_) {}
       }
+      if (stale()) return;
       currentSlug = slug;
       currentPost = post;
       currentPostAuthor = post.author;
@@ -852,6 +875,10 @@
       bar.className = "read-progress";
       document.body.appendChild(bar);
     }
+    // 先摘掉上一次的监听：本函数每打开一篇文章就调用一次，
+    // 若不移除，读 N 篇后滚动一次会触发 N 个 handler，且旧闭包持有已卸载的 .post-body
+    // 引用，每次滚动都做无用的 getBoundingClientRect + offsetHeight 强制重排。
+    if (progressHandler) { window.removeEventListener("scroll", progressHandler); progressHandler = null; }
     const body = postDetail.querySelector(".post-body");
     if (!body) { bar.style.width = "0%"; return; }
     const update = () => {
@@ -862,7 +889,8 @@
       bar.style.width = pct + "%";
     };
     update();
-    window.addEventListener("scroll", update, { passive: true });
+    progressHandler = update;
+    window.addEventListener("scroll", progressHandler, { passive: true });
   }
 
   // 单条评论的 HTML（顶层与回复复用）
@@ -1854,13 +1882,8 @@
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====
-  // currentUser 已在 IIFE 顶部声明（避免 TDZ），此处不再重复声明
-  let currentPostAuthor = "";    // 当前打开文章的作者
-  let currentSlug = "";          // 当前打开文章的 slug
-  let currentPost = null;        // 当前打开文章的完整数据（用于编辑）
-  let editingSlug = "";          // 非空表示正在编辑该 slug 的文章
-  let commentSort = "new";       // 评论排序：new 最新 / hot 最热
-  let replyTo = 0;               // 正在回复的父评论 id（0 = 顶层新评）
+  // 状态变量（currentUser / currentSlug / currentPost 等）已全部移至 IIFE 顶部声明，
+  // 见文件开头的「⚠️ 以下状态变量必须全部声明在 IIFE 顶部」注释，此处不再重复声明（会造成 TDZ）。
   function setAuthUI(user) {
     if (user && user.username) {
       if (authBtn) authBtn.hidden = true;
