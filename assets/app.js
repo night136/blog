@@ -1618,11 +1618,32 @@
   const SHICHEN_RANGE = ["23:00–01:00","01:00–03:00","03:00–05:00","05:00–07:00","07:00–09:00","09:00–11:00","11:00–13:00","13:00–15:00","15:00–17:00","17:00–19:00","19:00–21:00","21:00–23:00"];
   const pad2 = (n) => String(n).padStart(2, "0");
 
-  // lunar.js 体积 426KB（压缩后约 87KB）。宽屏照旧空闲时自动加载；窄屏（≤980px）右侧栏
+  // lunar.js 体积 426KB（br 约 110KB）。宽屏照旧空闲时自动加载；窄屏（≤980px）右侧栏
   // 整体 display:none，详细农历与「此刻」时钟都看不到，唯一用到 Lunar 的只有 hero 里这行干支
-  // —— 不值得让每个手机访客都下载 87KB。故窄屏改为「按需加载」：先用本地地支算出时辰 + 时间
+  // —— 不值得让每个手机访客都下载 110KB。故窄屏改为「按需加载」：先用本地地支算出时辰 + 时间
   // （不依赖 lunar.js），用户点那行才加载库并升级为干支/农历月日。
+  //
+  // ⚠️ 加载失败绝不能是「静默终态」（2026-09-15 修）：原先 onerror 只把状态置 failed 就收尾，
+  // 而失败文案只在窄屏渲染 —— 于是宽屏用户看到的是「hero 行一切正常、右侧农历挂件永远是 —」。
+  // 一次偶发失败（跨境下载被掐断）就让农历永久失灵，既没有提示、也没有任何恢复途径。
+  // 现在两条失败路径都要走：① 明确 onerror；② 请求挂着不返回（看门狗超时）—— 后者在跨境
+  // 链路上更常见，原先会让状态永远停在 loading。失败后退避自动重试，用尽则把重试入口交给用户。
+  //
+  // 为什么「连续刷新」挂件总是空的：文档卸载会中止未完成的请求，而 max-age 缓存只有**下载完成**
+  // 后才写入 —— 刷得比 110KB 下载快，就每次都从头开始、永远下不完。桌面端已用 <link rel=preload>
+  // （见 index.html，带 media 门控，窄屏不受影响）把它提前到解析阶段下载，缩短这个窗口。
+  const LUNAR_SRC = "assets/vendor/lunar.js";
+  const LUNAR_MAX_ATTEMPTS = 3;
+  const LUNAR_RETRY_DELAYS = [1500, 5000];   // 第 1、2 次失败后的退避（ms）
+  const LUNAR_WATCHDOG_MS = 15000;           // 既不 load 也不 error（连接挂住）也算失败
+  const LUNAR_HINT_LOADING = '<span class="lunar-hint">农历加载中…</span>';
+  const LUNAR_HINT_FAIL = '<span class="lunar-hint">农历加载失败 · 点按重试</span>';
+  const LUNAR_HINT_RETRYING = '<span class="lunar-hint">农历重试中…</span>';
+  const LUNAR_HINT_FIND = '<span class="lunar-hint">查农历</span>';
   let lunarLibState = "idle"; // idle | loading | ready | failed
+  let lunarAttempts = 0;      // 已发起的加载次数（自动重试的预算依据）
+  let lunarRetryTimer = 0;    // 自动重试定时器
+  let lunarWatchdogTimer = 0; // 单次加载的超时看门狗
   let heroLineKey = "";       // hero 行的渲染签名，避免每秒重建 DOM
   let lunarDetailDayKey = ""; // 详细农历（节气/整月月历）已渲染的日期，避免每秒重算
   const narrowMQ = window.matchMedia("(max-width: 980px)");
@@ -1633,19 +1654,56 @@
     return { idx, name: DI_ZHI[idx] };
   }
 
+  // 判定加载失败：置状态 + 通知 hero 行与侧栏挂件 + 安排下一次退避重试。
+  // 「已就绪」直接返回 —— 用户手动重试与自动重试可能留下多个在途 script，
+  // 迟到的那个报错不能把已经好的状态打回失败。
+  function lunarFail() {
+    if (typeof Lunar !== "undefined") return;
+    lunarLibState = "failed";
+    heroLineKey = "";
+    try { tickClock(); renderLunarStatus(); } catch (e) { console.error("[lunar] 失败态渲染出错", e); }
+    if (lunarAttempts < LUNAR_MAX_ATTEMPTS) {
+      const delay = LUNAR_RETRY_DELAYS[lunarAttempts - 1] || 8000;
+      lunarRetryTimer = setTimeout(function () {
+        if (typeof Lunar === "undefined") loadLunarLib();
+      }, delay);
+    }
+  }
+
   function loadLunarLib() {
     if (lunarLibState === "loading" || lunarLibState === "ready") return;
+    if (typeof Lunar !== "undefined") { lunarLibState = "ready"; renderLunarStatus(); return; }
     lunarLibState = "loading";
+    lunarAttempts++;
+    try { renderLunarStatus(); } catch (e) {}
     const s = document.createElement("script");
-    s.src = "assets/vendor/lunar.js";
+    s.src = LUNAR_SRC;
     s.async = true;
+    // 跨境链路上「请求挂着不回来」比「明确失败」更常见：没有看门狗就永远停在 loading
+    clearTimeout(lunarWatchdogTimer);
+    lunarWatchdogTimer = setTimeout(lunarFail, LUNAR_WATCHDOG_MS);
     s.onload = function () {
+      clearTimeout(lunarWatchdogTimer);
+      // 下载完成 ≠ 可用：被代理/过滤插件替换过内容的响应照样触发 onload
+      if (typeof Lunar === "undefined") { lunarFail(); return; }
       lunarLibState = "ready";
       heroLineKey = ""; lunarDetailDayKey = "";
-      try { tickClock(); renderLunarDetails(); updateSideClock(); } catch (e) {}
+      try { tickClock(); renderLunarStatus(); renderLunarDetails(); updateSideClock(); }
+      catch (e) { console.error("[lunar] 就绪后渲染出错", e); }
     };
-    s.onerror = function () { lunarLibState = "failed"; heroLineKey = ""; try { tickClock(); } catch (e) {} };
+    s.onerror = function () { clearTimeout(lunarWatchdogTimer); lunarFail(); };
     document.head.appendChild(s);
+  }
+
+  // 用户主动重试：重开一次预算（自动重试已用尽也能救回来），并立即发起。
+  function retryLunarNow() {
+    if (typeof Lunar !== "undefined") return;
+    clearTimeout(lunarRetryTimer);
+    lunarAttempts = 0;
+    lunarLibState = "idle";
+    loadLunarLib();
+    heroLineKey = "";
+    try { tickClock(); } catch (e) {}
   }
 
   // hero 那行「时辰 + 时间」：每秒调用，必须极轻 —— 只在「跨日 / 换时辰 / 库状态变化」时重建，
@@ -1672,16 +1730,41 @@
       el.title = "农历时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
       el.dataset.lunarCta = "0";
     } else {
+      // 窄屏：这行本来就是「按需加载」的入口（三种状态各有文案，点了才下载）。
+      // 宽屏：正常情况不显示任何提示（视觉零变化），只有失败/重试中才提示 ——
+      // 否则用户永远不知道右侧农历挂件为什么一直空着。
       let hint = "";
       if (isNarrow()) {
-        hint = lunarLibState === "loading" ? "<span class=\"lunar-hint\">农历加载中…</span>"
-          : lunarLibState === "failed" ? "<span class=\"lunar-hint\">农历加载失败 · 点按重试</span>"
-          : "<span class=\"lunar-hint\">查农历</span>";
+        hint = lunarLibState === "loading" ? LUNAR_HINT_LOADING
+          : lunarLibState === "failed" ? LUNAR_HINT_FAIL
+          : LUNAR_HINT_FIND;
+      } else if (lunarLibState === "failed") {
+        hint = LUNAR_HINT_FAIL;
+      } else if (lunarAttempts > 1) {
+        hint = LUNAR_HINT_RETRYING;
       }
       el.innerHTML = "🕐 <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>" + hint;
       el.title = "时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
-      el.dataset.lunarCta = (isNarrow() && lunarLibState !== "loading") ? "1" : "0";
+      // 宽屏也能点：失败/重试中时把它变成人工救回来的入口（原先只有窄屏可点）
+      const canRetry = isNarrow() ? lunarLibState !== "loading" : (lunarLibState === "failed" || lunarAttempts > 1);
+      el.dataset.lunarCta = canRetry ? "1" : "0";
     }
+  }
+
+  // 侧栏农历挂件的「未就绪」态：库没加载好时，主行别一直挂个「—」（看着就是坏了）。
+  // 只改这一行，其余占位保持原样 —— 长度相近，不会引起侧栏布局跳动；
+  // 就绪后 renderLunarDetails() 会把整块内容填回来。
+  function renderLunarStatus() {
+    const wrap = $("lunarWidget");
+    const gzEl = $("lunarGanZhi");
+    if (!gzEl) return;                          // 挂件不在页面上（如 404 页复用本脚本时）
+    if (typeof Lunar !== "undefined") {         // 就绪：清掉状态痕迹，交给正常渲染
+      if (wrap) delete wrap.dataset.lunarState;
+      return;
+    }
+    const failed = lunarLibState === "failed";
+    gzEl.textContent = failed ? "农历加载失败 · 点按重试" : "农历加载中…";
+    if (wrap) wrap.dataset.lunarState = failed ? "failed" : "loading";
   }
 
   // 详细农历挂件（右侧栏）：节气 + 整月月历属于「一天只变一次」的重活，按日缓存。
@@ -2356,6 +2439,8 @@
 
   // ===== 启动 =====
   tickClock();
+  // 侧栏挂件先进入「农历加载中…」，别让主行挂着「—」等下完 110KB（看着像坏了）
+  try { renderLunarStatus(); } catch (e) {}
 
   // 农历库（426KB / br 87KB）：宽屏空闲时自动加载；窄屏不自动加载 —— 那里看不到详细农历，
   // 点 hero 那行才按需拉取（省 87KB）。加载完成前 hero 行显示「时辰 + 时间」，仍然有用。
@@ -2372,14 +2457,16 @@
       if (!e.matches) updateSideClock();
     });
   } catch (_) {}
-  // 窄屏点 hero 那行 → 按需加载
+  // 点 hero 那行 → 立即重试加载（窄屏是「按需加载」入口；宽屏是失败后的人工补救）
   const lunarClockEl = $("lunarClock");
   if (lunarClockEl) {
-    lunarClockEl.addEventListener("click", () => {
-      if (typeof Lunar !== "undefined") return;
-      if (lunarLibState === "failed") lunarLibState = "idle";
-      loadLunarLib();
-      heroLineKey = ""; tickClock();
+    lunarClockEl.addEventListener("click", retryLunarNow);
+  }
+  // 侧栏挂件：只有失败态才整块可点（避免正常浏览时误触）
+  const lunarWidgetEl = $("lunarWidget");
+  if (lunarWidgetEl) {
+    lunarWidgetEl.addEventListener("click", function () {
+      if (lunarLibState === "failed") retryLunarNow();
     });
   }
 

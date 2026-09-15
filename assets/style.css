@@ -984,6 +984,8 @@ body.lightbox-open { overflow: hidden; }
 .lunar-cal-cell.today .cal-solar { color: var(--accent-dark); }
 .lunar-cal-cell.today .cal-lunar { color: var(--accent-dark); }
 .lunar-shichen { margin-top: 8px; font-size: 11px; color: var(--text-faint); text-align: center; }
+/* 农历库加载失败时整块可点重试。只有 failed 才给手型 —— 正常/加载中不可点，避免误触 */
+#lunarWidget[data-lunar-state="failed"] { cursor: pointer; }
 
 /* ===== Hero 头像 ===== */
 .hero-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: transparent; display: block; box-shadow: var(--shadow); margin-bottom: 14px; }
