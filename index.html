@@ -43,11 +43,18 @@
   <meta name="color-scheme" content="light dark" />
   <!-- 移动端浏览器 UI（地址栏 / 状态栏）配色：默认暖米色，深色由 applyTheme() 动态同步（跟随站内主题开关，而非只看系统偏好） -->
   <meta name="theme-color" id="theme-color" content="#F5EFE6" />
-  <!-- 字体：使用国内可访问的 Google Fonts 镜像（fonts.font.im），赣州网络下不再卡顿；失败则回退系统衬线字体。
+  <!-- 字体：使用国内可访问的 Google Fonts 镜像（fonts.font.im），失败则回退系统衬线字体。
        只请求 400/700/900 三档 —— 600 在正文里只用于次要小标签，缺字重时浏览器会按 CSS 规范就近回退到 700，
-       视觉几乎无差，却能少下一整套 CJK 子集文件。900 是 Bento 标题的核心字重，必须保留。 -->
+       视觉几乎无差，却能少下一整套 CJK 子集文件。900 是 Bento 标题的核心字重，必须保留。
+
+       ⚠️ 这里刻意**不放** <link rel="stylesheet">：那条样式表未压缩 339KB、gzip 91KB，
+       实测冷缓存要 460~590ms 才到，而它是**跨站渲染阻塞资源** —— 首屏所有内容（文章、侧栏、挂件）
+       会一起等它，实测把首绘从 ~900ms 拖到 1296ms。改由 app.js 在首绘之后动态注入
+       （动态插入的样式表不参与渲染阻塞，字体到了由 font-display:swap 自然替换）。
+       ⚠️ 也刻意**不用** media="print" onload 切换：见下方 style.css 那条注释 ——
+       小米/360 兼容模式对 onload 切换支持不良，会导致样式表永远不生效，项目已因此回滚过一次。
+       preconnect 保留：注入时机虽晚，握手仍可提前完成。 -->
   <link rel="preconnect" href="https://fonts.font.im" crossorigin />
-  <link href="https://fonts.font.im/css2?family=Noto+Serif+SC:wght@400;700;900&display=swap" rel="stylesheet" />
   <!-- 首屏关键 CSS 内联：变量 + 防闪 + 布局骨架 + 卡片入场动画 + 移动端布局兜底。即使 style.css 加载失败/延迟，页面也不会错乱、卡片也不会消失。 -->
   <style>
     :root {
@@ -106,6 +113,10 @@
       var isStyle = t.tagName === 'LINK' && /\bstylesheet\b/i.test(t.rel || '');
       var isCssPreload = t.tagName === 'LINK' && /\bpreload\b/i.test(t.rel || '') && /^style$/i.test(t.as || '');
       if (!isScript && !isStyle && !isCssPreload) return; // 过滤 canonical/icon 等非关键资源的误报
+      /* 可选资源（网页字体由 app.js 在首绘之后注入，带 data-optional）：
+         它失败只是回到系统衬线字体，页面完全可用，不该弹「资源加载失败」横幅吓用户。
+         ⚠️ 加任何「非关键」的资源都要同步补这一条，否则会造出假告警。 */
+      if (t.getAttribute && t.getAttribute('data-optional')) return;
       var b = document.getElementById('bootFallback');
       if (b && b.style.display !== 'block') {
         b.style.display = 'block';

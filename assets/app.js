@@ -96,6 +96,7 @@
   // 排查方法：node scripts/verify-no-tdz.mjs（已纳入全量回归）。
   let currentUser = null;
   let sessionReady = false;       // 会话已校验过则不再每次打开文章都请求 /api/me
+  let sessionPromise = null;      // 进行中的会话校验：启动与「打开文章」共用同一个请求（去重）
   let currentPostAuthor = "";     // 当前打开文章的作者
   let currentSlug = "";           // 当前打开文章的 slug
   let currentPost = null;         // 当前打开文章的完整数据（用于编辑）
@@ -486,28 +487,17 @@
       }
       if (stale()) return;
       updateMeta(post);
-      if (!sessionReady) { currentUser = await checkSession(); sessionReady = true; }
-      if (stale()) return;
-      // 静态快照无法判断作者，按当前会话修正，保证作者看到编辑/删除按钮
-      post.isAuthor = !!(currentUser && currentUser.username && post.author && (currentUser.username === post.author || currentUser.isOwner));
-      // 静态加载未经过 detail.js 的 +1 逻辑，这里补一次实时阅读数（非作者才 +1）
-      if (fromStatic) {
-        try {
-          const vres = await fetch("/api/posts/view", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }) });
-          const vd = await vres.json();
-          if (stale()) return;
-          if (vd && vd.ok) post.views = vd.views;
-        } catch (_) {}
-      }
-      if (stale()) return;
+      // ── 关键路径到此为止，下面只做渲染 ──
+      // 「会话」(/api/me) 与「阅读数 +1」(/api/posts/view) 都是**装饰性**信息，
+      // 但两者都是 no-store（永远不走缓存），原先串行挡在渲染之前 →
+      // 每次打开文章都白等两次跨境往返，与正文内容毫无关系。
+      // 线上实测（暖缓存）：静态正文 563ms 就到了，正文却到 1171ms 才出现，
+      // 其中约 600ms 全部花在这两次请求上。现在改为「先渲染、后补齐」。
       currentSlug = slug;
       currentPost = post;
       currentPostAuthor = post.author;
-      const isAuthor = !!post.isAuthor;
-      const manageBtns = isAuthor
-        ? `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`
-        : "";
-      const rt = { minutes: post.readingMinutes || 0, words: post.words || 0 };
+      const isAuthor = !!post.isAuthor;   // 可能来自 postCache 的上一次会话结果；随后由 patchPostMeta 校正
+      const manageBtns = isAuthor ? postActionsHtml(slug) : "";
       const heroCover = post.cover ? safeUrl(post.cover, true) : "";
       const hero = heroCover ? `<img class="post-cover" src="${escapeHtml(heroCover)}" alt="">` : "";
       const toc = buildToc(post.body || "");
@@ -517,7 +507,8 @@
       // 文末入口：长文读到底想分享时，不必再滚回顶部（两个入口共用同一个面板）
       const shareBtnsEnd = `<div class="post-share post-share-end"><span class="share-end-label">觉得有用？</span><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享给朋友</button><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button></div>`;
       const nav = buildPostNav(slug);
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h1>${post.title}</h1>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h2 class="comments-title">💬 评论</h2><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time"></span>${manageBtns}</div>${hero}<h1>${post.title}</h1>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h2 class="comments-title">💬 评论</h2><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      renderReadTime(post);   // 与 patchPostMeta 共用同一处格式化，避免两份文案漂移
       lazyLoadImages(postDetail);
       bindCommentForm(slug);
       loadComments(slug);
@@ -528,7 +519,62 @@
       initTocSpy();
       // ① 文章详情进入动画：重播子元素错位淡入
       postDetail.classList.remove("post-anim"); void postDetail.offsetWidth; postDetail.classList.add("post-anim");
-    } catch (_) { postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`; }
+      // ── 渲染完成，正文已经可读。下面才去补装饰性信息（不 await，不阻塞）──
+      patchPostMeta(slug, seq, fromStatic);
+    } catch (e) {
+      // 详细记日志、模糊给用户：不能像历史上那样把异常整个吞掉（见文件顶部的 TDZ 注释）
+      console.error("[post] 打开文章失败", slug, e);
+      postDetail.innerHTML = `<p style="color:var(--text-faint)">文章加载失败，请重试</p>`;
+    }
+  }
+
+  // 阅读时长/字数/阅读数这一行的唯一格式化入口（初次渲染与「阅读数回来」都走它）
+  function renderReadTime(post) {
+    const el = postDetail.querySelector(".read-time");
+    if (!el || !post) return;
+    el.textContent = `⏱ 约 ${post.readingMinutes || 0} 分钟 · ${post.words || 0} 字 · ${post.views || 0} 阅读`;
+  }
+
+  function postActionsHtml(slug) {
+    return `<span class="post-actions"><button class="post-edit" data-edit-slug="${escapeHtml(slug)}" type="button">✏️ 编辑</button><button class="post-del" data-del-slug="${escapeHtml(slug)}" type="button">🗑 删除</button></span>`;
+  }
+
+  // 正文渲染**之后**才做的两件装饰性小事：
+  //   ① 会话 → 决定要不要显示「编辑 / 删除」（编辑/删除按钮是事件委托绑定的，后插也能用）
+  //   ② 静态快照没经过 detail.js 的 +1，这里补一次实时阅读数
+  // 两者原先都串行挡在渲染前，且都是 no-store（永不缓存）→ 每次打开文章平白多等约 600ms。
+  // 现在允许它们慢、允许它们失败：正文已经看得见了，这里只负责把细节补上。
+  // ⚠️ 每一处改 DOM 之前都要复查 stale()（用户可能已经切到别的文章了）。
+  async function patchPostMeta(slug, seq, fromStatic) {
+    const stale = () => seq !== openSeq || currentSlug !== slug;
+    try {
+      const user = await ensureSession();
+      if (stale()) return;
+      if (currentPost && currentPost.slug === slug) {
+        currentPost.isAuthor = !!(user && user.username && currentPost.author &&
+          (user.username === currentPost.author || user.isOwner));
+      }
+      const meta = postDetail.querySelector(".post-meta");
+      if (!meta) return;
+      const existing = meta.querySelector(".post-actions");
+      const isAuthor = !!(currentPost && currentPost.isAuthor);
+      if (isAuthor && !existing) meta.insertAdjacentHTML("beforeend", postActionsHtml(slug));
+      else if (!isAuthor && existing) existing.remove();
+    } catch (e) { console.error("[post] 会话补齐失败", slug, e); }
+
+    if (!fromStatic) return; // 动态接口（detail.js）已经 +1 过，不要重复计数
+    try {
+      const vres = await fetch("/api/posts/view", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug }),
+      });
+      const vd = await vres.json();
+      if (stale()) return;
+      if (vd && vd.ok && typeof vd.views === "number" && currentPost && currentPost.slug === slug) {
+        currentPost.views = vd.views;
+        renderReadTime(currentPost);
+      }
+    } catch (e) { console.error("[post] 阅读数更新失败", slug, e); }
   }
 
   // ===== 工具函数 =====
@@ -983,15 +1029,21 @@
     if (editBtn) {
       e.preventDefault();
       const s = editBtn.dataset.editSlug;
-      if (currentPost && currentPost.slug === s) {
-        openCompose(currentPost);
-      } else {
-        // 兜底：从列表项进入时可能还没完整 body，先取详情再编辑
-        try {
-          const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: s }) });
-          const data = await res.json();
-          if (data.ok && data.post) openCompose(data.post);
-        } catch (_) {}
+      // ⚠️ 一律从动态接口取**原始**正文，不要图省事直接用 currentPost。
+      // currentPost 来自静态快照，而快照正文为了瘦身已把内嵌图片抽成了
+      // /generated/body-images/… 构建产物路径（build.mjs）。拿它预填编辑器，
+      // 用户只改几个字一保存，就会把产物路径写回 D1 → 原始 data: 图片永久丢失
+      // （与封面那次同类事故 3afafdd，只是对象换成了正文里的图）。
+      // 动态接口返回的是 D1 里的原文，永远是可以安全回存的那一份。
+      try {
+        const res = await fetch("/api/posts/detail", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: s }) });
+        const data = await res.json();
+        if (data.ok && data.post) { openCompose(data.post); return; }
+        throw new Error((data && data.error) || res.status);
+      } catch (e) {
+        // 取不到原文就**不进编辑器**：宁可让用户重试，也不能拿快照正文顶替（那会毁掉原图）
+        console.error("[compose] 载入原始正文失败", s, e);
+        toast("无法载入文章原文，请稍后重试");
       }
       return;
     }
@@ -2050,6 +2102,43 @@
     if (typeof updateGuestbookAuthHint === "function") updateGuestbookAuthHint();
   }
   async function checkSession() { try { const r = await fetch("/api/me", { credentials: "same-origin", cache: "no-store" }); const d = await r.json(); currentUser = d.user; setAuthUI(d.user); return d.user; } catch (_) { currentUser = null; setAuthUI(null); return null; } }
+
+  // 会话校验去重。启动时（见文件末尾）与「打开文章」都会想要 currentUser，
+  // 原先两边各发一次 /api/me —— 实测同一页面出现**两次**请求（+240ms 与 +565ms），
+  // 白等一个跨境往返（~190ms）。这里共用一个 promise：
+  // 谁先要谁发起，后到的直接复用同一次结果。
+  // 失败（网络异常）时把 promise 清掉，允许下次重试，避免一次抖动被永久钉死。
+  function ensureSession() {
+    if (!sessionPromise) {
+      sessionPromise = checkSession()
+        .then((u) => { sessionReady = true; return u; })
+        .catch(() => { sessionPromise = null; sessionReady = false; return null; });
+    }
+    return sessionPromise;
+  }
+
+  // ===== 网页字体（非阻塞注入）=====
+  // 为什么不在 index.html 里直接写 <link rel="stylesheet">：
+  // 那条样式表未压缩 339KB / gzip 91KB，且是**跨站**资源。它是渲染阻塞的 ——
+  // 实测冷缓存要 460~590ms 才到，首屏所有内容（文章、侧栏、挂件）会一起等它，
+  // 把首绘从约 900ms 拖到 1296ms。字体本身只是外观增强（系统衬线栈随时兜底），
+  // 让它拖住整页首绘完全不划算。
+  // 动态插入的 <link> 不参与渲染阻塞：字体到达后由 font-display:swap 自然替换。
+  // data-optional 让 index.html 的全局 error 监听忽略它的失败 —— 字体下不来不该弹「资源加载失败」。
+  // ⚠️ 不要改成 media="print" onload="this.media='all'"：小米/360 兼容模式对该切换支持不良，
+  //    会导致样式表永远不生效（项目已因此回滚过一次，见 index.html 里 style.css 上方的注释）。
+  const FONT_CSS_URL = "https://fonts.font.im/css2?family=Noto+Serif+SC:wght@400;700;900&display=swap";
+  function loadWebFont() {
+    try {
+      if (document.querySelector("link[data-web-font]")) return;
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = FONT_CSS_URL;
+      link.setAttribute("data-web-font", "1");
+      link.setAttribute("data-optional", "1");
+      document.head.appendChild(link);
+    } catch (e) { console.error("[font] 网页字体注入失败", e); }
+  }
   function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
   function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
   function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register" && typeof renderRegisterTurnstile === "function") renderRegisterTurnstile(); }
@@ -2503,7 +2592,7 @@
   }, true);
 
   const memberNav = document.querySelector('.nav-link[data-view="member"]');
-  if (memberNav) memberNav.addEventListener("click", async () => { const user = await checkSession(); renderMember(user); });
+  if (memberNav) memberNav.addEventListener("click", async () => { const user = await ensureSession(); renderMember(user); });
 
   // ===== 启动 =====
   // 农历数据就在本文件里，随时可算 —— 没有「加载中」这个状态，也不需要任何重试机制。
@@ -2518,8 +2607,18 @@
   } catch (_) {}
 
   bindInputStates();
-  checkSession();
+  ensureSession();
   loadPosts();
+
+  // 网页字体放到**首绘之后**再注入（两层 rAF ≈ 至少画过一帧）。
+  // 注入的是动态 <link>，不参与渲染阻塞，因此不会推迟任何内容的出现；
+  // 用户先看到系统衬线体，字体到达后由 font-display:swap 自然替换。
+  // 不用 window.load 触发：load 要等封面图（含图文章最大 1.1MB），那时才换字体太晚、跳变更明显。
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => requestAnimationFrame(loadWebFont));
+  } else {
+    setTimeout(loadWebFont, 0);
+  }
 
   // 若 URL 带 ?post=slug，自动打开对应文章（分享链接可用）
   const startParams = new URLSearchParams(location.search);

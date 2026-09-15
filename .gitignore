@@ -22,3 +22,6 @@ dist/
 /assets/app.*.js
 /assets/style.*.css
 /assets/vendor/lunar.*.js
+
+# 排查用的临时抓取物（线上快照、字体 CSS、真实浏览器探针的中间产物）
+/.diag/

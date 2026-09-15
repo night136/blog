@@ -590,8 +590,15 @@ body.lightbox-open { overflow: hidden; }
 .compose-actions .btn-submit { padding: 12px 34px; }
 
 /* ── 骨架屏 ── */
-.skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, #EDE8E0 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: shimmer 1.3s ease infinite; border-radius: 8px; }
-@keyframes shimmer { from{background-position:100% 0} to{background-position:-100% 0} }
+/* 骨架屏微光。原来动的是 background-position（400% 宽的渐变 → 每帧重绘整块元素）：
+   骨架屏会连续显示数秒（等 posts.json / 封面图），弱设备上这段期间持续掉帧。
+   改为「覆盖层 + transform 位移」：只走合成器，不参与重绘。
+   ⚠️ 不要改回 background-position / background-size 动画。 */
+.skeleton { position: relative; overflow: hidden; background: var(--surface-2); border-radius: 8px; }
+.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 100%);
+  animation: shimmer 1.3s ease-in-out infinite; }
+@keyframes shimmer { from{transform:translateX(-100%)} to{transform:translateX(100%)} }
 .sk-card { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .sk-card .sk-cover { height: 172px; }
 .sk-card .sk-line { height: 14px; margin: 14px 22px 0; }

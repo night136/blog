@@ -47,3 +47,25 @@ export function isBuildArtifactCover(raw, origin) {
   }
   return /(^|\.)pages\.dev$/.test(host) || /(^|\.)workers\.dev$/.test(host);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 构建产物**正文图片**判定：禁止把 generated/body-images/ 路径写回数据库
+// ─────────────────────────────────────────────────────────────────────────────
+// 背景：和封面是同一类事故，只是对象换成了正文里内嵌的图。
+// build.mjs 的 materializeBodyImages() 会把正文里的 `![](data:image/…;base64,…)`
+// 抽离成静态文件并把路径写回 markdown，用于**详情快照**（否则单篇详情被 base64 撑到
+// 几百 KB，实测最大 1.14MB）。而编辑器是从快照加载文章的（openCompose）——
+// 于是正文框被预填成产物路径，用户只改几个字、点一下保存，D1 里的原始 data: 图片
+// 就被覆盖，而 generated/ 不入库、每次构建都可能改名甚至消失 → 原图永久丢失。
+// 两道防线：① 前端编辑时改从 /api/posts/detail 取**原始**正文（见 app.js openCompose）；
+//           ② 这里对「正文里引用产物图片」的提交一律拒绝（见 manage.js）。
+//
+// 只说「图片引用」形态，不做全文 includes：本博客就写技术文章，
+// 正文里完全可能出现 /generated/body-images/ 这样的路径示例（代码块里），
+// 全文匹配会把它误判成事故、把作者卡在保存不了。
+const ARTIFACT_BODY_IMG_RE =
+  /!\[[^\]]*\]\((?:https?:\/\/[^\s)]+)?\/generated\/body-images\/|<img\b[^>]*\bsrc=["'](?:https?:\/\/[^"']+)?\/generated\/body-images\//i;
+
+export function isBuildArtifactBody(raw) {
+  return ARTIFACT_BODY_IMG_RE.test(String(raw == null ? "" : raw));
+}

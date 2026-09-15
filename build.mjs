@@ -128,7 +128,18 @@ function publicList(row, cover) {
   };
 }
 
-function publicDetail(row, cover, words) {
+// bodyMd：**已抽离内嵌图片**的正文，由 materializeBodyImages() 产出。
+// ⚠️ 不要改回 row.body：正文里的图常是 base64 内联的，原样写进详情会让单篇快照被撑到几百 KB。
+// 线上实测（2026-09-15）：16 篇里 7 篇含内嵌图，含图文章详情平均 530KB，
+// 最大一篇 1,148,543 字节；一篇正文仅 68 字的文章详情也有 151KB —— 全是那张 base64 图。
+// 跨境网络下拉这个体积，表现就是「点开文章愣好几秒」。抽离后详情只剩几 KB，
+// 图片走独立文件：可被浏览器长期缓存、可懒加载、也不再和正文抢同一个响应体。
+// ⚠️ 随之而来的硬约束：详情里的 body 含 /generated/body-images/ 构建产物路径，
+// 而编辑器会拿快照的 body 预填（openCompose）—— 所以
+//   ① 前端编辑时改从 /api/posts/detail 取**原始**正文（见 app.js openCompose）；
+//   ② 后端 manage.js 加了绊线：正文里出现构建产物路径直接 400。
+// 丢掉这道防线就会重演「构建产物写回 D1 → 原图永久丢失」（封面那次事故 3afafdd）。
+function publicDetail(row, cover, words, bodyMd) {
   return {
     id: row.id,
     slug: row.slug,
@@ -144,7 +155,7 @@ function publicDetail(row, cover, words) {
     views: row.views || 0,
     readingMinutes: Math.max(1, Math.round(words / 300)),
     words,
-    body: row.body,
+    body: bodyMd,
   };
 }
 
@@ -217,18 +228,21 @@ async function main() {
   let seoHtmlBytes = 0;
   for (const row of rows) {
     const cover = materializeCover(row);
-    const words = countWords(row.body);
-    listPosts.push(publicList(row, cover));
-    writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row, cover, words) }));
-
-    // 爬虫用正文片段。顺带把内嵌的 base64 图落成独立文件：
-    // 一是爬虫无法把 data: URI 当图片抓（图片搜索收录不了），
-    // 二是 base64 会把这一篇的响应体从几 KB 撑到几百 KB。
+    // 正文内嵌图先落成独立文件 —— **详情快照和爬虫片段都要用它**。
+    // 必须在写详情 JSON 之前做：详情原先直接用 row.body，导致含图文章的详情
+    // 被 base64 撑到几百 KB（实测最大 1.14MB），而抽离后只剩几 KB。
     const { markdown, saved } = materializeBodyImages(row.body || "", {
       outDir: BODY_IMG_DIR,
       urlPrefix: BODY_IMG_PREFIX,
     });
     bodyImgCount += saved.length;
+
+    // 字数按**发布出去的正文**算：countWords 会剥掉图片 markdown，
+    // 所以与按 row.body 算结果一致，但语义上更不容易出错。
+    const words = countWords(markdown);
+    listPosts.push(publicList(row, cover));
+    writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row, cover, words, markdown) }));
+
     const fragment = buildArticleHtml({
       title: row.title,
       tag: row.tag || "未分类",

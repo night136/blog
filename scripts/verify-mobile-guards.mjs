@@ -288,11 +288,20 @@ console.log("\n[10] P2 打磨：浏览器 UI 配色 / 点按反馈 / 滚动链 /
   check("380 兜底写在 640 之后（否则不生效）",
     g380 > g640, "640 块位置=" + g640 + "，380 块位置=" + g380);
 
-  const fontLink = (htmlSrc.match(/fonts\.font\.im\/css2\?[^"]+/) || [])[0] || "";
+  // 字体链接现在住在 app.js 的 FONT_CSS_URL 里（index.html 那条已被移除，改由 JS 首绘后注入，
+  // 因为它 91KB gzip 且是跨站渲染阻塞资源，会把整页首绘一起拖住）。
+  // 这里仍然只关心「请求了几档字重」—— 与「从哪儿加载」是两件事，所以换成从 app.js 取 URL。
+  // 顺便断言 index.html 里**没有**剩下那条阻塞链接：这是首绘性能的关键，见 verify-first-paint。
+  const fontLink =
+    (appSrc.match(/FONT_CSS_URL\s*=\s*"([^"]+)"/) || [])[1] ||
+    (htmlSrc.match(/fonts\.font\.im\/css2\?[^"]+/) || [])[0] || "";
   check("字体只请求 3 档字重（砍掉 600，视觉靠就近回退）",
     /wght@400;700;900\b/.test(fontLink) && !/;600\b/.test(fontLink), "字体链接：" + fontLink);
   check("保留 900（Bento 标题的核心字重，砍了会明显变细）",
     /wght@[\d;]*900/.test(fontLink), "字体链接：" + fontLink);
+  check("字体已改为非阻塞注入（index.html 不再有阻塞的字体样式表）",
+    !/<link[^>]+fonts\.font\.im[^>]*stylesheet/.test(htmlSrc) && /function loadWebFont\(/.test(appSrc),
+    "index.html 仍有阻塞字体链接，或 app.js 缺少 loadWebFont");
 
   const logoPath = path.join(root, "assets", "logo.jpg");
   const logoReferenced = /logo\.jpg/.test(htmlSrc + appSrc + cssSrc);

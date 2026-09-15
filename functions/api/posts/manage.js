@@ -4,7 +4,7 @@
 //   action: "delete" → 删除文章（仅作者）
 import { verifyJWT, getCookie, json, isOwner, jwtSecret } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
-import { isBuildArtifactCover } from "../../_lib/cover.js";
+import { isBuildArtifactCover, isBuildArtifactBody } from "../../_lib/cover.js";
 
 // 发布/更新/删除成功后触发 Cloudflare Pages 重新构建，使静态预渲染文件（generated/）重生成。
 // Deploy Hook URL 存于 Functions 环境变量 DEPLOY_HOOK_URL，不暴露给前端。
@@ -91,6 +91,21 @@ export async function onRequestPost(ctx) {
     if (title.length > MAX_TITLE) return json({ ok: false, error: "标题过长（最多 120 字）" }, 400);
     if (!mdBody) return json({ ok: false, error: "正文不能为空" }, 400);
     if (mdBody.length > MAX_BODY) return json({ ok: false, error: "正文过长（图片较多时请减少，单篇上限约 1.9MB）" }, 400);
+
+    // ── 正文图片：绊线。放行就会重演封面那次事故，只是对象换成了正文里的图 ──
+    // 详情快照为了瘦身会把正文内嵌的 base64 图抽成 /generated/body-images/…（build.mjs），
+    // 而快照的 body 是编辑器预填的来源。一旦把产物路径写回 D1，原始 data: 图片就没了，
+    // 而 generated/ 不入库 → 无法恢复。正常流程不会走到这里（前端已改从 /api/posts/detail
+    // 读原始正文），能走到就说明「编辑器把快照正文原样回存了」。
+    // 这里刻意选择**响亮失败**（400 + 可操作提示），而不是像封面那样静默保留旧值：
+    // 正文是用户这次真正在编辑的内容，静默保留会让他以为改动生效了、实际白改。
+    if (isBuildArtifactBody(mdBody)) {
+      return json({
+        ok: false,
+        error: "正文里含有本站构建产物的图片路径（/generated/body-images/…）。这通常说明编辑器把静态快照的正文原样提交了。已阻止保存以免覆盖你原有的图片 —— 请刷新页面后重新编辑；若图片显示为本地文件路径，请重新插入一次图片。",
+        code: "artifact_body",
+      }, 400);
+    }
 
     // ── 封面：这里写错会永久毁掉用户的原始图片，必须走「宁可不动」策略 ──
     // 背景：详情快照（/generated/posts/<slug>.json）里的 cover 是**构建产物路径**
