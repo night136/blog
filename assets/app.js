@@ -278,7 +278,10 @@
   }
 
   async function fetchDynamicPosts() {
-    const res = await fetchJSON("/api/posts", { cache: "no-store", timeout: 6000 });
+    // 降级路径（静态快照不可用 / 304 无体 / 过期时才走）。返回的字段全是公开数据
+    // （id/slug/title/date/tag/summary/cover/author/字数/阅读数，无任何登录态），
+    // 服务端配的是 public, max-age=60 —— 用 default 让浏览器缓存生效，省一次跨境往返。
+    const res = await fetchJSON("/api/posts", { cache: "default", timeout: 6000 });
     const data = await res.json();
     if (!data.ok) throw new Error("bad list");
     return data.posts || [];
@@ -1623,7 +1626,10 @@
   // 所以 api.js 的注入点自然落在首屏之后，不会挤首屏带宽。
   async function loadTurnstileConfig() {
     try {
-      const res = await fetch("/api/config", { credentials: "same-origin", cache: "no-store" });
+      // 用 default 走浏览器缓存：响应只有公开的 Turnstile Site Key，服务端配的是
+      // public, max-age=300。原来写 no-store 等于每次访问都跨境取一个几乎永不变化的字符串
+      // （实测第 2 次 239ms vs 3ms）。改 Site Key 后最多 5 分钟生效，可接受。
+      const res = await fetch("/api/config", { credentials: "same-origin", cache: "default" });
       const d = await res.json();
       if (d && d.turnstileSiteKey) turnstileSiteKey = d.turnstileSiteKey;
     } catch (_) { /* 配置拉取失败不阻塞页面 */ }

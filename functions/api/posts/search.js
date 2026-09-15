@@ -4,7 +4,16 @@ import { listCover, loadCoverMap } from "../../_lib/cover.js";
 
 export async function onRequestGet({ env, request }) {
   const json = (data, status = 200) =>
-    new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        // 结果由用户输入触发、且随文章增删改变化 —— 删掉的文章若被缓存，点进去就是 404。
+        // 没有缓存价值（不是首屏路径），显式声明不缓存，
+        // 别让浏览器按「无缓存头响应」的启发式规则自行决定有效期。
+        "Cache-Control": "no-store",
+      },
+    });
 
   if (!env.BLOG_DB) return json({ ok: false, error: "服务端未配置数据库" }, 500);
 

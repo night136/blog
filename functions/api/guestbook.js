@@ -134,11 +134,16 @@ export async function onRequestGet({ env, request }) {
 
     const turnstileSiteKey = env.TURNSTILE_SITE_KEY || null;
     const body = JSON.stringify({ ok: true, notes: page, canDelete, total, streak, turnstileSiteKey, hasMore, nextCursor, currentUser: username || null });
+    // ⚠️ 响应含登录态（canDelete / currentUser）。只有**访客版本**可以标 public：
+    // 登录用户的版本若标 public，浏览器缓存 30s 内会一直复用 canDelete:true，
+    // 用户登出后重进留言墙仍看到删除按钮（点下去会被后端拒绝，但界面已经错了）。
+    // 前端对本接口始终用 no-store，这里是第二道防线 —— 万一哪天前端被改成 default，
+    // 也不会把权限态落到浏览器缓存里。
     const response = new Response(body, {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "public, max-age=30, s-maxage=30",
+        "Cache-Control": username ? "private, no-store" : "public, max-age=30, s-maxage=30",
       },
     });
     try { await cache.put(cacheKey, response.clone()); } catch (_) {}
