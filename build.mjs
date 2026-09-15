@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync, statSync, existsSync, readFileSync } from "no
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderMarkdown, materializeBodyImages, buildArticleHtml, articleFileName } from "./scripts/lib/seo-render.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "generated");
@@ -14,6 +15,19 @@ const LIST_FILE = join(OUT_DIR, "posts.json");
 const POST_DIR = join(OUT_DIR, "posts");
 const COVER_DIR = join(OUT_DIR, "covers");
 const COVER_PREFIX = "/generated/covers/"; // 封面静态文件的对外路径前缀（判断 cover 是否为本站构建产物）
+// 爬虫专用的「正文 HTML 片段」产物：
+//   generated/post-html/<slug哈希>.html → 文章主体（meta + 封面 + 标题 + 正文）
+//   generated/post-html.json            → slug → 片段路径（边缘函数查表用）
+// 为什么必须预渲染：本站是 SPA，正文靠 JS 渲染，而百度/搜狗等爬虫不执行 JS，
+// 打开文章只能看到一个空容器 —— 文章根本进不了索引。边缘函数在这里只做「读片段 + 注入」，
+// 不做渲染（Pages Functions 免费版 CPU 预算只有 10ms 量级，而单篇 body 可达 147KB）。
+const POST_HTML_DIR = join(OUT_DIR, "post-html");
+const POST_HTML_PREFIX = "/generated/post-html/";
+const POST_HTML_MANIFEST = join(OUT_DIR, "post-html.json");
+// 正文内嵌的 base64 图解码后的存放目录（文件名 = 内容哈希，可长缓存）
+const BODY_IMG_DIR = join(OUT_DIR, "body-images");
+const BODY_IMG_PREFIX = "/generated/body-images";
+const postHtmlMap = {};
 // slug → 对外可用的封面路径。边缘函数（functions/index.js）给爬虫注入 og:image 时需要它：
 // D1 里的封面可能是 data: base64（爬虫无法引用），而抽离后的文件名含内容哈希，边缘侧算不出来。
 const COVER_MANIFEST = join(OUT_DIR, "covers.json");
@@ -97,7 +111,7 @@ function materializeCover(row) {
   }
 }
 
-function publicList(row) {
+function publicList(row, cover) {
   const words = row.words || 0;
   return {
     id: row.id,
@@ -106,7 +120,7 @@ function publicList(row) {
     date: row.date,
     tag: row.tag || "未分类",
     summary: row.summary || "",
-    cover: materializeCover(row),
+    cover,
     author: row.author_username || "昉昕",
     readingMinutes: Math.max(1, Math.round(words / 300)),
     words,
@@ -114,8 +128,7 @@ function publicList(row) {
   };
 }
 
-function publicDetail(row) {
-  const words = countWords(row.body);
+function publicDetail(row, cover, words) {
   return {
     id: row.id,
     slug: row.slug,
@@ -125,7 +138,7 @@ function publicDetail(row) {
     summary: row.summary || "",
     // 详情同样抽离封面：否则同一张图会在 detail JSON 里出现两次（cover 字段一份、
     // body 正文里又内嵌一份），实测单篇详情 241KB 中有 240KB 是这张图的重复。
-    cover: materializeCover(row),
+    cover,
     author: row.author_username || "昉昕",
     isAuthor: false, // 静态无法判断当前用户，前端打开时按会话修正
     views: row.views || 0,
@@ -194,26 +207,68 @@ async function main() {
   const rows = res[0].results;
   mkdirSync(POST_DIR, { recursive: true });
   mkdirSync(COVER_DIR, { recursive: true }); // 封面抽离目录：必须先建，materializeCover 才能写入
+  mkdirSync(POST_HTML_DIR, { recursive: true });
+  mkdirSync(BODY_IMG_DIR, { recursive: true });
+
+  // 一次循环产出三类产物：列表项 / 详情 JSON / 爬虫用正文片段。
+  // 合并成一个循环是为了让 materializeCover() 每篇只跑一次（它有写文件的副作用，重复调用纯属浪费）。
+  const listPosts = [];
+  let bodyImgCount = 0;
+  let seoHtmlBytes = 0;
+  for (const row of rows) {
+    const cover = materializeCover(row);
+    const words = countWords(row.body);
+    listPosts.push(publicList(row, cover));
+    writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row, cover, words) }));
+
+    // 爬虫用正文片段。顺带把内嵌的 base64 图落成独立文件：
+    // 一是爬虫无法把 data: URI 当图片抓（图片搜索收录不了），
+    // 二是 base64 会把这一篇的响应体从几 KB 撑到几百 KB。
+    const { markdown, saved } = materializeBodyImages(row.body || "", {
+      outDir: BODY_IMG_DIR,
+      urlPrefix: BODY_IMG_PREFIX,
+    });
+    bodyImgCount += saved.length;
+    const fragment = buildArticleHtml({
+      title: row.title,
+      tag: row.tag || "未分类",
+      date: row.date,
+      author: row.author_username || "昉昕",
+      readingMinutes: Math.max(1, Math.round(words / 300)),
+      words,
+      views: row.views || 0,
+      coverUrl: cover,
+      bodyHtml: renderMarkdown(markdown),
+    });
+    const fragName = articleFileName(row.slug);
+    writeFileSync(join(POST_HTML_DIR, fragName), fragment);
+    seoHtmlBytes += Buffer.byteLength(fragment);
+    postHtmlMap[row.slug] = `${POST_HTML_PREFIX}${fragName}`;
+  }
+
   // 列表附带新鲜度元信息：静态快照无法感知数据库后续新增，前端据此校验是否过期
   // （Deploy Hook 未生效 / 部署延迟时，前端自动回退动态接口，保证发布后一定能看到）
   writeFileSync(
     LIST_FILE,
     JSON.stringify({
       ok: true,
-      count: rows.length,
-      latest: rows.length ? rows[0].slug : "",
+      count: listPosts.length,
+      latest: listPosts.length ? listPosts[0].slug : "",
       generatedAt: new Date().toISOString(),
-      posts: rows.map(publicList),
+      posts: listPosts,
     })
   );
-  for (const row of rows) {
-    writeFileSync(join(POST_DIR, `${row.slug}.json`), JSON.stringify({ ok: true, post: publicDetail(row) }));
-  }
   // 封面映射表：与上面的文件同一次构建产出 → 表里写了哪个路径，那个文件就一定存在，天然一致。
   // 边缘函数据此给爬虫注入 og:image（D1 里存 data: base64 时爬虫抓不到，必须换成静态文件地址）。
   writeFileSync(
     COVER_MANIFEST,
     JSON.stringify({ ok: true, generatedAt: new Date().toISOString(), covers: coverMap })
+  );
+  // 正文片段映射表：边缘函数据此把 slug 换成片段路径 —— 与片段文件同批产出，天然一致。
+  // 用映射表而不是「slug 直接拼路径」：slug 含中文，而 Pages 对非 ASCII 资源名不可靠。
+  writeFileSync(
+    POST_HTML_MANIFEST,
+    JSON.stringify({ ok: true, generatedAt: new Date().toISOString(), pages: postHtmlMap })
   );
   // 自检：把「表里有路径、文件却不存在」和「文件名含非 ASCII」这两类问题在构建期就喊出来。
   // 成因是真实的：线上出现过映射表登记了封面、部署里却没有该文件（Pages 对非 ASCII 资源名不可靠），
@@ -228,6 +283,16 @@ async function main() {
       coverIssues.push(`映射表引用了不存在的文件: ${slug} -> ${p}`);
     }
   }
+  // 正文片段同样自检：段里少了哪篇，那篇文章的正文就对爬虫隐身
+  for (const [slug, p] of Object.entries(postHtmlMap)) {
+    const decoded = decodeURIComponent(p);
+    if (/[^\x20-\x7e]/.test(decoded)) coverIssues.push(`正文片段含非 ASCII 文件名: ${decoded}`);
+    try {
+      statSync(join(__dirname, decoded.replace(/^\//, "")));
+    } catch (_) {
+      coverIssues.push(`正文片段映射引用了不存在的文件: ${slug} -> ${p}`);
+    }
+  }
   if (coverIssues.length) {
     console.warn("[build] ⚠️ 封面映射表自检未通过：\n  " + coverIssues.join("\n  "));
   }
@@ -236,6 +301,11 @@ async function main() {
   console.log(
     `[build] 已生成 ${rows.length} 篇文章静态 JSON → generated/；列表 posts.json = ${(listBytes / 1024).toFixed(1)}KB；` +
       `封面映射 ${Object.keys(coverMap).length} 条 → generated/covers.json`
+  );
+  console.log(
+    `[build] 爬虫用正文片段 ${Object.keys(postHtmlMap).length} 篇 → generated/post-html/；` +
+      `合计 ${(seoHtmlBytes / 1024).toFixed(1)}KB（平均 ${(seoHtmlBytes / 1024 / Math.max(1, rows.length)).toFixed(1)}KB/篇）；` +
+      `正文内嵌图落盘 ${bodyImgCount} 张 → generated/body-images/`
   );
 }
 

@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>昉昕的博客 · 记录与思考</title>
-  <meta name="description" content="昉昕的个人博客，记录技术实践、读书笔记与生活思考。" />
-  <meta name="author" content="昉昕" />
-  <link rel="canonical" href="https://blog-6p3.pages.dev/" />
+  <!-- 站点级 description / author / canonical 都放在下面的 OG 块**内部**（见块尾）。
+       原因：边缘函数 functions/index.js 是整块替换 OG 区的。这三行若留在块外，
+       爬虫请求文章页时会同时收到「站点版 + 文章版」两条 canonical，
+       搜索引擎会据此把文章判为首页的副本 —— 文章永远进不了索引（线上实测确实如此）。 -->
 
   <!--OG-DEFAULT-START-->
   <!-- Open Graph：社交平台分享卡片（微信 / 微博 / X / Facebook / Telegram 等）
@@ -32,6 +33,11 @@
   <meta itemprop="name" content="昉昕的博客 · 记录与思考" />
   <meta itemprop="image" content="https://blog-6p3.pages.dev/assets/og-default.png" />
   <meta itemprop="description" content="昉昕的个人博客，记录技术实践、读书笔记与生活思考。" />
+
+  <!-- 站点级默认值（块内）：文章页会被边缘函数整块换成文章自己的版本 -->
+  <meta name="description" content="昉昕的个人博客，记录技术实践、读书笔记与生活思考。" />
+  <meta name="author" content="昉昕" />
+  <link rel="canonical" href="https://blog-6p3.pages.dev/" />
   <!--OG-DEFAULT-END-->
 
   <meta name="color-scheme" content="light dark" />
@@ -302,7 +308,11 @@
       <!-- 文章详情视图 -->
       <section class="view view-post">
         <button class="back-btn" id="backBtn">← 返回</button>
-        <article class="post-detail" id="postDetail"></article>
+        <!-- 两个注释之间的区域由边缘函数注入文章正文（仅爬虫请求）：
+             本站是 SPA，正文原本全靠 JS 渲染，而百度/搜狗等爬虫不执行 JS，
+             打开文章只能看到一个空容器 —— 文章因此进不了索引。
+             真人访问时这里是空的（随后由 app.js 渲染覆盖），不影响任何前端逻辑。 -->
+        <article class="post-detail" id="postDetail"><!--SSR-BODY-START--><!--SSR-BODY-END--></article>
       </section>
 
       <!-- ✍️ 全屏写作页 -->

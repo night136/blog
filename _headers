@@ -31,6 +31,22 @@
 /generated/posts/*
   Cache-Control: public, max-age=300, stale-while-revalidate=86400
 
+# 爬虫用正文片段（build.mjs 预渲染）。文件名是 slug 的哈希（纯 ASCII），
+# 但**内容会随文章更新而变**，所以不能 immutable —— 与详情快照同策略：短缓存 + 后台再验证。
+/generated/post-html/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=86400
+
+# 正文片段映射表（slug → 片段路径）：同 covers.json，必须短缓存。
+# 新部署会换掉片段文件名，长缓存会让边缘拿到旧映射表、指向已删除的片段。
+# 同样注意：这条要写在 /generated/post-html/* 之后，且它不匹配上面那条通配（多一层路径）。
+/generated/post-html.json
+  Cache-Control: public, max-age=60
+
+# 正文内嵌图：由 build.mjs 从 base64 解码落盘，文件名 = 内容哈希。
+# 内容变即换名，所以可以放一年 immutable。
+/generated/body-images/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # 首页 HTML 外壳：必须「每次都校验」，绝不能让旧壳长期生效。
 # 事故（2026-09-12 实测）：这里原本是 max-age=60 + stale-while-revalidate=86400，
 # 浏览器/边缘可以端着近一天的旧壳，而旧壳里引用的资源文件名是按内容哈希生成的构建产物，

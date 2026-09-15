@@ -43,6 +43,15 @@ function setup() {
   for (const f of fs.readdirSync(path.join(srcAssets, "vendor"))) {
     fs.copyFileSync(path.join(srcAssets, "vendor", f), path.join(tmp, "assets", "vendor", f));
   }
+  // build.mjs 现在会 import scripts/lib/seo-render.mjs（正文 SEO 片段渲染器），
+  // 临时目录里必须也有它，否则 build.mjs 一启动就 ERR_MODULE_NOT_FOUND。
+  const srcLib = path.join(root, "scripts", "lib");
+  if (fs.existsSync(srcLib)) {
+    fs.mkdirSync(path.join(tmp, "scripts", "lib"), { recursive: true });
+    for (const f of fs.readdirSync(srcLib)) {
+      fs.copyFileSync(path.join(srcLib, f), path.join(tmp, "scripts", "lib", f));
+    }
+  }
 }
 function build() {
   // 不设 CF_* 环境变量 → main() 提前返回，只执行 finally 里的 hashAssets()
