@@ -45,7 +45,12 @@ function makeEnv(post, manifest, options = {}) {
         // 封面文件：默认「存在」；errors → 500（瞬态故障），missing → 404（真缺失）
         if (errors.has(p)) return new Response("boom", { status: 500 });
         if (missing.has(p)) return new Response("not found", { status: 404 });
-        if (p.startsWith("/generated/covers/") || p.startsWith("/uploads/")) return new Response("img", { status: 200 });
+        if (
+          p.startsWith("/generated/covers/") ||
+          p.startsWith("/generated/body-images/") || // 封面复用正文图后就落在这里
+          p.startsWith("/uploads/")
+        )
+          return new Response("img", { status: 200 });
         return new Response("nope", { status: 404 });
       },
     },
@@ -104,6 +109,10 @@ console.log("\n[2] 映射表可用时以其为准");
     "p-wins": "/generated/covers/p-wins-newhash.png",
     "p-gone": "/generated/covers/p-gone-missing.jpg",
     "p-err": "/generated/covers/p-err-abc12345.jpg",
+    // 封面与正文图是同一张时，build 让它复用 /generated/body-images/ 那一个 URL（不再另存一份）。
+    // 线上 7 篇有封面文章的封面现在全都在这个目录下，所以 og:image 必须照样认得它。
+    "p-reuse": "/generated/body-images/5cfe2fcc.jpg",
+    "p-reuse-gone": "/generated/body-images/deadbeef.jpg",
   };
 
   const a = await run("data 命中映射表", basePost({ slug: "p-data", cover: DATA_COVER }), manifest);
@@ -135,6 +144,16 @@ console.log("\n[2] 映射表可用时以其为准");
     BOT_UA, { errors: ["/generated/covers/p-err-abc12345.jpg"] });
   check("复核遇瞬态 5xx → 不降级，仍用映射表地址",
     err.img === `${ORIGIN}/generated/covers/p-err-abc12345.jpg`, err.img);
+
+  // 封面复用正文图（/generated/body-images/…）后的爬虫路径：分享卡片必须照样有图
+  const reuse = await run("封面复用正文图", basePost({ slug: "p-reuse", cover: DATA_COVER }), manifest);
+  check("封面指向 /generated/body-images/… 时仍能当 og:image（不是只有 covers/ 才认）",
+    reuse.img === `${ORIGIN}/generated/body-images/5cfe2fcc.jpg`, reuse.img);
+  check("复用正文图时 twitter:image 同步", reuse.tw === reuse.img, reuse.tw);
+  const reuseGone = await run("复用的正文图缺失", basePost({ slug: "p-reuse-gone", cover: DATA_COVER }), manifest,
+    BOT_UA, { missing: ["/generated/body-images/deadbeef.jpg"] });
+  check("复用的正文图缺失 → 同样退回默认图（存在性复核对这个目录也生效）",
+    reuseGone.img === DEFAULT_IMG, reuseGone.img);
 }
 
 console.log("\n[2b] 站内相对路径兜底也必须复核存在性");
@@ -252,9 +271,19 @@ console.log("\n[6] 封面文件名必须纯 ASCII");
     "未找到 `${slugKey}-${hash8}` 模板或仍在使用 `${safe}`");
   check("build.mjs 含构建期自检（映射表 ↔ 文件存在性）",
     /coverIssues/.test(buildSrc), "未找到封面映射表自检逻辑");
+  // 按「语义组合」断言，不锁死变量名（原先写死 COVER_PREFIX/COVER_DIR，
+  // 把复核范围放宽到整个 /generated/ 之后就误报失败 —— 断言该拦的是「防御还在不在」，
+  // 不是「变量是不是还叫这个名字」）。四要素：产物前缀判断 → 解码 URL → 拦 ".." 越权 → 查文件是否存在。
   check("build.mjs 丢弃「指向不存在文件」的历史站内封面路径（不污染映射表）",
-    /COVER_PREFIX/.test(buildSrc) && /existsSync\(join\(COVER_DIR/.test(buildSrc),
-    "未找到站内相对路径的存在性校验");
+    /startsWith\([A-Z_]*PREFIX\)/.test(buildSrc) &&
+      /existsSync\(join\((OUT_DIR|COVER_DIR),\s*rel\)\)/.test(buildSrc) &&
+      /includes\("\.\."\)/.test(buildSrc),
+    "未找到站内相对路径的存在性校验（前缀判断 / decodeURIComponent / .. 拦截 / existsSync）");
+  // 复核范围必须是整个构建产物根目录：封面现在可能复用 /generated/body-images/ 里的正文图
+  // （见 materializeCover），只盯着 /generated/covers/ 会漏掉这一类。
+  check("存在性复核覆盖整个 /generated/（而非只管 covers 子目录）",
+    /ARTIFACT_PREFIX\s*=\s*"\/generated\/"/.test(buildSrc),
+    "ARTIFACT_PREFIX 未定义或不再是 /generated/");
 
   const idxSrc = fs.readFileSync(path.join(root, "functions", "index.js"), "utf8");
   check("边缘函数复核封面文件是否存在", /assetExists/.test(idxSrc), "未找到 assetExists");

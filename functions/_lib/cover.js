@@ -33,6 +33,45 @@ export function safeCover(c) {
 // 其它站点上的 /generated/ 路径不归我们管（可能是对方 CDN 的正常资源）。
 const ARTIFACT_COVER_PREFIX = "/generated/";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 列表封面的最终取值：D1 原值 + 构建产物映射表（generated/covers.json）
+// ─────────────────────────────────────────────────────────────────────────────
+// 与 safeCover 的分工：safeCover 只管「这条值能不能进列表」，这里管「进列表的该是哪条」。
+//
+// 为什么要看构建产物映射表：
+//   ① D1 存 data: base64 时 safeCover 会丢弃 → 列表没有封面，而构建产物里明明有它的静态文件
+//      （同一张图）。实测 16 篇里 6 篇是这种情况：静态快照有封面、API 降级路径没有，
+//      同一篇文章两条路表现不一致 —— 快照一失败封面就集体消失。
+//   ② D1 存 /generated/covers/… 时，那条路径未必还有效：历史构建用过「含中文 slug」的命名，
+//      线上实测 404（2026-09-08-学会识痞-拒痞-治痞-hu59）。以本轮构建写出的路径为准才可靠。
+// 只在上面两种情况下改用映射表；外链、以及「D1 本来就空」一律以 D1 为准 ——
+// 否则用户删掉封面后，旧映射表会把已经删掉的封面又显示回来（D1 是唯一事实来源）。
+export function listCover(raw, slug, covMap) {
+  const v = (raw || "").trim();
+  const fromManifest = (covMap && slug && covMap[slug]) || "";
+  if (v.startsWith("data:")) return fromManifest;
+  if (v.startsWith(ARTIFACT_COVER_PREFIX)) return fromManifest || v;
+  return safeCover(v);
+}
+
+// 读构建产物封面映射表（generated/covers.json，构建时与静态快照同批产出）。
+// 模块级缓存 5 分钟：列表/搜索本身还有边缘缓存，这里只是避免每次都去读一次 ASSETS。
+// 读不到一律返回 null —— 调用方退回 D1 原值，接口不能因为映射表缺失而失败。
+let coverMapCache = { at: 0, map: null };
+export async function loadCoverMap(env, requestUrl) {
+  const now = Date.now();
+  if (coverMapCache.map && now - coverMapCache.at < 300000) return coverMapCache.map;
+  try {
+    if (!env || !env.ASSETS || typeof env.ASSETS.fetch !== "function") return null;
+    const r = await env.ASSETS.fetch(new URL("/generated/covers.json", requestUrl).toString());
+    if (!r.ok) return null;
+    const j = await r.json();
+    const map = (j && typeof j.covers === "object" && j.covers) || null;
+    if (map) coverMapCache = { at: now, map };
+    return map;
+  } catch (_) { return null; }
+}
+
 export function isBuildArtifactCover(raw, origin) {
   const v = String(raw == null ? "" : raw).trim();
   if (!v) return false;

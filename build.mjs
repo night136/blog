@@ -14,7 +14,11 @@ const OUT_DIR = join(__dirname, "generated");
 const LIST_FILE = join(OUT_DIR, "posts.json");
 const POST_DIR = join(OUT_DIR, "posts");
 const COVER_DIR = join(OUT_DIR, "covers");
-const COVER_PREFIX = "/generated/covers/"; // 封面静态文件的对外路径前缀（判断 cover 是否为本站构建产物）
+const COVER_PREFIX = "/generated/covers/"; // 新抽离封面的落盘位置（对外路径；封面复用正文图时不走这里）
+// 构建产物的总前缀。封面除了 /generated/covers/ 之外还可能指向 /generated/body-images/：
+// 封面与正文图是同一张时会复用正文那份（见 materializeCover），此时它同样是「本轮构建产出的文件」，
+// 复核存在性必须一起覆盖，否则又会造出「表里有、文件却没有」的死链。
+const ARTIFACT_PREFIX = "/generated/";
 // 爬虫专用的「正文 HTML 片段」产物：
 //   generated/post-html/<slug哈希>.html → 文章主体（meta + 封面 + 标题 + 正文）
 //   generated/post-html.json            → slug → 片段路径（边缘函数查表用）
@@ -58,26 +62,38 @@ function countWords(md) {
 // 手机弱网下首屏直接卡住/白屏。
 // 做法：把 data: 封面解码写成独立图片文件，列表里只留 URL。
 // 好处：列表 JSON 瘦身到几十 KB；图片可被浏览器独立缓存，不再阻塞首屏解析。
-function materializeCover(row) {
+function materializeCover(row, bodyImgs) {
   const c = (row.cover || "").trim();
+  // 已落盘的正文图（按出现顺序）。封面要与它们「共用同一个 URL」，见函数末尾的复用分支。
+  const imgs = Array.isArray(bodyImgs) ? bodyImgs : [];
+  const firstBodyImg = imgs.length ? imgs[0].url : "";
   // 统一的出口：把最终对外可用的封面路径登记进映射表（og:image 注入依赖它）
   const record = (v) => {
     if (v && row.slug) coverMap[row.slug] = v;
     return v;
   };
-  // 站内相对路径的 cover：若指向 /generated/covers/ 下的构建产物，必须确认文件真的存在再登记。
+  // 站内相对路径的 cover：若指向 /generated/ 下的构建产物，必须确认文件真的存在再登记。
   // 为什么：后台编辑「回存」会把上一轮构建产出的路径写回 D1，而上一轮可能用的是别的命名
   // （历史版本文件名含非 ASCII 的 slug）。原样登记就会造出一条「表里有、文件却没有」的死链 ——
   // 线上事故（2026-09-12）：该文章的 og:image 因此指向 404，社交分享卡片是坏图。
   if (!c.startsWith("data:")) {
-    if (c.startsWith(COVER_PREFIX)) {
+    if (c.startsWith(ARTIFACT_PREFIX)) {
       let ok = false;
       try {
-        const rel = decodeURIComponent(c).slice(COVER_PREFIX.length);
-        ok = !rel.includes("..") && existsSync(join(COVER_DIR, rel));
+        const rel = decodeURIComponent(c).slice(ARTIFACT_PREFIX.length);
+        ok = !rel.includes("..") && existsSync(join(OUT_DIR, rel));
       } catch (_) {}
       if (!ok) {
-        console.warn(`[build] ⚠️ 丢弃失效的历史封面路径（文件不存在，改用默认图）：${row.slug} -> ${c}`);
+        // 自愈（2026-09-15）：失效路径不要直接放弃封面 —— 原图通常还躺在正文里，
+        // 而且正文抽离产物与封面本来是同一张图（内容哈希一致，封面文件名尾部那 8 位就是它）。
+        // 直接引用正文那张，既不留白、也不多下一次图（同一个 URL，浏览器只请求一次）。
+        // 实测案例：2026-09-08-学会识痞-拒痞-治痞-hu59，D1 里存的是含中文 slug 的旧命名产物路径，
+        // 线上 404，而正文里的 base64 原图（228KB）与 body-images 产物 md5 完全一致。
+        if (firstBodyImg) {
+          console.warn(`[build] ⚠️ 封面路径已失效，改用正文首图自愈：${row.slug} -> ${firstBodyImg}`);
+          return record(firstBodyImg);
+        }
+        console.warn(`[build] ⚠️ 丢弃失效的历史封面路径（文件不存在，正文也没有可用图）：${row.slug} -> ${c}`);
         return record("");
       }
     }
@@ -102,10 +118,18 @@ function materializeCover(row) {
   // 内容哈希：换了封面 → 文件名就变 → 可以安全地给封面设长期 immutable 缓存，
   // 不用担心「文章内容更新了但 CDN 还在发旧封面」。
   const hash8 = createHash("sha256").update(buf).digest("hex").slice(0, 8);
+  // 封面常常就是正文里的某一张图（后台用「正文首图」当封面是常态）—— 那就是**同一份字节**。
+  // 若在 /generated/covers/ 再存一份，浏览器就会下两遍（URL 不同、缓存不共享）：
+  // 实测详情页同一张图占了两个 URL、各 113KB，白白多花一份跨境带宽，而且两个都算 LCP 候选。
+  // 所以这里让封面**直接复用正文那一个 URL**，于是：同一个 URL ⇒ 只下载一次 ⇒ 正文首图命中封面
+  // 已经下好的缓存，从首页点进文章时也不用再等一次图。
+  // 认人靠内容哈希（两者都是 sha256 前 8 位），所以正文里任意一张都能命中，不必是首图。
+  const same = imgs.find((b) => String(b.name || "").replace(/\.[a-z0-9]+$/i, "") === hash8);
+  if (same) return record(same.url);
   const name = `${slugKey}-${hash8}.${ext}`;
   try {
     writeFileSync(join(COVER_DIR, name), buf);
-    return record(`/generated/covers/${encodeURIComponent(name)}`);
+    return record(COVER_PREFIX + encodeURIComponent(name));
   } catch (_) {
     return record(""); // 写失败就丢掉封面，前端会用渐变色兜底，不影响列表
   }
@@ -226,16 +250,22 @@ async function main() {
   const listPosts = [];
   let bodyImgCount = 0;
   let seoHtmlBytes = 0;
+  let coverReuseCount = 0; // 封面与正文图共用同一个 URL 的篇数（省掉一份重复字节）
   for (const row of rows) {
-    const cover = materializeCover(row);
     // 正文内嵌图先落成独立文件 —— **详情快照和爬虫片段都要用它**。
     // 必须在写详情 JSON 之前做：详情原先直接用 row.body，导致含图文章的详情
     // 被 base64 撑到几百 KB（实测最大 1.14MB），而抽离后只剩几 KB。
+    // 顺序还有一个用处：封面自愈需要它（D1 里的封面路径失效时回退正文首图）。
     const { markdown, saved } = materializeBodyImages(row.body || "", {
       outDir: BODY_IMG_DIR,
       urlPrefix: BODY_IMG_PREFIX,
     });
     bodyImgCount += saved.length;
+    // 把本轮落盘的正文图交给封面：既用于「同一张图就复用同一个 URL」，也用于失效封面自愈。
+    const bodyImgs = saved.map((s) => ({ name: s.name, url: `${BODY_IMG_PREFIX}/${s.name}` }));
+    const cover = materializeCover(row, bodyImgs);
+    // 复用计数只为构建日志好看：说明这一轮省掉了多少份重复图片
+    if (cover && bodyImgs.some((b) => b.url === cover)) coverReuseCount++;
 
     // 字数按**发布出去的正文**算：countWords 会剥掉图片 markdown，
     // 所以与按 row.body 算结果一致，但语义上更不容易出错。
@@ -319,7 +349,8 @@ async function main() {
   console.log(
     `[build] 爬虫用正文片段 ${Object.keys(postHtmlMap).length} 篇 → generated/post-html/；` +
       `合计 ${(seoHtmlBytes / 1024).toFixed(1)}KB（平均 ${(seoHtmlBytes / 1024 / Math.max(1, rows.length)).toFixed(1)}KB/篇）；` +
-      `正文内嵌图落盘 ${bodyImgCount} 张 → generated/body-images/`
+      `正文内嵌图落盘 ${bodyImgCount} 张 → generated/body-images/；` +
+      `其中 ${coverReuseCount} 篇的封面直接复用正文图（同一 URL，浏览器只下一次）`
   );
 }
 

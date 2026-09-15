@@ -105,6 +105,7 @@
   let replyTo = 0;                // 正在回复的父评论 id（0 = 顶层新评）
   let openSeq = 0;                // openPost 请求序号：用于丢弃过期响应（快速切文章防串内容）
   let progressHandler = null;     // 阅读进度 scroll 监听：每次打开文章前先移除旧的，避免叠加
+  let deferHomeCovers = false;    // 深链打开文章时，首页封面先不下载（首页此时是 display:none，下了也看不到）
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
@@ -227,7 +228,37 @@
   // 无封面卡片固定奶油玻璃底色（与标题无关，杜绝绿/红等差异色）
   // 用 CSS 变量引用底色，跟随明暗主题；括号里的值是变量缺失时的兜底
   function glassBg() { return "linear-gradient(135deg, var(--slide-glass-1, hsl(38,42%,92%)), var(--slide-glass-2, hsl(33,38%,86%)))"; }
-  function coverStyle(p) { return p.cover ? `background-image:url('${p.cover}');` : `background:${glassBg()};`; }
+  // 首页封面「按需下载」的两个出口（轮播背景图 / 卡片 <img> 都走这里）。
+  // 背景：分享链接（?post=slug）直接打开文章时，首页整块是 display:none，但卡片封面的
+  // loading="lazy" 会在「先渲染首页 → 再切到文章」的窗口期判定「已进入视口」并开始下载，
+  // 而切换视图**不会取消已发出的请求**。实测文章页冷启动时因此白下了 5 张首页封面
+  // （643KB，单张 93–183KB），和文章自己的封面/正文图抢同一条跨境连接 —— 访客根本没看首页。
+  // 规则：启动即深链打开文章时不下首页封面；真的回到首页时由 activateHomeCovers() 一次性补上。
+  // 只按「启动是不是深链」判定、不按「首页此刻是否 active」判定：后者会在离开首页后
+  // 被快照刷新重渲染时又把已缓存封面重新标记为待下载（徒增一次判断，还可能闪一下空图）。
+  function homeCoversReady() { return !deferHomeCovers; }
+  function activateHomeCovers() {
+    deferHomeCovers = false;
+    if (!views.home) return;
+    views.home.querySelectorAll("img[data-cover]").forEach((img) => {
+      if (img.getAttribute("src")) return;
+      img.setAttribute("src", img.dataset.cover);
+      img.removeAttribute("data-cover");
+    });
+    views.home.querySelectorAll(".slide[data-bg]").forEach((s) => {
+      if (!s.style.backgroundImage) s.style.backgroundImage = "url('" + s.dataset.bg + "')";
+      s.removeAttribute("data-bg");
+    });
+  }
+  // 封面 URL 统一出口：必须过 safeUrl（只放行 http/https/相对路径 + data:image 位图）。
+  // 这里还要再剥掉引号/括号/反斜杠/空白 —— 值会被拼进 style 的 url('…')，带引号就能提前闭合、
+  // 把后面的内容当 CSS 注入。
+  function coverUrl(p) {
+    if (!p || !p.cover) return "";
+    const u = safeUrl(p.cover, true);
+    return u ? String(u).replace(/['"()\\\s]/g, "") : "";
+  }
+  function coverStyle(p) { const u = coverUrl(p); return u ? `background-image:url('${u}');` : `background:${glassBg()};`; }
 
   // ===== 数据 =====
   // 动态列表：直查 D1 的 Function 接口（静态快照不可用或已过期时使用）
@@ -308,10 +339,17 @@
     const top = posts.slice(0, Math.min(5, posts.length));
     if (!top.length) { if (sliderEl) sliderEl.style.display = "none"; return; }
     if (sliderEl) sliderEl.style.display = "block";
-    slidesEl.innerHTML = top.map((p, i) => `
-      <div class="slide ${i === 0 ? "active" : ""} ${p.cover ? "" : "no-cover"}" data-slug="${escapeHtml(p.slug)}" style="${coverStyle(p)}">
+    // 封面按需下载：不可见时只把 URL 记在 data-bg 上，等首页真的显示出来再设背景
+    // （旧实现给全部 5 张 slide 都设了 background-image，首屏一次性抢 3–5 张封面带宽）
+    const ready = homeCoversReady();
+    slidesEl.innerHTML = top.map((p, i) => {
+      const url = coverUrl(p);
+      const deferred = url && !ready;
+      return `
+      <div class="slide ${i === 0 ? "active" : ""} ${url ? "" : "no-cover"}" data-slug="${escapeHtml(p.slug)}"${deferred ? ` data-bg="${escapeHtml(url)}"` : ""} style="${deferred ? "" : coverStyle(p)}">
         <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h2 class="slide-title">${escapeHtml(p.title)}</h2><p class="slide-summary">${escapeHtml(p.summary || "")}</p><button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`).join("");
     slidesEl.querySelectorAll(".slide-read").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openPost(b.dataset.slug); }));
     slidesEl.querySelectorAll(".slide").forEach((s) => s.addEventListener("click", () => openPost(s.dataset.slug)));
@@ -344,10 +382,13 @@
   const PAGE_SIZE = 9;
 
   function cardHtml(p, i) {
-    const hasCover = !!p.cover;
+    const coverSrc = coverUrl(p);
+    const hasCover = !!coverSrc;
     const cls = [i === 0 ? "feature" : i === 1 ? "wide" : "", hasCover ? "" : "no-cover"].filter(Boolean).join(" ");
+    // 首页不可见时只写 data-cover（不触发下载），由 activateHomeCovers() 在真正回到首页时补 src
+    const coverAttr = homeCoversReady() ? `src="${escapeHtml(coverSrc)}"` : `data-cover="${escapeHtml(coverSrc)}"`;
     const cover = hasCover
-      ? `<div class="card-cover"><img class="card-cover-img" src="${escapeHtml(safeUrl(p.cover, true))}" loading="lazy" decoding="async" alt=""></div>`
+      ? `<div class="card-cover"><img class="card-cover-img" ${coverAttr} loading="lazy" decoding="async" alt=""></div>`
       : "";
     return `
       <article class="card ${cls}" data-slug="${escapeHtml(p.slug)}">
@@ -499,7 +540,9 @@
       const isAuthor = !!post.isAuthor;   // 可能来自 postCache 的上一次会话结果；随后由 patchPostMeta 校正
       const manageBtns = isAuthor ? postActionsHtml(slug) : "";
       const heroCover = post.cover ? safeUrl(post.cover, true) : "";
-      const hero = heroCover ? `<img class="post-cover" src="${escapeHtml(heroCover)}" alt="">` : "";
+      // 详情页封面是这一页的 LCP 元素，给它最高优先级：跨境链路下它能抢在正文图之前开始下载。
+      // decoding="async" 是不让解码占用主线程（封面多为竖版大图，同步解码会顶掉一帧）。
+      const hero = heroCover ? `<img class="post-cover" src="${escapeHtml(heroCover)}" decoding="async" fetchpriority="high" alt="">` : "";
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
       const shareUrl = postShareUrl(slug);
@@ -1140,6 +1183,8 @@
     if (name === "guestbook") loadGuestbook();
     Object.values(views).forEach((v) => v.classList.remove("active"));
     if (views[name]) views[name].classList.add("active");
+    // 首页真的显示出来了 → 补上此前为省带宽而没设的封面（见 homeCoversReady）
+    if (name === "home") activateHomeCovers();
     navLinks.forEach((l) => l.classList.toggle("active", l.dataset.view === name));
     // 切视图时收起移动端抽屉（统一走 setSidebar，保证遮罩/滚动锁/aria 同步）
     setSidebar(false);
@@ -2606,6 +2651,14 @@
     });
   } catch (_) {}
 
+  const startParams = new URLSearchParams(location.search);
+  const startSlugRaw = startParams.get("post");
+  const startSlug = startSlugRaw ? decodeURIComponent(startSlugRaw) : "";
+  // 必须在 loadPosts() 之前定：它决定首页那一批封面要不要现在下载（见 homeCoversReady）。
+  // 分享链接进来的人只看这一篇文章，首页卡片 300ms 后就被切走，那 5 张封面（实测 643KB）
+  // 却已经进入 lazy 视口判定并开始下载了。
+  deferHomeCovers = !!startSlug;
+
   bindInputStates();
   ensureSession();
   loadPosts();
@@ -2620,11 +2673,7 @@
     setTimeout(loadWebFont, 0);
   }
 
-  // 若 URL 带 ?post=slug，自动打开对应文章（分享链接可用）
-  const startParams = new URLSearchParams(location.search);
-  const startSlug = startParams.get("post");
-  if (startSlug) {
-    setTimeout(() => openPost(decodeURIComponent(startSlug)), 300);
-  }
+  // URL 带 ?post=slug 时自动打开对应文章（分享链接可用）
+  if (startSlug) setTimeout(() => openPost(startSlug), 300);
 
 })();

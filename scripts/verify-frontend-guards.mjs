@@ -72,8 +72,20 @@ console.log("\n[3] 详情页封面与列表缩略图保持同一种观感：固�
 
 console.log("\n[4] 封面 URL 必须过安全函数");
 {
-  check("卡片封面走 safeUrl", /card-cover-img"\s+src="\$\{escapeHtml\(safeUrl\(/.test(appSrc),
-    "卡片封面未走 escapeHtml(safeUrl(...))");
+  // 封面 URL 统一出口：coverUrl(p) = safeUrl + 剥离能在 url('…') 里提前闭合的字符。
+  // 断言按「出口」而不是按「某个模板的字面写法」——写成字面量匹配时，任何一次重构
+  // （比如这次给卡片封面加 data-cover 延迟下载）都会让守护失效或误报。
+  const coverUrlFn = (appSrc.match(/function coverUrl\(p\)\s*\{[\s\S]{0,260}?\n  \}/) || [])[0] || "";
+  check("存在封面 URL 统一出口 coverUrl()", !!coverUrlFn, "未找到 function coverUrl(p)");
+  check("coverUrl 内部走 safeUrl", /safeUrl\(p\.cover, true\)/.test(coverUrlFn), "coverUrl 未调用 safeUrl");
+  check("coverUrl 剥离引号/括号/反斜杠/空白（防 url('…') 里提前闭合注入 CSS）",
+    /replace\(\/\[\x27"\(\)\\\\\\s\]\/g, ""\)/.test(coverUrlFn), "未做字符剥离：" + coverUrlFn.slice(0, 120));
+
+  check("卡片封面走 coverUrl", /const coverSrc = coverUrl\(p\)/.test(appSrc) && /escapeHtml\(coverSrc\)/.test(appSrc),
+    "卡片封面未走 coverUrl + escapeHtml");
+  check("卡片封面不得直接拼 p.cover", !/card-cover-img[^`]{0,120}safeUrl\(p\.cover/.test(appSrc),
+    "卡片封面仍在模板里直接拼 p.cover");
+  check("轮播封面走 coverUrl", /const url = coverUrl\(p\)/.test(appSrc), "轮播封面未走 coverUrl");
   check("详情封面走 safeUrl", /const heroCover = post\.cover \? safeUrl\(post\.cover, true\)/.test(appSrc),
     "详情封面未走 safeUrl");
 }

@@ -93,11 +93,19 @@ const fmt = (n, d = 0) => (n == null ? "-" : n.toFixed(d));
 
   // 在文档开始执行前装探针：记录「关键元素第一次非空」的时刻
   await S("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__probe = { marks: {}, longTasks: [] };
+    source: `window.__probe = { marks: {}, longTasks: [], lcp: null };
       if (window.PerformanceObserver && PerformanceObserver.supportedEntryTypes.includes('longtask')) {
         try { new PerformanceObserver(function (l) {
           l.getEntries().forEach(function (e) { window.__probe.longTasks.push({ s: Math.round(e.startTime), d: Math.round(e.duration) }); });
         }).observe({ type: 'longtask', buffered: true }); } catch (e) {}
+      }
+      // LCP：最大的首屏内容元素何时画出来 —— 判断「封面图拖慢首屏」的关键指标
+      if (window.PerformanceObserver && PerformanceObserver.supportedEntryTypes.includes('largest-contentful-paint')) {
+        try { new PerformanceObserver(function (l) {
+          var es = l.getEntries(); var e = es[es.length - 1];
+          window.__probe.lcp = { t: Math.round(e.startTime), url: e.url || '', tag: e.element ? e.element.tagName : '',
+            cls: e.element && e.element.className ? String(e.element.className).slice(0, 40) : '' };
+        }).observe({ type: 'largest-contentful-paint', buffered: true }); } catch (e) {}
       }
       var tick = setInterval(function () {
         var p = window.__probe, now = performance.now();
@@ -154,6 +162,7 @@ const fmt = (n, d = 0) => (n == null ? "-" : n.toFixed(d));
       domNodes: document.getElementsByTagName('*').length,
       booted: window.__APP_BOOTED__,
       marks: (window.__probe||{}).marks || {},
+      lcp: (window.__probe||{}).lcp || null,
       longTasks: (window.__probe||{}).longTasks || [],
       fontsStatus: document.fonts ? document.fonts.status : 'n/a',
       serifUsed: (function(){ try { return getComputedStyle(document.querySelector('h2')).fontFamily; } catch(e){ return null; } })(),
@@ -192,6 +201,28 @@ const fmt = (n, d = 0) => (n == null ? "-" : n.toFixed(d));
   console.log(`  文章正文            ${M.postBodyHtml ?? "未出现"}`);
   console.log(`  评论列表            ${M.commentList ?? "未出现"}`);
   console.log(`  → 实际渲染：最近文章 ${nav.recentCount} 条 / 卡片 ${nav.cardCount} 个`);
+
+  // ── 封面/图片专项：回答「图片会不会阻塞首绘、为什么没加载出来」 ──
+  // 图片（<img> 与 CSS background-image）都不在渲染阻塞资源之列，真正值得看的是
+  // 「它什么时候才开始下载」和「它的结束时间相对 FCP/LCP 在哪」。
+  const imgRes = resources.filter((r) => r.t === "img" || /\.(jpe?g|png|webp|avif|gif|svg)(\?|$)/i.test(r.n));
+  const coverRes = imgRes.filter((r) => /\/generated\/(covers|body-images)\//.test(r.n));
+  console.log("\n--- 封面/图片资源（下载何时开始、何时结束）---");
+  if (!imgRes.length) console.log("  无图片请求");
+  else {
+    console.log("  资源                                 开始   耗时   结束   传输  发起");
+    for (const r of imgRes.slice().sort((a, b) => a.s - b.s)) {
+      const name = r.n.replace(/^https?:\/\/[^/]+/, "").slice(0, 34) + (r.n.length > 46 ? "…" : "");
+      console.log(`  ${name.padEnd(38)} ${String(r.s).padStart(5)} ${String(r.d).padStart(6)} ${String(r.s + r.d).padStart(6)} ${String(r.b).padStart(7)}  ${r.t}`);
+    }
+    const firstStart = Math.min(...imgRes.map((r) => r.s));
+    const lastEnd = Math.max(...imgRes.map((r) => r.s + r.d));
+    console.log(`  图片共 ${imgRes.length} 个（其中 generated/ 下 ${coverRes.length} 个）；` +
+      `最早开始 +${firstStart}ms，最晚结束 +${lastEnd}ms`);
+    console.log(`  → 相对 FCP(${nav.fcp ?? "-"}ms)：图片最早发起于 FCP ${firstStart < (nav.fcp || 0) ? "之前" : "之后"}，` +
+      `图片全部结束于 FCP ${lastEnd > (nav.fcp || 0) ? "之后" : "之前"}`);
+  }
+  console.log(`\n  LCP（最大首屏内容）  ${nav.lcp ? nav.lcp.t + "ms  " + nav.lcp.tag + " " + nav.lcp.cls + " " + (nav.lcp.url || "").replace(/^https?:\/\/[^/]+/, "").slice(0, 46) : "未记录"}`);
 
   console.log("\n--- 长任务（>50ms，阻塞交互）---");
   const lt = (nav.longTasks || []).sort((a, b) => b.d - a.d).slice(0, 8);

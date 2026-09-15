@@ -1,6 +1,6 @@
 // /api/posts/search?q=关键词 —— 全文搜索（标题/摘要/正文）
 import { readingTime } from "../../_lib/readingTime.js";
-import { safeCover } from "../../_lib/cover.js";
+import { listCover, loadCoverMap } from "../../_lib/cover.js";
 
 export async function onRequestGet({ env, request }) {
   const json = (data, status = 200) =>
@@ -35,6 +35,9 @@ export async function onRequestGet({ env, request }) {
         results.forEach((row) => { row.views = 0; });
       } else throw e;
     }
+    // 与列表接口同一套封面取值（见 listCover）：base64 内联封面不进结果（体积爆炸），
+    // 但改用构建产物里的静态文件路径 —— 否则同一篇文章在首页有封面、在搜索结果里没有。
+    const covMap = await loadCoverMap(env, request.url);
     const posts = results.map((row) => {
       const rt = readingTime(row.body);
       return {
@@ -44,7 +47,7 @@ export async function onRequestGet({ env, request }) {
         date: row.date,
         tag: row.tag || "未分类",
         summary: row.summary || "",
-        cover: safeCover(row.cover), // 同列表接口：丢弃 base64 内联封面，避免搜索结果体积爆炸
+        cover: listCover(row.cover, row.slug, covMap),
         author: row.author_username || "昉昕",
         readingMinutes: rt.minutes,
         words: rt.words,

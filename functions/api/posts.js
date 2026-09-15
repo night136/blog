@@ -3,7 +3,7 @@
 //   POST : 会员发文章（验证 JWT → 写入 posts 表）
 import { verifyJWT, getCookie, json, jwtSecret } from "./_lib/auth.js";
 import { readingTime } from "../_lib/readingTime.js";
-import { safeCover, isBuildArtifactCover } from "../_lib/cover.js";
+import { listCover, loadCoverMap, isBuildArtifactCover } from "../_lib/cover.js";
 
 const MAX_TITLE = 120;
 // 正文允许嵌 base64 图片：D1 单行上限 2,000,000 字节，正文留 1.9MB 余量（其他列也占空间）
@@ -29,7 +29,9 @@ function todayStr() {
   return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`;
 }
 
-function publicPost(row) {
+// 构建产物封面映射表由 _lib/cover.js 的 loadCoverMap() 提供（列表与搜索共用同一份缓存）。
+
+function publicPost(row, covMap) {
   // 列表接口读取预存的 words 列（发布/更新时已算好写入 D1），不再 SELECT body，
   // 避免把每篇文章的 base64 图片从数据库搬出来，首页加载大幅提速
   const words = row.words || 0;
@@ -41,9 +43,9 @@ function publicPost(row) {
     tag: row.tag || "未分类",
     summary: row.summary || "",
     // 列表封面瘦身：data: 内联封面会让列表响应膨胀到 576KB（实测 99.5% 是 3 张 base64 图），
-    // 手机弱网首屏要等 4.6~9.2s。列表丢弃内联封面，前端用标题哈希渐变兜底；
-    // 封面在文章详情页仍会正常显示。详见 _lib/cover.js
-    cover: safeCover(row.cover),
+    // 手机弱网首屏要等 4.6~9.2s。列表改用构建产物里的静态文件路径（见 _lib/cover.js listCover），
+    // 无产物时才退回 D1 原值 / 丢弃。
+    cover: listCover(row.cover, row.slug, covMap),
     author: row.author_username || "昉昕",
     readingMinutes: Math.max(1, Math.round(words / 300)),
     words,
@@ -89,7 +91,9 @@ export async function onRequestGet({ env, request }) {
         results.forEach((row) => { row.views = 0; row.words = 0; });
       } else throw e;
     }
-    const body = JSON.stringify({ ok: true, posts: results.map(publicPost) });
+    // ⚠️ 必须用箭头包一层：直接 results.map(publicPost) 会把数组下标当成第二个参数（covMap）传进去
+    const covMap = await loadCoverMap(env, request.url);
+    const body = JSON.stringify({ ok: true, posts: results.map((row) => publicPost(row, covMap)) });
     const response = new Response(body, {
       status: 200,
       headers: {
