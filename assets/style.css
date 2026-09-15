@@ -1241,6 +1241,20 @@ body.lightbox-open { overflow: hidden; }
 .auth-turnstile { margin: 2px 0; min-height: 65px; display: flex; justify-content: center; }
 .auth-turnstile[hidden] { display: none; }
 
+/* Turnstile 脚本拉不到时的就地降级（被墙 / 跨境超时 / 被扩展或代理拦截）。
+   原实现只留一个 65px 空灰框，提交时才提示「请先完成人机验证」——页面上根本没有验证框可点。
+   所以这里给明确说明 + 一个可点的「重试」，别让用户对着空气确认自己「已经完成验证」。
+   判定与文案在 app.js 的 renderTurnstileFallback / retryTurnstile，实测见 docs/turnstile-loading.md */
+.ts-fallback { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-soft); }
+.ts-fallback-tip { line-height: 1.5; }
+.ts-fallback-retry {
+  cursor: pointer; font: inherit; font-size: 13px; line-height: 1;
+  color: var(--accent-dark); background: transparent;
+  border: 1px solid var(--accent); border-radius: 8px;
+  padding: 6px 14px; min-height: 32px;
+}
+@media (hover: hover) and (pointer: fine) { .ts-fallback-retry:hover { background: var(--accent-soft); } }
+
 /* 优化 #8：便签输入框下方的 emoji 快捷栏 */
 .guestbook-emoji {
   display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 2px 0;
@@ -1550,6 +1564,8 @@ body.lightbox-open { overflow: hidden; }
   .share-item { padding: 8px 0; }
   .share-ico { width: 46px; height: 46px; }
   .share-link-copy, .share-copy-title { min-height: 44px; }
+  /* Turnstile 降级里的「重试」：触屏也是要能点准的目标 */
+  .ts-fallback-retry { min-height: 44px; padding: 8px 16px; }
 }
 
 /* ===== 键盘可达性：全局可见焦点 ===== */

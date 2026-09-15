@@ -104,14 +104,26 @@
   <script>
     /* 标记 JS 可用：仅当 JS 启用时才隐藏卡片（opacity:0 默认），JS 被禁用时卡片直接显示，避免永久空白 */
     document.documentElement.classList.add('js');
-    /* app.js 启动成功后由 IIFE 置 true；本页 6s 内未启动则判定脚本未加载/运行中断 */
+    /* app.js 的两个启动标记（初值 false，由 IIFE 置位）：
+       __APP_BOOTED__ —— 脚本已开始执行（IIFE 第 5 行）
+       __APP_READY__  —— 启动段已完整跑完（IIFE 最后一个顶层语句）
+       两者都要判：app.js 是单 IIFE、顶层无 try/catch，一处同步异常就会让后面所有顶层语句
+       集体不执行（历史事故：turnstile.ready() 抛错 ⇒ 首页空白 + 按钮全死，而横幅一直不弹）。 */
     window.__APP_BOOTED__ = false;
+    window.__APP_READY__ = false;
+    /* 记下第一条未捕获的运行时错误，供下方 10s 兜底横幅显示原因（资源错误的 e.message 为空，不受影响） */
+    window.__BOOT_ERROR__ = '';
     /* 全局错误捕获：只关心 JS/CSS 这类关键资源的加载失败；
        像 <link rel="canonical"> 这类非资源 link 在某些浏览器会误报 error，必须过滤掉，
        否则会弹「资源加载失败：https://blog-6p3.pages.dev/」这种假横幅。 */
     window.addEventListener('error', function (e) {
+      /* 运行时异常（e.target 是 window，且带 message）：记下第一条，供 10s 兜底横幅显示。
+         启动段中途抛异常时，这是唯一能自动留下线索的地方 —— 控制台没人会去看。 */
+      if (e && e.message && !window.__BOOT_ERROR__) {
+        window.__BOOT_ERROR__ = String(e.message).slice(0, 200);
+      }
       var t = e && e.target;
-      if (!t) return;
+      if (!t || t === window) return;
       var isScript = t.tagName === 'SCRIPT';
       var isStyle = t.tagName === 'LINK' && /\bstylesheet\b/i.test(t.rel || '');
       var isCssPreload = t.tagName === 'LINK' && /\bpreload\b/i.test(t.rel || '') && /^style$/i.test(t.as || '');
@@ -140,18 +152,30 @@
           if (r.top < (window.innerHeight || 0) && r.bottom > 0) c.classList.add('in-view');
         });
       }, 1200);
-      /* 10s 后若 app.js 仍未启动（脚本没下下来 / 运行中断/被第三方脚本阻塞），显示诊断横幅。
-         时间从 6s 延长到 10s：跨境网络下首次无缓存访问 app.js 偶有抖动，避免误报。 */
+      /* 10s 后检查启动是否**完成**（脚本没下下来 / 运行中断 / 被第三方脚本阻塞 都会命中）。
+         时间从 6s 延长到 10s：跨境网络下首次无缓存访问 app.js 偶有抖动，避免误报。
+         ⚠️ 判据必须同时看 BOOTED 和 READY：只判 BOOTED 会漏掉「启动了但中途断掉」——
+         那正是历史事故的形态（首页空白、按钮全死，横幅却一直不弹），因为标记在 IIFE 第 5 行就置位了。 */
       setTimeout(function () {
-        if (!window.__APP_BOOTED__) {
-          var b = document.getElementById('bootFallback');
-          if (b) {
-            b.style.display = 'block';
-            var m = document.getElementById('bootMsg');
-            if (m) m.textContent = '脚本未能在 10 秒内完成启动，可能网络阻塞、缓存过期或被第三方脚本阻塞。';
-            var h = document.getElementById('bootHost');
-            if (h) h.textContent = location.hostname;
-          }
+        var booted = !!window.__APP_BOOTED__;
+        var ready = !!window.__APP_READY__;
+        if (booted && ready) return; // 正常完成
+        var b = document.getElementById('bootFallback');
+        if (!b || b.style.display === 'block') return;
+        b.style.display = 'block';
+        var m = document.getElementById('bootMsg');
+        var h = document.getElementById('bootHost');
+        var ti = document.getElementById('bootTitle');
+        var hint = document.getElementById('bootHint');
+        if (h) h.textContent = location.hostname;
+        if (!booted) {
+          if (ti) ti.textContent = '⚠️ 页面脚本未能启动';
+          if (hint) hint.innerHTML = '多半是网络/缓存问题，或访问到了已废弃的旧域名。<br>';
+          if (m) m.textContent = '脚本未能在 10 秒内完成启动，可能网络阻塞、缓存过期或被第三方脚本阻塞。';
+        } else {
+          if (ti) ti.textContent = '⚠️ 页面脚本启动中途中断';
+          if (hint) hint.innerHTML = '页面已加载，但初始化没跑完（脚本运行出错），部分功能会失灵。<br>';
+          if (m) m.textContent = '启动流程未走完。' + (window.__BOOT_ERROR__ ? ('首个错误：' + window.__BOOT_ERROR__) : '未捕获到错误信息，可先硬刷新试试。');
         }
       }, 10000);
     });
@@ -571,8 +595,8 @@
 
   <!-- 脚本兜底横幅：若 6s 内 app.js 未启动（多因访问旧域名 / 跨境网络导致脚本没下下来），显示当前域名+硬刷新按钮，便于定位 -->
   <div id="bootFallback" style="display:none;position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:99999;max-width:92vw;background:#2a1f1a;color:#f4ece2;border:1px solid #F0B06E;border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.7;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:system-ui,-apple-system,'PingFang SC',sans-serif;">
-    <strong>⚠️ 页面脚本未能启动</strong><br>
-    多半是网络/缓存问题，或访问到了已废弃的旧域名。<br>
+    <strong id="bootTitle">⚠️ 页面脚本未能启动</strong><br>
+    <span id="bootHint">多半是网络/缓存问题，或访问到了已废弃的旧域名。<br></span>
     当前域名：<code id="bootHost" style="color:#F0B06E"></code><br>
     <span id="bootMsg" style="color:#d9b48a"></span>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">

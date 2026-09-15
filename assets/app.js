@@ -1,7 +1,11 @@
 // ===== 昉昕的博客 — 前端交互 =====
 (function () {
-  // IIFE 已开始执行即视为脚本启动成功；index.html 的 6s 兜底检测据此判断是否误报。
-  // 放在最前面，避免后续任何同步/异步延迟让诊断横幅错误弹出。
+  // ⚠️ 两个启动标记，分工不同，缺一不可（index.html 的 10s 兜底横幅同时判它们）：
+  //   __APP_BOOTED__ —— 「脚本已开始执行」。放在最前面，避免后续任何同步/异步延迟造成误报。
+  //   __APP_READY__  —— 「启动段已完整跑完」。放在文件最末尾（IIFE 收口前一行）。
+  // 只判 BOOTED 抓不到「启动了、但中途抛异常断掉」——本文件是单 IIFE、顶层没有 try/catch，
+  // 一处同步异常就会让后面所有顶层语句集体不执行（历史事故：turnstile.ready() 抛错 ⇒ 首页空白、
+  // 登录/发布按钮全死、列表不加载，而横幅一直不弹）。BOOTED+READY 才能把这种情况显示出来。
   window.__APP_BOOTED__ = true;
 
   // ── DOM 缓存 ──
@@ -1485,10 +1489,56 @@
       s.async = true;
       // 加载失败不能变成静默终态（跨境被墙/超时会走到这里）：清空 promise，让下一次交互还能再试。
       s.onerror = () => { turnstileScriptPromise = null; console.error("[turnstile] api.js 加载失败，稍后重试"); resolve(false); };
-      s.onload = () => resolve(true);
+      // 只认「脚本跑完且 API 真的挂上」：有些扩展/代理会返回空脚本（onload 照样触发），
+      // 只看 load 事件会把它当成成功，于是接下来 render() 无声无息地不画。
+      s.onload = () => {
+        const ok = !!(window.turnstile && typeof window.turnstile.render === "function");
+        if (!ok) { turnstileScriptPromise = null; console.error("[turnstile] api.js 已加载但 window.turnstile 不可用"); }
+        resolve(ok);
+      };
       document.head.appendChild(s);
     });
     return turnstileScriptPromise;
+  }
+
+  // 脚本拉不到时（被墙 / 跨境超时 / 被扩展或代理拦截）在容器里就地给一个可点的降级提示。
+  // 原实现只留一个 65px 空灰框，提交时提示「请先完成人机验证」——让用户去点一个不存在的验证框，
+  // 是死胡同（真浏览器实测见 .diag/ts-undefined-cases.mjs 的 Pass A）。
+  function renderTurnstileFallback(container) {
+    if (!container) return;
+    if (container.querySelector(".ts-fallback")) return; // 已经画过就别重复插
+    container.innerHTML = "";
+    const box = document.createElement("div");
+    box.className = "ts-fallback";
+    const tip = document.createElement("span");
+    tip.className = "ts-fallback-tip";
+    tip.textContent = "人机验证加载失败";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ts-fallback-retry";
+    btn.textContent = "重试";
+    btn.addEventListener("click", retryTurnstile);
+    box.appendChild(tip);
+    box.appendChild(btn);
+    container.appendChild(box);
+  }
+
+  // 「重试」：清掉旧容器与旧 widget id，重新注入 api.js 并重画。
+  function retryTurnstile() {
+    // ⚠️ 容器一清空，旧 widget 就没了，必须同步把 id 置空：
+    //    否则 renderTurnstile() 会走 reset(旧 id) 分支，Cloudflare 抛
+    //    "Could not find widget for provided container"（.diag 的 Pass B 正是这个）。
+    turnstileWidgetId = null;
+    registerWidgetId = null;
+    turnstileScriptPromise = null; // 失败分支已置空，这里再保险一次（成功过的不会被覆盖）
+    const c1 = $("turnstileWidget");
+    const c2 = $("registerTurnstile");
+    if (c1) c1.innerHTML = "";
+    if (c2) c2.innerHTML = "";
+    ensureTurnstileScript().then((ok) => {
+      if (ok) { renderTurnstile(true); renderRegisterTurnstile(true); }
+      else { renderTurnstileFallback(c1); renderTurnstileFallback(c2); }
+    });
   }
 
   // ready=true 表示「本次就是脚本就绪后的重画」，用来防住「promise 已 resolve 但 window.turnstile 仍缺失」的无限自递归。
@@ -1499,21 +1549,34 @@
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
       // 脚本未就绪（包含「还没注入」）→ 就绪后自动重画。原实现是直接 return，注释写着「等脚本就绪事件自动触发」，
       // 但那个「就绪事件」正是会抛异常的 turnstile.ready()，等于压根没有兜底。
-      if (!ready) ensureTurnstileScript().then((ok) => { if (ok) renderTurnstile(true); });
+      if (!ready) {
+        ensureTurnstileScript().then((ok) => {
+          if (ok) renderTurnstile(true);
+          else renderTurnstileFallback(container); // 拉不到就给可点的降级提示，不留空灰框
+        });
+      } else {
+        // 走到这里 = 脚本已 load 但 window.turnstile 仍不可用，同样按失败处理（不再无限重试）
+        renderTurnstileFallback(container);
+      }
       return;
     }
     if (turnstileWidgetId) {
       try { window.turnstile.reset(turnstileWidgetId); } catch (_) {}
       return;
     }
+    // Turnstile 要求容器干净；若之前画过失败态，先清掉再 render
+    if (container.querySelector(".ts-fallback")) container.innerHTML = "";
     try {
       turnstileWidgetId = window.turnstile.render(container, {
         sitekey: turnstileSiteKey,
         theme: "auto",
         language: "zh-cn",
         callback: () => {
+          // 验证通过 → 清掉之前那条红色报错（「请先完成人机验证」）。
+          // ⚠️ 只清 err 类：提交成功后会 reset(widgetId) 触发新一轮验证，回调紧跟着执行，
+          //    无条件清空会把刚写上去的「✅ 已钉上」也抹掉（实测 .diag/degrade-check.mjs 抓到）。
           const msg = $("guestbookMsg");
-          if (msg) { msg.hidden = true; msg.textContent = ""; }
+          if (msg && msg.classList.contains("err")) { msg.hidden = true; msg.textContent = ""; }
         },
       });
     } catch (e) {
@@ -1527,19 +1590,28 @@
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
-      if (!ready) ensureTurnstileScript().then((ok) => { if (ok) renderRegisterTurnstile(true); });
+      if (!ready) {
+        ensureTurnstileScript().then((ok) => {
+          if (ok) renderRegisterTurnstile(true);
+          else renderTurnstileFallback(container);
+        });
+      } else {
+        renderTurnstileFallback(container);
+      }
       return;
     }
     if (registerWidgetId) {
       try { window.turnstile.reset(registerWidgetId); } catch (_) {}
       return;
     }
+    if (container.querySelector(".ts-fallback")) container.innerHTML = "";
     try {
       registerWidgetId = window.turnstile.render(container, {
         sitekey: turnstileSiteKey,
         theme: "auto",
         language: "zh-cn",
-        callback: () => { if (registerMsg) { registerMsg.textContent = ""; registerMsg.className = "form-msg"; } },
+        // 同留言墙：只清 err 类提示，别把「✅ 注册成功」也抹掉（reset 后回调会紧跟执行）
+        callback: () => { if (registerMsg && registerMsg.classList.contains("err")) { registerMsg.textContent = ""; registerMsg.className = "form-msg"; } },
       });
     } catch (e) {
       console.error("Turnstile render failed (register)", e);
@@ -1635,13 +1707,27 @@
       // 脚本还没到（刚打开页面就点提交）→ 先等它，别把「还没加载完」误报成「没做人机验证」
       if (turnstileSiteKey && !(window.turnstile && typeof window.turnstile.render === "function")) {
         if (msg) { msg.hidden = false; msg.textContent = "人机验证加载中…"; msg.className = "guestbook-msg"; }
-        await ensureTurnstileScript();
-        renderTurnstile();
+        const ok = await ensureTurnstileScript();
+        if (!ok) {
+          // 真的拉不到就别让用户去点一个不存在的框：给明确原因 + 就地重试
+          if (msg) { msg.textContent = "人机验证加载失败，请点验证框里的「重试」或刷新页面"; msg.className = "guestbook-msg err"; }
+          renderTurnstileFallback($("turnstileWidget"));
+          if (submitBtn) submitBtn.disabled = false;
+          return;
+        }
+        renderTurnstile(true);
       }
-      const tsToken = (turnstileSiteKey && turnstileWidgetId && window.turnstile)
+      const tsReady = !!(window.turnstile && typeof window.turnstile.render === "function");
+      const tsToken = (turnstileSiteKey && turnstileWidgetId && tsReady)
         ? window.turnstile.getResponse(turnstileWidgetId) : null;
       if (turnstileSiteKey && !tsToken) {
-        if (msg) { msg.hidden = false; msg.textContent = "请先完成人机验证"; msg.className = "guestbook-msg err"; }
+        // 区分「验证框在、只是没点」与「验证框压根没画出来」——后者要让用户重试，而不是让他去找空气
+        if (msg) {
+          msg.hidden = false;
+          msg.textContent = tsReady && turnstileWidgetId ? "请先完成人机验证" : "人机验证未显示出来，请点「重试」或刷新页面";
+          msg.className = "guestbook-msg err";
+        }
+        if (!tsReady || !turnstileWidgetId) renderTurnstileFallback($("turnstileWidget"));
         if (submitBtn) submitBtn.disabled = false;
         return;
       }
@@ -2320,13 +2406,22 @@
     // 同留言墙：脚本还没到就先等它，避免「脚本没加载」被误报成「没做人机验证」
     if (turnstileSiteKey && !(window.turnstile && typeof window.turnstile.render === "function")) {
       registerMsg.textContent = "人机验证加载中…"; registerMsg.className = "form-msg";
-      await ensureTurnstileScript();
-      renderRegisterTurnstile();
+      const ok = await ensureTurnstileScript();
+      if (!ok) {
+        registerMsg.textContent = "人机验证加载失败，请点验证框里的「重试」或刷新页面"; registerMsg.className = "form-msg err";
+        renderTurnstileFallback($("registerTurnstile"));
+        triggerState("error", 2500);
+        return;
+      }
+      renderRegisterTurnstile(true);
     }
-    const tsToken = (turnstileSiteKey && registerWidgetId && window.turnstile)
+    const tsReady = !!(window.turnstile && typeof window.turnstile.render === "function");
+    const tsToken = (turnstileSiteKey && registerWidgetId && tsReady)
       ? window.turnstile.getResponse(registerWidgetId) : null;
     if (turnstileSiteKey && !tsToken) {
-      registerMsg.textContent = "请先完成人机验证"; registerMsg.className = "form-msg err";
+      registerMsg.textContent = (tsReady && registerWidgetId) ? "请先完成人机验证" : "人机验证未显示出来，请点「重试」或刷新页面";
+      registerMsg.className = "form-msg err";
+      if (!tsReady || !registerWidgetId) renderTurnstileFallback($("registerTurnstile"));
       triggerState("error", 2500);
       return;
     }
@@ -2721,5 +2816,10 @@
 
   // URL 带 ?post=slug 时自动打开对应文章（分享链接可用）
   if (startSlug) setTimeout(() => openPost(startSlug), 300);
+
+  // ⚠️ 必须是本文件的**最后一个顶层语句**：它表示「启动段完整跑完」。
+  // 同步异常会中断 IIFE、走不到这一行 ⇒ index.html 的横幅据此报「启动中途中断」。
+  // 新加启动代码请写在这一行**之前**（scripts/verify-first-paint.mjs 有断言守着）。
+  window.__APP_READY__ = true;
 
 })();

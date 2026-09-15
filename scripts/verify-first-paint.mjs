@@ -299,7 +299,8 @@ console.log("\n[9] Turnstile 在首绘之后才注入，且不用会抛异常的
     /onerror[\s\S]{0,140}turnstileScriptPromise = null/.test(ensureBody),
     "失败分支未清空 turnstileScriptPromise");
   check("脚本未就绪时不是直接 return，而是等就绪后重画",
-    /if \(!ready\) ensureTurnstileScript\(\)\.then/.test(appCode),
+    // 不锁死「一行还是带花括号」的写法差异（这条断言自己就因为改写格式误报过一次）
+    /if \(!ready\)\s*\{?\s*ensureTurnstileScript\(\)\.then/.test(appCode),
     "未找到「就绪后重画」的分支");
 
   // 静态证明「首绘之后才注入」：注入点是配置拉取（至少一个 RTT，实测排在 FCP 之后）的下一行，
@@ -315,13 +316,117 @@ console.log("\n[9] Turnstile 在首绘之后才注入，且不用会抛异常的
   check("提交路径会先等脚本（不把「没加载完」误报成「没做人机验证」）",
     (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length >= 2,
     "只有 " + (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length + " 处等待");
-  check("读 token 前先确认 widget 已渲染（id 非空），不会把 null 交给 getResponse",
-    /turnstileSiteKey && turnstileWidgetId && window\.turnstile[\s\S]{0,90}?getResponse\(turnstileWidgetId\)/.test(appCode) &&
-    /turnstileSiteKey && registerWidgetId && window\.turnstile[\s\S]{0,90}?getResponse\(registerWidgetId\)/.test(appCode),
+  // 断言按语义写，不锁死 a && b && c 的书写顺序（历史上这种「写死变量名/顺序」的断言自己误报过）：
+  // 只要求 getResponse 调用点前 260 字符内同时盯住了「id 非空」与「window.turnstile 可用」。
+  const guardedGetResponse = (src, idVar) => {
+    const i = src.indexOf(`getResponse(${idVar})`);
+    if (i < 0) return false;
+    const head = src.slice(Math.max(0, i - 260), i);
+    return head.includes(idVar) && /window\.turnstile\b/.test(head);
+  };
+  check("读 token 前先确认 widget 已渲染（id 非空）+ API 可用，不会把 null 交给 getResponse",
+    guardedGetResponse(appCode, "turnstileWidgetId") && guardedGetResponse(appCode, "registerWidgetId"),
     "getResponse 的参数仍可能为 null");
+  check("变异②（删掉 getResponse 前的 id 判空）会被判红",
+    guardedGetResponse(
+      appCode.replace("turnstileSiteKey && turnstileWidgetId && tsReady", "turnstileSiteKey && tsReady"),
+      "turnstileWidgetId") === false);
+
+  // ── 脚本彻底拉不到时的降级（2026-09-15 补，真浏览器实测见 .diag/ts-undefined-cases.mjs）──
+  // 原实现只留一个 65px 空灰框，提交时才提示「请先完成人机验证」——页面上根本没有验证框可点。
+  // 这两条正则提出来，供「正向断言」与「变异自检」共用同一份判定逻辑，避免两处写法漂移。
+  const RETRY_IDS_RE = /function retryTurnstile\(\)[\s\S]{0,300}?turnstileWidgetId = null;[\s\S]{0,140}?registerWidgetId = null;/;
+  const ONLOAD_GUARD_RE = /s\.onload = \(\) => \{[\s\S]{0,400}?window\.turnstile\.render === "function"[\s\S]{0,260}?resolve\(ok\)/;
+  check("脚本拉不到时不留空灰框，而是就地渲染降级提示",
+    /function renderTurnstileFallback\(container\)/.test(appCode) &&
+    (appCode.match(/renderTurnstileFallback\(/g) || []).length >= 4,
+    "renderTurnstileFallback 调用点只有 " + (appCode.match(/renderTurnstileFallback\(/g) || []).length + " 处（渲染+两条提交路径都要有）");
+  check("降级提示带「重试」按钮（不是让用户去刷新猜）",
+    /btn\.textContent = "重试"/.test(appCode) && /btn\.addEventListener\("click", retryTurnstile\)/.test(appCode),
+    "缺少可点的重试按钮");
+  check("重试会重建脚本 promise（失败过一次也能再来）",
+    /function retryTurnstile\(\)[\s\S]{0,400}?turnstileScriptPromise = null/.test(appCode),
+    "重试没有清空 turnstileScriptPromise");
+  check("重试会清空 widget id（容器已清空，旧 id 会让 reset 抛 Could not find widget）",
+    RETRY_IDS_RE.test(appCode),
+    "重试未置空 widget id —— 会复现 Could not find widget for provided container");
+  check("变异③（重试不清 widget id）会被判红",
+    RETRY_IDS_RE.test(appCode.replace(
+      /turnstileWidgetId = null;\s*registerWidgetId = null;\s*turnstileScriptPromise = null;/,
+      "turnstileScriptPromise = null;")) === false);
+  check("渲染前清掉降级态（Turnstile 要求容器是干净的）",
+    (appCode.match(/querySelector\("\.ts-fallback"\)\) container\.innerHTML = ""/g) || []).length >= 2,
+    "render 前没有清空 .ts-fallback");
+  check("「脚本已 load 但 API 不可用」也算失败，不再无限重试",
+    ONLOAD_GUARD_RE.test(appCode),
+    "onload 仍是无条件 resolve(true)，空脚本会被当成成功");
+  check("变异④（onload 改回无条件 resolve(true)）会被判红",
+    ONLOAD_GUARD_RE.test(appCode.replace(/s\.onload = \(\) => \{[\s\S]{0,400}?\};/, "s.onload = () => resolve(true);")) === false);
+  check("提交文案不再把「加载失败」说成「请先完成人机验证」",
+    /人机验证加载失败/.test(appSrc) && /人机验证未显示出来/.test(appSrc),
+    "失败文案缺失，用户仍会被指去点一个不存在的验证框");
+  // 提交成功后会 reset(widgetId) → 触发新一轮验证 → callback 紧跟执行。
+  // 无条件清空提示会把刚写上去的「✅ 已钉上」抹掉（真浏览器实测见 .diag/degrade-check.mjs）。
+  const cbGuard = (src) =>
+    /callback: \(\) => \{[\s\S]{0,360}?msg\.classList\.contains\("err"\)/.test(src) &&
+    /registerMsg && registerMsg\.classList\.contains\("err"\)/.test(src);
+  check("验证通过的回调只清 err 提示，不抹掉成功提示",
+    cbGuard(appCode),
+    "回调无条件清空，提交成功的提示会被紧随其后的 reset 抹掉");
+  check("变异⑦（回调改回无条件清空）会被判红",
+    cbGuard(appCode.replace('msg && msg.classList.contains("err")', "msg")) === false);
 }
 
-console.log("\n[10] 台账（记录本轮线上实测，供以后对比）");
+console.log("\n[10] 启动完整性：横幅必须能抓到「启动了但中途断掉」");
+{
+  // 事故背景（2026-09-15，.diag/old-warm-abort.mjs 真浏览器实测）：
+  // app.js 是单 IIFE、顶层无 try/catch，turnstile.ready() 在热缓存下同步抛异常 ⇒ 从那一行起
+  // 后面 530 行顶层语句集体不执行 ⇒ /api/posts 与 /api/me 请求数 0、#cardGrid 空、登录按钮无反应。
+  // 而 index.html 的兜底横幅判的是 __APP_BOOTED__，它在 IIFE 第 5 行就置位了 ⇒ 横幅永远不弹，
+  // 用户只看到「连续刷新首页空白」。根因是判据从「启动完成」退化成了「启动」。
+  const appLines = appSrc.split(/\r?\n/);
+  const readyIdx = appLines.findIndex((l) => /window\.__APP_READY__\s*=\s*true/.test(l));
+  const bootedIdx = appLines.findIndex((l) => /window\.__APP_BOOTED__\s*=\s*true/.test(l));
+  const loadPostsIdx = appLines.findIndex((l) => /^\s*loadPosts\(\);/.test(l));
+  const htmlNoComment = htmlSrc.replace(/<!--[\s\S]*?-->/g, "");
+
+  check("app.js 置了 __APP_READY__", readyIdx >= 0, "没有 __APP_READY__ 标记");
+  check("__APP_READY__ 在真正的启动调用之后（未提前置位）",
+    readyIdx > loadPostsIdx && loadPostsIdx > 0,
+    `READY 在第 ${readyIdx + 1} 行、loadPosts 在第 ${loadPostsIdx + 1} 行`);
+  check("__APP_READY__ 是文件最后的顶层语句（其后只剩 IIFE 收口）",
+    appLines.slice(readyIdx + 1).filter((l) => l.trim() && !/^\s*(\/\/|\/\*|\*)/.test(l)).every((l) => /^\s*\}\)\(\);/.test(l)),
+    "READY 之后还有可执行语句 —— 那些代码不会被「中断检测」覆盖到");
+  check("变异⑤（把 READY 提到 IIFE 开头）会被判红",
+    (() => {
+      const moved = appSrc.replace(/window\.__APP_READY__\s*=\s*true;/, "").replace(
+        /window\.__APP_BOOTED__ = true;/, "window.__APP_BOOTED__ = true;\n  window.__APP_READY__ = true;");
+      const ls = moved.split(/\r?\n/);
+      const ri = ls.findIndex((l) => /window\.__APP_READY__\s*=\s*true/.test(l));
+      const li = ls.findIndex((l) => /^\s*loadPosts\(\);/.test(l));
+      return !(ri > li);
+    })());
+
+  check("横幅同时判 BOOTED 与 READY（不是只判启动）",
+    /!window\.__APP_BOOTED__|window\.__APP_BOOTED__/.test(htmlNoComment) &&
+    /window\.__APP_READY__/.test(htmlNoComment),
+    "index.html 未判 __APP_READY__，抓不到「启动中途断掉」");
+  check("变异⑥（横幅改回只判 BOOTED）会被判红",
+    /window\.__APP_READY__/.test(htmlNoComment.replace(/window\.__APP_READY__/g, "window.__IGNORED__")) === false);
+  check("横幅区分「未启动」与「启动中断」两种文案",
+    /页面脚本未能启动/.test(htmlNoComment) && /启动中途中断/.test(htmlNoComment),
+    "两种情形文案相同，用户无法区分");
+  check("横幅会带出第一条未捕获错误的 message（有据可查，不用开控制台猜）",
+    /__BOOT_ERROR__/.test(htmlNoComment) &&
+    /e\.message/.test(htmlNoComment) &&
+    /首个错误/.test(htmlNoComment),
+    "没有记录/展示运行时错误");
+  check("横幅标题可被 JS 改写（id 存在）",
+    /id="bootTitle"/.test(htmlNoComment) && /getElementById\('bootTitle'\)/.test(htmlNoComment),
+    "bootTitle 缺失，标题写死会误导");
+}
+
+console.log("\n[11] 台账（记录本轮线上实测，供以后对比）");
 {
   // 2026-09-15 用真实浏览器（本机 Edge + CDP，scripts/perf-probe.mjs）实测，非估算：
   console.log("  暖缓存：首页列表/侧栏 368ms · 文章正文 1171ms（其中 ~608ms 花在装饰请求上）");
