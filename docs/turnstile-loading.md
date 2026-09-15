@@ -1,8 +1,9 @@
 # Turnstile 的加载方式（别再改回 `turnstile.ready()`）
 
-> 2026-09-15 线上控制台报错的排查与修复（`89838d8`）。
-> 相关守护：`scripts/verify-first-paint.mjs` 的 `[9]` 段（12 项，含变异自检）。
-> 诊断/验证脚本（均在 gitignore 的 `.diag/`）：`turnstile-probe.mjs`、`local-turnstile-check.mjs`、`check-deploy.mjs`。
+> 2026-09-15 线上控制台报错的排查与修复（`89838d8`）；同日补充「拉不到时的降级与重试」。
+> 相关守护：`scripts/verify-first-paint.mjs` 的 `[9]` 段（含 4 组变异自检）。
+> 诊断/验证脚本（均在 gitignore 的 `.diag/`）：`turnstile-probe.mjs`、`local-turnstile-check.mjs`、
+> `ts-undefined-cases.mjs`（三组对照）、`degrade-check.mjs`（降级端到端）、`check-deploy.mjs`。
 
 ## 症状
 
@@ -68,7 +69,11 @@ function ensureTurnstileScript() {          // 自己注入，只认 <script> �
     const s = document.createElement("script");
     s.src = TURNSTILE_API_URL; s.async = true;
     s.onerror = () => { turnstileScriptPromise = null; /* 清空 → 下次交互还能再试 */ resolve(false); };
-    s.onload = () => resolve(true);
+    s.onload = () => {                        // 只认「脚本跑完且 API 真挂上」
+      const ok = !!(window.turnstile && typeof window.turnstile.render === "function");
+      if (!ok) turnstileScriptPromise = null; // 空脚本（代理/扩展改写）也算失败，允许重试
+      resolve(ok);
+    };
     document.head.appendChild(s);
   });
   return turnstileScriptPromise;
@@ -110,6 +115,35 @@ node .diag/local-turnstile-check.mjs
 ⚠️ **别拿 iframe 数当判据**：widget 的 iframe 在 **closed shadow root** 里，
 `querySelectorAll('iframe')` 数出 **0 是正常的**，一开始就是这么误判成「又没渲染」。
 
+## 脚本彻底拉不到时：降级 + 重试（别让用户去点空气）
+
+上一版修好了「脚本迟到」，但没管「脚本永远不到」（被墙 / 跨境超时 / 被扩展或代理拦截）。
+那时容器里只有一个 65px 的空灰框（CSS 的 `min-height`），点提交才弹一句
+**「请先完成人机验证」——可页面上根本没有验证框可点**，是死胡同（`ts-undefined-cases.mjs` 的 Pass A 实测）。
+
+现在：
+
+- 失败即把容器换成 `.ts-fallback`（「人机验证加载失败」+「重试」按钮），不再留空灰框；
+  `.ts-fallback` 只在容器里没有时插入，重复触发不会堆叠。
+- 提交时若脚本确实拉不到，文案变成「人机验证加载失败，请点验证框里的「重试」或刷新页面」，
+  按钮恢复可点（不会卡在「钉上中…」）。
+- 「重试」会清空容器、**把 `turnstileWidgetId` / `registerWidgetId` 置空**、重建 `turnstileScriptPromise`。
+  ⚠️ 置空 id 是必须的：容器一清空旧 widget 就没了，带着旧 id 走 `reset()` 分支会让 Cloudflare 抛
+  `Could not find widget for provided container`（`ts-undefined-cases.mjs` 的 Pass B 就复现过这个冻结态）。
+- 渲染前会清掉残留的 `.ts-fallback`（Turnstile 要求容器干净）。
+- 提交成功后会 `reset(widgetId)` → 触发新一轮验证 → `callback` 紧跟执行，
+  所以回调**只清 `err` 类提示**，否则会把刚写上去的「✅ 已钉上」一起抹掉（`degrade-check.mjs` 抓到）。
+
+验证：
+
+```
+node .diag/degrade-check.mjs
+```
+
+Pass 2 用 CDP `Network.setBlockedURLs(["*challenges.cloudflare.com*"])` 真掐断，检查
+「出现降级提示 → 提交文案正确、按钮可点、不发 POST → 解除拦截 → 点重试 → widget 画出来（token 长度 21）
+→ 再提交，POST 真的发出且提示「✅ 已钉上」」。
+
 ## 截图里另外三条报错：不是本站的
 
 `No available adapters.` ×2 与 `OTS parsing error: Size of decompressed WOFF 2.0 …`
@@ -127,4 +161,7 @@ https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/f/av0
 
 - 🚫 **绝不用 `turnstile.ready()`**，api.js 必须由 `ensureTurnstileScript()` 注入、只认 `load`/`error`。
 - 🚫 **别把 api.js 的 `<script>` 写回 `index.html`** —— 一是会重新抢首屏带宽，二是又变回「与 app.js 抢执行顺序」。
+- 🚫 **别把降级提示退回成空灰框 + 「请先完成人机验证」** —— 那是让用户去点一个不存在的验证框。
+  同理：**重试时不许漏掉置空 widget id**（会复现 `Could not find widget for provided container` 冻结态）。
 - ⚠️ 改这块后必须跑 `node scripts/verify-first-paint.mjs`，并把「把 `ready()` 写回启动段 → 断言必须判红」做一遍。
+- 启动完整性（`BOOTED` / `READY` 与兜底横幅）见 `docs/boot-integrity.md`。
