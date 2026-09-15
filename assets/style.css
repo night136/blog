@@ -98,10 +98,12 @@ body {
   -webkit-font-smoothing: antialiased; transition: background .35s ease, color .35s ease;
 }
 
-/* 衬线标题 */
-h1, h2, h3, .hero h2, .slide-title, .post-detail h2, .page-head h2,
-.auth-title, .brand-text h1, .comments-title, .post-detail h3,
-.compose-meta #composeTitle, .member-card h3 {
+/* 衬线标题。
+   只用元素选择器 h1/h2/h3：所有标题都落在这些元素上（.hero h1、.page-head h1、
+   .post-detail > h1、.slide-title、.comments-title、.member-card … 都是 h1/h2/h3），
+   所以没必要再逐个列类名 —— 旧写法把「元素层级」抄成了类名清单，标题层级一调整就漏改。
+   唯一例外是 .brand-name：站点名已从 h1 降为无语义容器（见 index.html 注释），需单独补字体。 */
+h1, h2, h3, .brand-name, .compose-meta #composeTitle {
   font-family: "Noto Serif SC", Georgia, "Songti SC", "STSong", serif;
   font-weight: 700;
 }
@@ -162,7 +164,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   background: transparent;
   display: block; box-shadow: var(--shadow-sm);
 }
-.brand-text h1 { font-size: 20px; letter-spacing: 0.5px; }
+.brand-text .brand-name { font-size: 20px; letter-spacing: 0.5px; }
 .brand-text p { font-size: 13px; color: var(--text-faint); margin-top: 2px; }
 
 .nav { display: flex; flex-direction: column; gap: 6px; }
@@ -210,7 +212,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 [data-theme="dark"] .hero::before { opacity: .45; }
 .hero-text { position: relative; max-width: 640px; margin: 0 auto; }
-.hero h2 { font-size: 38px; font-weight: 900; letter-spacing: 1px; margin-bottom: 10px; color: var(--text); }
+.hero h1 { font-size: 38px; font-weight: 900; letter-spacing: 1px; margin-bottom: 10px; color: var(--text); }
 .hero p { color: var(--text-soft); margin-top: 8px; font-size: 16px; }
 .hero-actions {
   position: relative;
@@ -249,7 +251,7 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .write-hint { font-size: 13px; color: var(--text-faint); }
 
 .page-head { margin-bottom: 28px; padding: 0 4px; }
-.page-head h2 { font-size: 30px; font-weight: 900; }
+.page-head h1 { font-size: 30px; font-weight: 900; }
 .page-head p { color: var(--text-soft); margin-top: 8px; font-size: 15px; }
 
 /* ── 卡片网格：Bento 瀑布流 ── */
@@ -287,8 +289,8 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 .cover-failed { display: none !important; }
 .card-body { padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-faint); }
-.card h3 { font-size: 18px; font-weight: 700; line-height: 1.45; transition: color .22s ease; }
-@media (hover: hover) and (pointer: fine) { .card:hover h3 { color: var(--accent-dark); } }
+.card h2 { font-size: 18px; font-weight: 700; line-height: 1.45; transition: color .22s ease; }
+@media (hover: hover) and (pointer: fine) { .card:hover h2 { color: var(--accent-dark); } }
 .card p { color: var(--text-soft); font-size: 14px; line-height: 1.65; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-faint); }
 .card-go { color: var(--accent-dark); font-weight: 700; display: inline-block; transition: transform .22s ease; }
@@ -316,7 +318,11 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
   margin-bottom: 24px; transition: all .18s;
 }
 @media (hover: hover) and (pointer: fine) { .back-btn:hover { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--accent); } }
-.post-detail h2 { font-size: 32px; font-weight: 900; letter-spacing: .5px; margin-bottom: 14px; }
+/* 文章标题 = 这一页的 h1（正文标题从 h2 起步，见 app.js 的 mdToHtml）。
+   这里必须用子选择器 >：旧的 `.post-detail h2` 是后代选择器，会一并命中 .post-body 里的正文 h2，
+   把标题的字号 / 字距 / margin-bottom 泄漏到正文小标题上（从前只靠 .post-body h2 恰好写在后面才盖回去，
+   样式顺序一调整就会翻车）。限定为直接子元素后，正文标题只归 .post-body h2 管。 */
+.post-detail > h1 { font-size: 32px; font-weight: 900; letter-spacing: .5px; margin-bottom: 14px; }
 .post-detail .post-meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   margin-bottom: 28px; color: var(--text-faint); font-size: 13px;
@@ -532,7 +538,7 @@ body.lightbox-open { overflow: hidden; }
 .member-welcome { display: flex; flex-direction: column; gap: 20px; }
 .member-card { display: flex; align-items: center; gap: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; }
 .member-avatar { width: 60px; height: 60px; border-radius: 50%; flex: 0 0 auto; background: linear-gradient(135deg, #E89B4C, #F5C687); color: #fff; font-size: 26px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.member-card h3 { font-size: 22px; }
+.member-card h2 { font-size: 22px; }
 .member-sub { color: var(--text-faint); font-size: 14px; margin-top: 3px; }
 .member-perks { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
 .perk { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; font-size: 15px; color: var(--text); transition: transform .18s; }
@@ -607,7 +613,7 @@ body.lightbox-open { overflow: hidden; }
   .sidebar-footer { margin-top: 20px; }
   .content { padding: 64px 0 20px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .hero { padding: 28px 20px; }
-  .hero h2 { font-size: 26px; }
+  .hero h1 { font-size: 26px; }
   .hero-avatar { width: 60px; height: 60px; }
   .search-box { width: 100%; }
   .topbar-inner { height: 54px; gap: 10px; padding: 0 14px; }
@@ -647,7 +653,7 @@ body.lightbox-open { overflow: hidden; }
   .compose-actions { flex-direction: column; align-items: stretch; gap: 10px; }
   .compose-actions .btn-submit { width: 100%; }
   .post-detail { padding: 0 4px; }
-  .post-detail h2 { font-size: 24px; }
+  .post-detail > h1 { font-size: 24px; }
   .post-detail .post-meta { flex-wrap: wrap; gap: 8px; font-size: 12px; }
   .post-actions { width: 100%; margin-left: 0; margin-top: 4px; }
   .post-actions button { flex: 1; padding: 5px 8px; font-size: 11px; }
@@ -985,19 +991,19 @@ body.lightbox-open { overflow: hidden; }
 /* ===== 首页错落 Bento 网格（首篇头条大卡） ===== */
 .card.feature { column-span: all; }
 .card.feature .card-cover { height: 320px; }
-.card.feature h3 { font-size: 22px; }
+.card.feature h2 { font-size: 22px; }
 
 /* ===== 文章阅读页精致排版 ===== */
 /* ① 文章详情进入动画：标题/元信息/正文依次由小变大淡入 */
 .post-detail.post-anim > .post-meta,
 .post-detail.post-anim > .post-cover,
-.post-detail.post-anim > h2,
+.post-detail.post-anim > h1,
 .post-detail.post-anim > .post-share,
 .post-detail.post-anim > .toc,
 .post-detail.post-anim > .post-body { animation: postReveal .7s cubic-bezier(.22,.61,.36,1) both; }
 .post-detail.post-anim > .post-meta { animation-delay: .02s; }
 .post-detail.post-anim > .post-cover { animation-delay: .08s; }
-.post-detail.post-anim > h2 { animation-delay: .14s; }
+.post-detail.post-anim > h1 { animation-delay: .14s; }
 .post-detail.post-anim > .post-share { animation-delay: .20s; }
 .post-detail.post-anim > .toc { animation-delay: .26s; }
 .post-detail.post-anim > .post-body { animation-delay: .32s; }
@@ -1200,7 +1206,7 @@ body.lightbox-open { overflow: hidden; }
 }
 .guestbook-form-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .guestbook-form-head .pen-icon { font-size: 20px; }
-.guestbook-form-head h3 { margin: 0; font-size: 17px; color: var(--text); font-weight: 600; }
+.guestbook-form-head h2 { margin: 0; font-size: 17px; color: var(--text); font-weight: 600; }
 .guestbook-form-row { display: grid; gap: 12px; }
 .guestbook-form input,
 .guestbook-form textarea {

@@ -16,7 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderMarkdown, articleFileName, materializeBodyImages } from "./lib/seo-render.mjs";
+import { renderMarkdown, articleFileName, materializeBodyImages, buildArticleHtml } from "./lib/seo-render.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -57,7 +57,20 @@ function check(name, cond, detail) {
 }
 
 const FRAG_PATH = "/generated/post-html/e65576f0a91714fd.html";
-const FRAG_HTML = '<div class="post-meta"><span class="tag">读书</span></div><h2>心理学的领域</h2><div class="post-body"><p>心理学的领域是探索个人的所有表现涉及的意义。</p><p>任何有意义的行动都必然以明确的目标导向为前提。</p></div>';
+// 夹具由真正的构造函数生成，而不是手抄一份 HTML 字面量：
+// 手抄件会悄悄和 buildArticleHtml() 漂移（标题从 h2 改成 h1 时只改了一边，断言照样全绿，
+// 线上却是另一套结构）。结构类的断言交给 verify-heading-outline.mjs，这里只关心「注入了什么」。
+const FRAG_HTML = buildArticleHtml({
+  title: "心理学的领域",
+  tag: "读书",
+  date: "2026-09-13",
+  author: "zfx",
+  readingMinutes: 1,
+  words: 60,
+  views: 3,
+  coverUrl: "",
+  bodyHtml: renderMarkdown("心理学的领域是探索个人的所有表现涉及的意义。\n\n任何有意义的行动都必然以明确的目标导向为前提。"),
+});
 
 function basePost(over = {}) {
   return {

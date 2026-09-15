@@ -68,6 +68,8 @@ export function renderMarkdown(md) {
       const q = []; while (i < lines.length && /^> /.test(lines[i])) { q.push(lines[i].slice(2)); i++; }
       html += `<blockquote>${q.map((ln) => `<p>${inline(ln)}</p>`).join("")}</blockquote>`; continue;
     }
+    // 正文标题从 h2 起步：h1 归文章标题所有（一页只能有一个 h1），所以 "# " 与 "## " 都落 h2，"### " 落 h3。
+    // 与 assets/app.js 的 mdToHtml() 必须逐条一致（verify-seo-render 会比对两边输出）。
     if (line.startsWith("### ")) { html += `<h3 id="sec-${++hCount}">${inline(line.slice(4))}</h3>`; i++; continue; }
     if (line.startsWith("## ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(3))}</h2>`; i++; continue; }
     if (line.startsWith("# ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(2))}</h2>`; i++; continue; }
@@ -133,7 +135,10 @@ export function buildArticleHtml({ title, tag, date, author, readingMinutes, wor
   return (
     `<div class="post-meta">${metaBits}</div>` +
     cover +
-    `<h2>${esc(title)}</h2>` +
+    // 文章标题是这一页唯一的 h1 —— 必须与 app.js openPost() 渲染出的层级完全一致，
+    // 否则同一个 URL 对爬虫和真人是两套大纲（爬虫看到 h2、真人看到 h1），
+    // 百度/Google 判定的页面主题会跟着变。verify-heading-outline 会两侧一起断言。
+    `<h1>${esc(title)}</h1>` +
     `<div class="post-body">${bodyHtml}</div>`
   );
 }

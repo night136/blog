@@ -169,6 +169,8 @@
         const q = []; while (i < lines.length && /^> /.test(lines[i])) { q.push(lines[i].slice(2)); i++; }
         html += `<blockquote>${q.map((ln) => `<p>${inline(ln)}</p>`).join("")}</blockquote>`; continue;
       }
+      // 正文标题从 h2 起步：h1 归文章标题所有（一页只能有一个 h1），所以 "# " 与 "## " 都落 h2，"### " 落 h3。
+      // 与 scripts/lib/seo-render.mjs 的 renderMarkdown() 必须逐条一致（verify-seo-render 会比对两边输出）。
       if (line.startsWith("### ")) { html += `<h3 id="sec-${++hCount}">${inline(line.slice(4))}</h3>`; i++; continue; }
       if (line.startsWith("## ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(3))}</h2>`; i++; continue; }
       if (line.startsWith("# ")) { html += `<h2 id="sec-${++hCount}">${inline(line.slice(2))}</h2>`; i++; continue; }
@@ -307,7 +309,7 @@
     if (sliderEl) sliderEl.style.display = "block";
     slidesEl.innerHTML = top.map((p, i) => `
       <div class="slide ${i === 0 ? "active" : ""} ${p.cover ? "" : "no-cover"}" data-slug="${escapeHtml(p.slug)}" style="${coverStyle(p)}">
-        <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h3 class="slide-title">${escapeHtml(p.title)}</h3><p class="slide-summary">${escapeHtml(p.summary || "")}</p><button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
+        <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h2 class="slide-title">${escapeHtml(p.title)}</h2><p class="slide-summary">${escapeHtml(p.summary || "")}</p><button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
       </div>`).join("");
     slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`).join("");
     slidesEl.querySelectorAll(".slide-read").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openPost(b.dataset.slug); }));
@@ -351,7 +353,7 @@
         ${cover}
         <div class="card-body">
           <div class="card-meta"><span class="tag">${escapeHtml(p.tag)}</span><span>${formatDate(p.date)}</span><span>✍ ${escapeHtml(p.author)}</span></div>
-          <h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.summary || "")}</p>
+          <h2>${escapeHtml(p.title)}</h2><p>${escapeHtml(p.summary || "")}</p>
           <div class="card-foot"><span>⏱ 约 ${p.readingMinutes || readingTime(p.summary || p.title).minutes} 分钟 · ${p.words || 0} 字 · ${p.views || 0} 阅读</span><span class="card-go">阅读 →</span></div>
         </div></article>`;
   }
@@ -450,7 +452,7 @@
     const seq = ++openSeq;
     const stale = () => seq !== openSeq;
     const p = posts.find((x) => x.slug === slug);
-    if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h2>${p.title}</h2><p style="color:var(--text-faint)">加载中…</p>`;
+    if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h1>${p.title}</h1><p style="color:var(--text-faint)">加载中…</p>`;
     showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       // slug 放 body，避免部分国产浏览器（小米等）fetch 对中文 slug 的 % 编码损坏
@@ -515,7 +517,7 @@
       // 文末入口：长文读到底想分享时，不必再滚回顶部（两个入口共用同一个面板）
       const shareBtnsEnd = `<div class="post-share post-share-end"><span class="share-end-label">觉得有用？</span><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享给朋友</button><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button></div>`;
       const nav = buildPostNav(slug);
-      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h2>${post.title}</h2>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h3 class="comments-title">💬 评论</h3><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
+      postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time">⏱ 约 ${rt.minutes} 分钟 · ${rt.words} 字 · ${post.views || 0} 阅读</span>${manageBtns}</div>${hero}<h1>${post.title}</h1>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h2 class="comments-title">💬 评论</h2><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       lazyLoadImages(postDetail);
       bindCommentForm(slug);
       loadComments(slug);
@@ -2025,7 +2027,7 @@
   async function renderMember(user) {
     if (!memberArea) return;
     if (!user) { memberArea.innerHTML = '<div class="member-gate"><p>登录后即可发表文章、查看会员内容。</p><button class="btn-auth" type="button" id="memberLogin">🔐 登录 / 注册</button></div>'; const b = $("memberLogin"); if (b) b.addEventListener("click", () => openAuth("login")); return; }
-    memberArea.innerHTML = `<div class="member-welcome"><div class="member-card"><div class="member-avatar">${escapeHtml((user.username || "?").slice(0,1).toUpperCase())}</div><div><h3>欢迎，${escapeHtml(user.username)} 👋</h3><p class="member-sub">你已登录会员专区。</p></div></div><div class="member-perks"><div class="perk">✍️ 撰写并发布文章</div><div class="perk">📚 会员专享读书笔记合集</div><div class="perk">💬 文章下方专属评论区</div><div class="perk">🔖 收藏你喜欢的文章</div></div><button class="btn-publish" type="button" id="memberPublish">✍️ 现在写一篇文章</button><p class="member-note">更多功能陆续开放。</p></div>`;
+    memberArea.innerHTML = `<div class="member-welcome"><div class="member-card"><div class="member-avatar">${escapeHtml((user.username || "?").slice(0,1).toUpperCase())}</div><div><h2>欢迎，${escapeHtml(user.username)} 👋</h2><p class="member-sub">你已登录会员专区。</p></div></div><div class="member-perks"><div class="perk">✍️ 撰写并发布文章</div><div class="perk">📚 会员专享读书笔记合集</div><div class="perk">💬 文章下方专属评论区</div><div class="perk">🔖 收藏你喜欢的文章</div></div><button class="btn-publish" type="button" id="memberPublish">✍️ 现在写一篇文章</button><p class="member-note">更多功能陆续开放。</p></div>`;
     const pb = $("memberPublish"); if (pb) pb.addEventListener("click", openCompose);
   }
 

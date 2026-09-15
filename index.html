@@ -170,7 +170,11 @@
       <div class="brand">
         <img class="avatar" src="assets/logo-avatar.png" alt="昉昕" width="56" height="56">
         <div class="brand-text">
-          <h1>昉昕</h1>
+          <!-- 站点名不是「这一页的主题」，所以不能占 h1：侧边栏挂在每一个视图上，
+               若它是 h1，文章页就同时存在两个 h1（站点名 + 文章标题），
+               而文章标题才是这一页真正的主角。改用无语义容器，样式照旧走 .brand-name。
+               （首页的 h1 是 hero 的「记录与思考」，见下方 .hero） -->
+          <div class="brand-name">昉昕</div>
           <p>开发者 · 写作者</p>
         </div>
       </div>
@@ -183,11 +187,11 @@
       </nav>
       <div class="widgets" id="widgets">
         <section class="widget">
-          <h4 class="widget-title">📌 最近文章</h4>
+          <h2 class="widget-title">📌 最近文章</h2>
           <ul class="widget-list" id="recentList"></ul>
         </section>
         <section class="widget">
-          <h4 class="widget-title">🏷️ 标签</h4>
+          <h2 class="widget-title">🏷️ 标签</h2>
           <div class="tag-cloud" id="tagCloud"></div>
         </section>
       </div>
@@ -206,7 +210,7 @@
         <header class="hero">
           <div class="hero-text">
             <img class="hero-avatar" src="assets/logo-hero.png" alt="昉昕" width="80" height="80">
-            <h2>记录与思考</h2>
+            <h1>记录与思考</h1>
             <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
             <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>
             <div class="search-box"><input type="search" id="searchInput" placeholder="🔍 搜索文章…" /></div>
@@ -236,14 +240,14 @@
 
       <!-- 归档视图 -->
       <section class="view view-archive">
-        <header class="page-head"><h2>归档</h2><p>所有文章按时间排列。</p></header>
+        <header class="page-head"><h1>归档</h1><p>所有文章按时间排列。</p></header>
         <div class="archive-list" id="archiveList"></div>
       </section>
 
       <!-- 留言墙视图 -->
       <section class="view view-guestbook">
         <header class="page-head">
-          <h2>留言墙</h2>
+          <h1>留言墙</h1>
           <p>留下你的足迹，每一张便签都是一份温暖。</p>
         </header>
         <div class="guestbook-stats" id="guestbookStats" hidden>
@@ -257,7 +261,7 @@
         <form class="guestbook-form" id="guestbookForm" autocomplete="off">
           <div class="guestbook-form-head">
             <span class="pen-icon" aria-hidden="true">✏️</span>
-            <h3>写一张便签</h3>
+            <h2>写一张便签</h2>
           </div>
           <div class="guestbook-form-row">
             <div class="guestbook-name-wrap" id="guestNameWrap">
@@ -291,7 +295,7 @@
 
       <!-- 关于视图 -->
       <section class="view view-about">
-        <header class="page-head"><h2>关于</h2></header>
+        <header class="page-head"><h1>关于</h1></header>
         <div class="prose">
           <p>你好，我是 <strong>昉昕</strong>，一个常驻江西的开发者。</p>
           <p>日常工作是开发与维护，节奏里夹着一些自动化的小机器人项目。这个博客用来沉淀我踩过的坑、读过的书，以及偶尔冒出来的想法。</p>
@@ -301,7 +305,7 @@
 
       <!-- 会员专区视图 -->
       <section class="view view-member">
-        <header class="page-head"><h2>👥 会员专区</h2><p>登录后可发表文章、查看会员内容。</p></header>
+        <header class="page-head"><h1>👥 会员专区</h1><p>登录后可发表文章、查看会员内容。</p></header>
         <div id="memberArea"></div>
       </section>
 
@@ -356,7 +360,7 @@
     <!-- 右侧小部件区 -->
     <aside class="rightbar" id="rightbar">
       <section class="widget">
-        <h4 class="widget-title">🕐 此刻</h4>
+        <h2 class="widget-title">🕐 此刻</h2>
         <div class="widget-clock" id="sideClock">
           <div class="analog-clock">
             <div class="clock-face">
@@ -382,7 +386,7 @@
         </div>
       </section>
       <section class="widget lunar-widget" id="lunarWidget">
-        <h4 class="widget-title">🌙 农历</h4>
+        <h2 class="widget-title">🌙 农历</h2>
         <div class="lunar-card">
           <div class="lunar-moon" aria-hidden="true">
             <svg viewBox="0 0 64 64" class="moon-svg"><circle cx="32" cy="32" r="30" fill="currentColor" opacity=".18"/><path d="M32 2a30 30 0 1 0 0 60 22 22 0 0 1 0-44 30 30 0 0 1 0-16z" fill="currentColor"/></svg>
@@ -412,7 +416,7 @@
   <div class="modal-mask" id="shareModal" hidden>
     <div class="modal share-panel" role="dialog" aria-modal="true" aria-labelledby="shareHeading">
       <button class="modal-close" id="shareClose" type="button" aria-label="关闭分享面板">×</button>
-      <h3 class="share-heading" id="shareHeading">分享这篇文章</h3>
+      <h2 class="share-heading" id="shareHeading">分享这篇文章</h2>
       <div class="share-post">
         <img class="share-thumb" id="shareThumb" src="" alt="" hidden />
         <div class="share-post-text">
