@@ -85,8 +85,11 @@ async function loadPost(env, slug) {
 
 // 封面映射表（构建期产物 generated/covers.json：slug → 可直接对外引用的封面路径）。
 // 为什么需要它：D1 里后台上传的封面存的是 data: base64，爬虫无法引用；build.mjs 会把这些
-// 图落成 /generated/covers/<slug哈希>-<内容哈希>.<ext> 静态文件，但哈希边缘侧算不出来，
-// 所以由构建期输出映射表。文件与映射表同一次构建产出，正常情况下表里有的路径文件必定存在。
+// 图落成静态文件，但哈希边缘侧算不出来，所以由构建期输出映射表。
+// 落点有两处：封面自成一图时是 /generated/covers/<slug哈希>-<内容哈希>.<ext>；
+// 封面就是正文里的某张图时（线上 7/7 都是）直接复用 /generated/body-images/<内容哈希>.<ext>
+// —— 同一个 URL，浏览器只下一次。所以下面复核存在性时**不能只放行 covers/**。
+// 文件与映射表同一次构建产出，正常情况下表里有的路径文件必定存在。
 const COVER_MANIFEST_PATH = "/generated/covers.json";
 const MANIFEST_TTL_MS = 5 * 60 * 1000;
 let manifestCache = { at: 0, data: null };
