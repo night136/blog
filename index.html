@@ -55,6 +55,9 @@
        小米/360 兼容模式对 onload 切换支持不良，会导致样式表永远不生效，项目已因此回滚过一次。
        preconnect 保留：注入时机虽晚，握手仍可提前完成。 -->
   <link rel="preconnect" href="https://fonts.font.im" crossorigin />
+  <!-- Turnstile 的 api.js 同理：首绘后才由 app.js 注入，这里只提前握手。不写 crossorigin ——
+       脚本标签本身不带 crossorigin，预连接必须与实际请求同类型才能复用这条连接。 -->
+  <link rel="preconnect" href="https://challenges.cloudflare.com" />
   <!-- 首屏关键 CSS 内联：变量 + 防闪 + 布局骨架 + 卡片入场动画 + 移动端布局兜底。即使 style.css 加载失败/延迟，页面也不会错乱、卡片也不会消失。 -->
   <style>
     :root {
@@ -579,10 +582,13 @@
     </div>
   </div>
 
-  <!-- 顺序很重要：app.js 优先于 Turnstile 加载执行。某些浏览器会把 async defer 的第三方脚本阻塞后续 defer 脚本；
-       如果 Turnstile 跨境加载慢/失败，会导致 app.js 迟迟不启动并触发 6s 检测。app.js 对 Turnstile 是软依赖（运行时检查 window.turnstile），
-       因此把它放在前面先执行，Turnstile 随后异步加载即可。 -->
+  <!-- app.js 用 defer：解析完就执行，不阻塞 HTML 解析。
+       Turnstile 的 api.js **不在这里**，由 app.js 首绘之后按需注入（软依赖），原因有二：
+         ① 它是跨境第三方脚本，写在这儿会和 app.js / style.css 抢首屏带宽（实测它 515ms 就开始抢）；
+         ② 它带 async/defer 时，Cloudflare 的 turnstile.ready() 会**直接抛未捕获异常**
+            （[Cloudflare Turnstile] Remove async/defer from the Turnstile api.js script tag...），
+            而 app.js 又必须排在它前面先启动 —— 自己注入 + 只听 <script> 的 load 事件可以同时满足两边。
+       详见 assets/app.js 里 ensureTurnstileScript() 的说明。 -->
   <script src="assets/app.js" defer></script>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </body>
 </html>

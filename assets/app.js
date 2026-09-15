@@ -1233,6 +1233,7 @@
   let turnstileSiteKey = null;   // 后端下发，未配置时不启用
   let turnstileWidgetId = null;  // 留言墙 Turnstile widget 实例 id
   let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
+  let turnstileScriptPromise = null; // api.js 的注入 promise（全局只注入一次；失败会清空以便重试）
   let guestNextCursor = null;    // 下一页游标 { before, before_id }
   let guestHasMore = false;      // 是否还有更早的便签
   let guestbookMineIds = new Set(); // 本机（localStorage）记录自己写过的便签 id（优化 #7）
@@ -1467,16 +1468,42 @@
     });
   }
 
-  function renderTurnstile() {
+  // ===== Turnstile 脚本的加载方式（⚠️ 别再改回 <script async defer> + turnstile.ready()）=====
+  // api.js 带 async/defer 时，turnstile.ready() 会**直接抛未捕获异常**：
+  //   [Cloudflare Turnstile] Remove async/defer from the Turnstile api.js script tag before using turnstile.ready().
+  // 而 index.html 又必须让 app.js 排在它前面先启动（否则跨境慢加载会连累整站 JS），两边天然冲突。
+  // 所以 api.js 改由这里「按需注入 + 只听 <script> 的 load 事件」：
+  //   ① 不碰 ready()，也就没有它那条限制；② 不存在「谁先加载完」的竞态；
+  //   ③ 首绘之后才注入，跨境网络里不和 app.js / style.css 抢首屏带宽。
+  const TURNSTILE_API_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  function ensureTurnstileScript() {
+    if (window.turnstile && typeof window.turnstile.render === "function") return Promise.resolve(true);
+    if (turnstileScriptPromise) return turnstileScriptPromise;
+    turnstileScriptPromise = new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = TURNSTILE_API_URL;
+      s.async = true;
+      // 加载失败不能变成静默终态（跨境被墙/超时会走到这里）：清空 promise，让下一次交互还能再试。
+      s.onerror = () => { turnstileScriptPromise = null; console.error("[turnstile] api.js 加载失败，稍后重试"); resolve(false); };
+      s.onload = () => resolve(true);
+      document.head.appendChild(s);
+    });
+    return turnstileScriptPromise;
+  }
+
+  // ready=true 表示「本次就是脚本就绪后的重画」，用来防住「promise 已 resolve 但 window.turnstile 仍缺失」的无限自递归。
+  function renderTurnstile(ready) {
     const container = $("turnstileWidget");
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
-    if (typeof window.turnstile === "undefined") {
-      // Turnstile 脚本还在加载，等脚本就绪事件自动触发
+    if (!window.turnstile || typeof window.turnstile.render !== "function") {
+      // 脚本未就绪（包含「还没注入」）→ 就绪后自动重画。原实现是直接 return，注释写着「等脚本就绪事件自动触发」，
+      // 但那个「就绪事件」正是会抛异常的 turnstile.ready()，等于压根没有兜底。
+      if (!ready) ensureTurnstileScript().then((ok) => { if (ok) renderTurnstile(true); });
       return;
     }
     if (turnstileWidgetId) {
-      window.turnstile.reset(turnstileWidgetId);
+      try { window.turnstile.reset(turnstileWidgetId); } catch (_) {}
       return;
     }
     try {
@@ -1495,11 +1522,14 @@
   }
 
   // 注册表单的 Turnstile widget（与留言墙共用同一个 Site Key）
-  function renderRegisterTurnstile() {
+  function renderRegisterTurnstile(ready) {
     const container = $("registerTurnstile");
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
-    if (typeof window.turnstile === "undefined") return;
+    if (!window.turnstile || typeof window.turnstile.render !== "function") {
+      if (!ready) ensureTurnstileScript().then((ok) => { if (ok) renderRegisterTurnstile(true); });
+      return;
+    }
     if (registerWidgetId) {
       try { window.turnstile.reset(registerWidgetId); } catch (_) {}
       return;
@@ -1517,6 +1547,8 @@
   }
 
   // 拉取公开配置（仅 Turnstile Site Key，非密钥），成功后渲染各处 widget
+  // 这里就是「首绘之后」：fetch 至少要一个来回（实测 200ms+，排在 FCP 之后），
+  // 所以 api.js 的注入点自然落在首屏之后，不会挤首屏带宽。
   async function loadTurnstileConfig() {
     try {
       const res = await fetch("/api/config", { credentials: "same-origin", cache: "no-store" });
@@ -1600,7 +1632,14 @@
       const name = (currentUser && currentUser.username ? currentUser.username : ((($("guestName") || {}).value || "").trim()));
       if (msg) { msg.hidden = false; msg.textContent = "钉上中…"; msg.className = "guestbook-msg"; }
       if (submitBtn) submitBtn.disabled = true;
-      const tsToken = (turnstileSiteKey && typeof window.turnstile !== "undefined") ? window.turnstile.getResponse(turnstileWidgetId) : null;
+      // 脚本还没到（刚打开页面就点提交）→ 先等它，别把「还没加载完」误报成「没做人机验证」
+      if (turnstileSiteKey && !(window.turnstile && typeof window.turnstile.render === "function")) {
+        if (msg) { msg.hidden = false; msg.textContent = "人机验证加载中…"; msg.className = "guestbook-msg"; }
+        await ensureTurnstileScript();
+        renderTurnstile();
+      }
+      const tsToken = (turnstileSiteKey && turnstileWidgetId && window.turnstile)
+        ? window.turnstile.getResponse(turnstileWidgetId) : null;
       if (turnstileSiteKey && !tsToken) {
         if (msg) { msg.hidden = false; msg.textContent = "请先完成人机验证"; msg.className = "guestbook-msg err"; }
         if (submitBtn) submitBtn.disabled = false;
@@ -2126,9 +2165,9 @@
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
   bindGuestbookForm();
   loadTurnstileConfig();
-  if (window.turnstile && window.turnstile.ready) {
-    window.turnstile.ready(() => { renderTurnstile(); renderRegisterTurnstile(); });
-  }
+  // 这里**不要**再写 turnstile.ready(...)：api.js 是异步注入的，ready() 会抛
+  // 「Remove async/defer from the Turnstile api.js script tag」异常（见 ensureTurnstileScript 的说明）。
+  // 脚本就绪后的渲染由 renderTurnstile / renderRegisterTurnstile 内部自己接续。
   if (composeBack) composeBack.addEventListener("click", () => { editingSlug = ""; if (composeSubmit) composeSubmit.textContent = "发布文章"; showView("home"); });
 
   // ===== 会员会话 =====
@@ -2278,7 +2317,14 @@
     const fd = new FormData(registerForm);
     registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";
     setAuthState("loading");
-    const tsToken = (turnstileSiteKey && typeof window.turnstile !== "undefined") ? window.turnstile.getResponse(registerWidgetId) : null;
+    // 同留言墙：脚本还没到就先等它，避免「脚本没加载」被误报成「没做人机验证」
+    if (turnstileSiteKey && !(window.turnstile && typeof window.turnstile.render === "function")) {
+      registerMsg.textContent = "人机验证加载中…"; registerMsg.className = "form-msg";
+      await ensureTurnstileScript();
+      renderRegisterTurnstile();
+    }
+    const tsToken = (turnstileSiteKey && registerWidgetId && window.turnstile)
+      ? window.turnstile.getResponse(registerWidgetId) : null;
     if (turnstileSiteKey && !tsToken) {
       registerMsg.textContent = "请先完成人机验证"; registerMsg.className = "form-msg err";
       triggerState("error", 2500);

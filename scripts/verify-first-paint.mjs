@@ -258,13 +258,80 @@ console.log("\n[8] 负向自检：把上面的判定逻辑作用在「改坏的�
     isBuildArtifactBody("正文提到 /generated/body-images/ 目录") === false);
 }
 
-console.log("\n[9] 台账（记录本轮线上实测，供以后对比）");
+console.log("\n[9] Turnstile 在首绘之后才注入，且不用会抛异常的 ready()");
+{
+  // 事故背景（2026-09-15 线上控制台，用户截图）：
+  //   Uncaught TurnstileError: [Cloudflare Turnstile] Remove async/defer from the Turnstile api.js
+  //   script tag before using turnstile.ready().
+  // 成因：index.html 用 <script src=".../turnstile/v0/api.js" async defer> 加载，app.js 又调 turnstile.ready()。
+  // 这两件事不可兼得 —— api.js 带 async/defer 时 ready() **必然抛异常**（热缓存下必现：api.js 先于 app.js 执行，
+  // 冷缓存则相反、恰好躲过，所以本地冷启动复现不出来，见 .diag/turnstile-probe.mjs）。
+  // 而且原来那句 return 的注释写着「等脚本就绪事件自动触发」，可那个「就绪事件」正是会抛异常的 ready() ——
+  // 等于压根没有兜底：widget 画不画得出来，全看 /api/config 和 api.js 谁先返回（竞态）。
+  // 改成「app.js 自己注入 api.js + 只听 <script> 的 load 事件」后，两边都不冲突，还顺带把它移出首屏关键路径。
+  const htmlNoComment = htmlSrc.replace(/<!--[\s\S]*?-->/g, "");
+
+  const noReadyCall = (src) => !/turnstile\.ready\s*\(/.test(strip(src));
+  check("app.js 不再调用 turnstile.ready()", noReadyCall(appSrc), "又出现了 turnstile.ready(");
+  check("变异①（把 ready() 写回启动段）会被判红",
+    noReadyCall(appSrc.replace("bindGuestbookForm();", "bindGuestbookForm(); window.turnstile.ready(function(){});")) === false);
+
+  check("index.html 里没有 Turnstile 的脚本标签（改由 app.js 注入）",
+    !/<script[^>]+challenges\.cloudflare\.com/i.test(htmlNoComment),
+    "index.html 仍在 <script async defer> 里加载 api.js，会与 turnstile.ready() 互斥");
+  check("api.js 的 URL 只出现在 app.js 的常量定义里（不散落、也不会被写回 HTML）",
+    (appCode.match(/challenges\.cloudflare\.com\/turnstile/g) || []).length === 1 && appCode.includes("TURNSTILE_API_URL"),
+    "URL 出现 " + (appCode.match(/challenges\.cloudflare\.com\/turnstile/g) || []).length + " 次");
+  check("注入用 render=explicit（不扫 DOM 自动渲染，避免无谓开销）",
+    /https:\/\/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js\?render=explicit/.test(appCode),
+    "URL 缺少 render=explicit");
+
+  const ensureBody = (() => {
+    const i = appCode.indexOf("function ensureTurnstileScript()");
+    if (i < 0) return "";
+    const j = appCode.indexOf("function renderTurnstile", i);
+    return appCode.slice(i, j < 0 ? i + 1400 : j);
+  })();
+  check("注入只认 <script> 的 load/error 事件",
+    /\.onload\s*=/.test(ensureBody) && /\.onerror\s*=/.test(ensureBody),
+    "缺少 onload/onerror");
+  check("加载失败会清空 promise（下次交互可重试，不是静默终态）",
+    /onerror[\s\S]{0,140}turnstileScriptPromise = null/.test(ensureBody),
+    "失败分支未清空 turnstileScriptPromise");
+  check("脚本未就绪时不是直接 return，而是等就绪后重画",
+    /if \(!ready\) ensureTurnstileScript\(\)\.then/.test(appCode),
+    "未找到「就绪后重画」的分支");
+
+  // 静态证明「首绘之后才注入」：注入点是配置拉取（至少一个 RTT，实测排在 FCP 之后）的下一行，
+  // 启动段本身不碰 ensureTurnstileScript。
+  check("注入点是 /api/config 到齐之后（不在启动段直连）",
+    /async function loadTurnstileConfig\(\)[\s\S]{0,700}?renderTurnstile\(\);[\s\S]{0,80}?renderRegisterTurnstile\(\);/.test(appCode) &&
+    !/^\s*ensureTurnstileScript\(\);\s*$/m.test(appCode),
+    "启动段直接注入了脚本");
+  check("保留 preconnect（注入虽晚，握手提前）",
+    /<link rel="preconnect" href="https:\/\/challenges\.cloudflare\.com"/.test(htmlSrc),
+    "preconnect 缺失");
+
+  check("提交路径会先等脚本（不把「没加载完」误报成「没做人机验证」）",
+    (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length >= 2,
+    "只有 " + (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length + " 处等待");
+  check("读 token 前先确认 widget 已渲染（id 非空），不会把 null 交给 getResponse",
+    /turnstileSiteKey && turnstileWidgetId && window\.turnstile[\s\S]{0,90}?getResponse\(turnstileWidgetId\)/.test(appCode) &&
+    /turnstileSiteKey && registerWidgetId && window\.turnstile[\s\S]{0,90}?getResponse\(registerWidgetId\)/.test(appCode),
+    "getResponse 的参数仍可能为 null");
+}
+
+console.log("\n[10] 台账（记录本轮线上实测，供以后对比）");
 {
   // 2026-09-15 用真实浏览器（本机 Edge + CDP，scripts/perf-probe.mjs）实测，非估算：
   console.log("  暖缓存：首页列表/侧栏 368ms · 文章正文 1171ms（其中 ~608ms 花在装饰请求上）");
   console.log("  冷缓存：FCP 1296ms（字体阻塞 ~400ms）· 首页列表 1425ms");
   console.log("  详情快照：16 篇里 7 篇含内嵌图，含图平均 530KB，最大 1,148,543 字节；不含图仅 0.8KB");
   console.log("  字体：CSS 未压缩 339KB / gzip 91KB / 303 条 @font-face / 101 个子集");
+  console.log("  Turnstile：api.js 原先 +515ms 就开始下载（和 app.js 抢首屏）→ 已改为首绘后注入");
+  console.log("    控制台里 'normal?lang=zh-cn' 那条 OTS 字体报错 + 两条 'No available adapters.'");
+  console.log("    来自挑战 iframe 内部（challenges.cloudflare.com/cdn-cgi/challenge-platform/…/normal?lang=zh-cn），");
+  console.log("    跨域、非本站代码，本站无法也不该去修 —— 本地实测证据见 .diag/local-turnstile-check.mjs");
   check("探针脚本仍在（以后要复测就用它）",
     fs.existsSync(path.join(here, "perf-probe.mjs")) || fs.existsSync(path.join(root, ".diag", "perf-probe.mjs")),
     "没有找到真实浏览器性能探针");
