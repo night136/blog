@@ -228,12 +228,11 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 }
 .lunar-clock strong { color: var(--accent-dark); font-weight: 700; }
 .lunar-clock .lunar-time { color: var(--text-faint); font-size: 12px; letter-spacing: .5px; }
-/* 窄屏下这行是「按需加载农历库」的入口（不点就不下载 426KB） */
-.lunar-clock[data-lunar-cta="1"] { cursor: pointer; }
-.lunar-clock[data-lunar-cta="1"]:active { transform: scale(.97); }
-.lunar-clock .lunar-hint {
-  font-size: 12px; letter-spacing: .3px; color: var(--accent-dark);
-  background: var(--accent-soft); border-radius: 999px; padding: 1px 9px;
+/* 生肖那截（「（马）」）在窄屏隐掉：农历数据已内联（不再有「点按加载」这一步），
+   窄屏也总能显示农历日期，但横向空间不够，就舍掉最不关键的一截。 */
+@media (max-width: 980px) {
+  .lunar-clock { flex-wrap: wrap; justify-content: center; }
+  .lunar-clock .lunar-sx { display: none; }
 }
 
 /* ── 搜索 ── */
@@ -984,8 +983,6 @@ body.lightbox-open { overflow: hidden; }
 .lunar-cal-cell.today .cal-solar { color: var(--accent-dark); }
 .lunar-cal-cell.today .cal-lunar { color: var(--accent-dark); }
 .lunar-shichen { margin-top: 8px; font-size: 11px; color: var(--text-faint); text-align: center; }
-/* 农历库加载失败时整块可点重试。只有 failed 才给手型 —— 正常/加载中不可点，避免误触 */
-#lunarWidget[data-lunar-state="failed"] { cursor: pointer; }
 
 /* ===== Hero 头像 ===== */
 .hero-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: transparent; display: block; box-shadow: var(--shadow); margin-bottom: 14px; }

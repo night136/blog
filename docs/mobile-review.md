@@ -1,5 +1,8 @@
 # 移动端专项审查（2026-09-12）
 
+> ⚠️ 后续变更（2026-09-15）：文中关于 `assets/vendor/lunar.js`（426KB）的方案已被取代 ——
+> 该库已删除，农历数据内联进 `assets/app.js`，首屏净省约 108KB。详见 `docs/lunar-inline.md`。
+
 审查范围：`index.html`、`assets/style.css`(1351 行，6 处媒体查询)、`assets/app.js`、`_headers`。
 所有结论均来自代码实证，未凭印象推断。
 

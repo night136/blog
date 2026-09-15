@@ -16,35 +16,42 @@ function check(name, cond, detail = "") {
   else { fail++; console.log("  ❌ " + name + (detail ? "\n     实际: " + detail : "")); }
 }
 
-console.log("\n[1] 农历库：窄屏必须按需加载，不得无条件下载 426KB");
+console.log("\n[1] 农历：数据内联，窄屏不再需要「按需加载」");
 {
+  // 这一节的前身是「窄屏不得无条件下载 426KB 的 lunar.js」。数据内联后，
+  // 这个权衡整个消失了：农历随 app.js 一起到达，窄屏也照样能显示农历日期。
+  // 断言前剥注释：改动说明里会**提到** lunar.js（解释为什么删它），
+  // 全文匹配会把注释误判成引用。
+  const appCode = appSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  check("农历数据确实内联在 app.js 里（不再依赖任何外部脚本）",
+    /var LUNAR_YEAR_INFO = \[/.test(appCode) && /var LUNAR_JIEQI_DAYS =/.test(appCode) &&
+    !/lunar\.js|loadLunarLib|lunarLibState/.test(appCode),
+    "未找到内联数据，或仍残留外部加载逻辑");
+
   check("不再存在「无条件注入」的 IIFE 加载器",
     !/\(function\s+loadLunarLib\s*\(\)/.test(appSrc),
     "又出现了无条件的 loadLunarLib IIFE");
 
-  check("自动加载被 isNarrow() 否定条件包住（宽屏才自动加载）",
-    /if\s*\(\s*!isNarrow\(\)\s*\)\s*\{[\s\S]{0,240}loadLunarLib/.test(appSrc),
-    "未找到 `if (!isNarrow())` 包裹的自动加载");
-
-  check("存在窄屏点击入口（点 hero 那行才加载）",
-    /lunarClockEl\.addEventListener\(\s*"click"/.test(appSrc),
-    "未找到 lunarClock 的 click 按需加载入口");
-
-  check("窄屏宽度变化时会补加载（横竖屏/桌面缩放）",
-    /narrowMQ\.addEventListener\(\s*"change"/.test(appSrc),
-    "未找到 matchMedia change 监听");
+  check("窄屏也渲染农历日期（不必再点按才显示）",
+    /function tickClock[\s\S]{0,1400}?lu\.month \+ "月" \+ lu\.day/.test(appSrc) &&
+    !/data-lunar-cta|lunarCta/.test(appSrc),
+    "hero 行未渲染农历日期，或仍保留按需加载入口");
 
   check("已删除「农历组件加载中…」永久占位（改为显示时辰 + 时间）",
-    !/农历组件加载中/.test(appSrc),
+    !/农历组件加载中|农历加载中/.test(appSrc),
     "仍存在只显示占位的降级文案 —— 库未加载时该行应当仍有用");
 
   check("已彻底移除旧的 updateLunar",
     !/\bupdateLunar\b/.test(appSrc),
     "updateLunar 仍在，重构不完整");
 
-  check("时辰由本地地支推算，不依赖 Lunar",
+  check("时辰由本地地支推算，不依赖任何库",
     /function shichenOf\(/.test(appSrc) && /DI_ZHI\[idx\]/.test(appSrc),
     "未找到本地时辰推算");
+
+  check("窄屏宽度变化时补渲染侧栏挂件（横竖屏/桌面缩放）",
+    /narrowMQ\.addEventListener\(\s*"change"/.test(appSrc),
+    "未找到 matchMedia change 监听");
 }
 
 console.log("\n[2] 农历重活不得挂在秒级定时器上");
@@ -128,17 +135,22 @@ console.log("\n[4] 触屏输入框必须 ≥16px（iOS 聚焦自动放大的根�
     "guestbook 规则位置=" + gbRule + "，触屏块位置=" + touchIdx);
 }
 
-console.log("\n[5] 按需加载的交互样式");
+console.log("\n[5] hero 农历行的窄屏适配");
 {
-  check(".lunar-clock 有可点击态（data-lunar-cta）",
-    /\.lunar-clock\[data-lunar-cta="1"\]\s*\{[^}]*cursor:\s*pointer/.test(cssSrc),
-    "未找到 data-lunar-cta 的 cursor:pointer");
-  check("存在 .lunar-hint 提示样式",
-    /\.lunar-hint\s*\{/.test(cssSrc),
-    "未找到 .lunar-hint 样式");
-  check("app.js 会设置 data-lunar-cta",
-    /dataset\.lunarCta/.test(appSrc),
-    "未找到 dataset.lunarCta 赋值");
+  // 数据内联后窄屏也能显示农历，但横向空间依旧紧张：生肖那截在窄屏隐掉，
+  // 并且允许换行 —— 320px 的机器上「丙午年八月初五 · 申时 15:52:05」会顶到边。
+  check("窄屏隐藏生肖那截（.lunar-sx）",
+    /@media \(max-width: 980px\)[\s\S]{0,220}\.lunar-clock \.lunar-sx\s*\{\s*display:\s*none/.test(cssSrc),
+    "未找到 .lunar-sx 的窄屏隐藏规则");
+  check("窄屏 hero 行允许换行（避免溢出胶囊）",
+    /@media \(max-width: 980px\)[\s\S]{0,160}\.lunar-clock\s*\{[^}]*flex-wrap:\s*wrap/.test(cssSrc),
+    "未找到 .lunar-clock 的窄屏 flex-wrap");
+  check(".lunar-clock 仍是胶囊样式（改动没顺手改坏外观）",
+    /\.lunar-clock\s*\{[^}]*border-radius:\s*999px/.test(cssSrc),
+    "未找到 .lunar-clock 的 999px 圆角");
+  check("已删除按需加载的交互样式（data-lunar-cta / .lunar-hint）",
+    !/data-lunar-cta|lunar-hint/.test(cssSrc),
+    "仍残留按需加载时代的样式");
 }
 
 console.log("\n[6] 弹窗：矮屏 / 横屏 / 键盘弹出时必须能滚到顶部");

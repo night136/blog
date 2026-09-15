@@ -13,8 +13,8 @@ blog-site/
 ├── index.html              # 博客前台（单页应用）
 ├── assets/
 │   ├── style.css           # 样式
-│   ├── app.js              # 前端逻辑：fetch /api/posts
-│   └── vendor/lunar.js     # 农历计算库
+│   ├── app.js              # 前端逻辑：fetch /api/posts（农历数据表也内联在此，见 docs/lunar-inline.md）
+│   └── vendor/             # 第三方资源（qrcode / highlight）
 ├── content/posts/          # 文章源 md（迁移前的内容备份，可留可删）
 │   ├── *.md
 │   └── index.json

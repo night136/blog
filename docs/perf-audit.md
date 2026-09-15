@@ -1,5 +1,8 @@
 # 博客性能审计记录（2026-08-25）
 
+> ⚠️ 后续变更（2026-09-15）：文中关于 `assets/vendor/lunar.js`（426KB）的方案已被取代 ——
+> 该库已删除，农历数据内联进 `assets/app.js`，首屏净省约 108KB。详见 `docs/lunar-inline.md`。
+
 > 适用站点：Cloudflare Pages 博客（Cloudflare Pages Functions + D1）
 > 目的：定位「文章加载慢 / 首页卡顿 / 小米浏览器布局错乱」等问题的根因并优化。
 

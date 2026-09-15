@@ -1618,32 +1618,202 @@
   const SHICHEN_RANGE = ["23:00–01:00","01:00–03:00","03:00–05:00","05:00–07:00","07:00–09:00","09:00–11:00","11:00–13:00","13:00–15:00","15:00–17:00","17:00–19:00","19:00–21:00","21:00–23:00"];
   const pad2 = (n) => String(n).padStart(2, "0");
 
-  // lunar.js 体积 426KB（br 约 110KB）。宽屏照旧空闲时自动加载；窄屏（≤980px）右侧栏
-  // 整体 display:none，详细农历与「此刻」时钟都看不到，唯一用到 Lunar 的只有 hero 里这行干支
-  // —— 不值得让每个手机访客都下载 110KB。故窄屏改为「按需加载」：先用本地地支算出时辰 + 时间
-  // （不依赖 lunar.js），用户点那行才加载库并升级为干支/农历月日。
+  // ===== LUNAR-INLINE-START =====
+  // 内联农历（替代原先 426KB / br 110KB 的 assets/vendor/lunar.js）。
   //
-  // ⚠️ 加载失败绝不能是「静默终态」（2026-09-15 修）：原先 onerror 只把状态置 failed 就收尾，
-  // 而失败文案只在窄屏渲染 —— 于是宽屏用户看到的是「hero 行一切正常、右侧农历挂件永远是 —」。
-  // 一次偶发失败（跨境下载被掐断）就让农历永久失灵，既没有提示、也没有任何恢复途径。
-  // 现在两条失败路径都要走：① 明确 onerror；② 请求挂着不返回（看门狗超时）—— 后者在跨境
-  // 链路上更常见，原先会让状态永远停在 loading。失败后退避自动重试，用尽则把重试入口交给用户。
+  // 为什么：本站只用到「农历日期 / 干支生肖 / 24 节气 / 农历月历」四样，却要为每个访客
+  // 下载一个外部脚本。而它有一个致命的失败模式 —— 文档卸载会中止未完成的请求，且
+  // max-age 缓存只有**下载完成**后才写入，于是「刷得比下载快就永远下不完」：连续刷新
+  // 时农历一直都是空的。内联后数据随 app.js 一起到达，这一整类问题不复存在
+  // （连带删掉了加载状态机 / 退避重试 / 看门狗 / 预加载）。
   //
-  // 为什么「连续刷新」挂件总是空的：文档卸载会中止未完成的请求，而 max-age 缓存只有**下载完成**
-  // 后才写入 —— 刷得比 110KB 下载快，就每次都从头开始、永远下不完。桌面端已用 <link rel=preload>
-  // （见 index.html，带 media 门控，窄屏不受影响）把它提前到解析阶段下载，缩短这个窗口。
-  const LUNAR_SRC = "assets/vendor/lunar.js";
-  const LUNAR_MAX_ATTEMPTS = 3;
-  const LUNAR_RETRY_DELAYS = [1500, 5000];   // 第 1、2 次失败后的退避（ms）
-  const LUNAR_WATCHDOG_MS = 15000;           // 既不 load 也不 error（连接挂住）也算失败
-  const LUNAR_HINT_LOADING = '<span class="lunar-hint">农历加载中…</span>';
-  const LUNAR_HINT_FAIL = '<span class="lunar-hint">农历加载失败 · 点按重试</span>';
-  const LUNAR_HINT_RETRYING = '<span class="lunar-hint">农历重试中…</span>';
-  const LUNAR_HINT_FIND = '<span class="lunar-hint">查农历</span>';
-  let lunarLibState = "idle"; // idle | loading | ready | failed
-  let lunarAttempts = 0;      // 已发起的加载次数（自动重试的预算依据）
-  let lunarRetryTimer = 0;    // 自动重试定时器
-  let lunarWatchdogTimer = 0; // 单次加载的超时看门狗
+  // 数据由 scripts/gen-lunar-data.mjs 从原库导出：202 年农历年表 + 4872 个节气日，
+  // 原始约 6.3KB、gzip 后不足 1KB。运行时只做「日数推算」，没有任何天文计算。
+  // 正确性由 scripts/verify-lunar-core.mjs 对着黄金基准逐日全量比对（见 docs/lunar-inline.md）。
+  //
+  // LUNAR_YEAR_INFO 每年一项（覆盖 1899..2100）：
+  //   低 4 位 = 闰月月份（0 = 无闰月）；bit16 = 闰月是大月；bit15..4 = 正月..腊月是否大月
+  var LUNAR_Y0 = 1899;
+  var LUNAR_YEAR_INFO = [
+    0xab50,0x4bd8,0x4ae0,0xa570,0x54d5,0xd260,0xd950,0x16554,0x56a0,
+    0x9ad0,0x55d2,0x4ae0,0xa5b6,0xa4d0,0xd250,0x1d255,0xb540,0xd6a0,
+    0xada2,0x95b0,0x14977,0x4970,0xa4b0,0xb4b5,0x6a50,0x6d40,0x1ab54,
+    0x2b60,0x9570,0x52f2,0x4970,0x6566,0xd4a0,0xea50,0x16a95,0x5ad0,
+    0x2b60,0x186e3,0x92e0,0x1c8d7,0xc950,0xd4a0,0x1d8a6,0xb550,0x56a0,
+    0x1a5b4,0x25d0,0x92d0,0xd2b2,0xa950,0xb557,0x6ca0,0xb550,0x15355,
+    0x4da0,0xa5b0,0x14573,0x52b0,0xa9a8,0xe950,0x6aa0,0xaea6,0xab50,
+    0x4b60,0xaae4,0xa570,0x5260,0xf263,0xd950,0x5b57,0x56a0,0x96d0,
+    0x4dd5,0x4ad0,0xa4d0,0xd4d4,0xd250,0xd558,0xb540,0xb6a0,0x195a6,
+    0x95b0,0x49b0,0xa974,0xa4b0,0xb27a,0x6a50,0x6d40,0xaf46,0xab60,
+    0x9570,0x4af5,0x4970,0x64b0,0x74a3,0xea50,0x6b58,0x5ac0,0xab60,
+    0x96d5,0x92e0,0xc960,0xd954,0xd4a0,0xda50,0x7552,0x56a0,0xabb7,
+    0x25d0,0x92d0,0xcab5,0xa950,0xb4a0,0xbaa4,0xad50,0x55d9,0x4ba0,
+    0xa5b0,0x15176,0x52b0,0xa930,0x7954,0x6aa0,0xad50,0x5b52,0x4b60,
+    0xa6e6,0xa4e0,0xd260,0xea65,0xd530,0x5aa0,0x76a3,0x96d0,0x4afb,
+    0x4ad0,0xa4d0,0x1d0b6,0xd250,0xd520,0xdd45,0xb5a0,0x56d0,0x55b2,
+    0x49b0,0xa577,0xa4b0,0xaa50,0x1b255,0x6d20,0xada0,0x14b63,0x9370,
+    0x49f8,0x4970,0x64b0,0x168a6,0xea50,0x6b20,0x1a6c4,0xaae0,0x92e0,
+    0xd2e3,0xc960,0xd557,0xd4a0,0xda50,0x5d55,0x56a0,0xa6d0,0x55d4,
+    0x52d0,0xa9b8,0xa950,0xb4a0,0xb6a6,0xad50,0x55a0,0xaba4,0xa5b0,
+    0x52b0,0xb273,0x6930,0x7337,0x6aa0,0xad50,0x14b55,0x4b60,0xa570,
+    0x54e4,0xd160,0xe968,0xd520,0xdaa0,0x16aa6,0x56d0,0x4ae0,0xa9d4,
+    0xa2d0,0xd150,0xf252,0xd520
+  ];
+  // 24 节气日：自 1899 年起每年 24 个，'0'-'9' 表示 1..9 日，'a'-'n' 表示 10..23 日
+  var LUNAR_JIEQI_DAYS =
+    "5k4j6l5k6l6l7n8n8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m7m8o8o8o9o8n8n6l5k" +
+    "7m6l7m7m8o9o9o9o8n8n7l5k6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m6m8o8o8o9o8n8n6l5k7m6l" +
+    "7m7m8o9o9o9o8n8n7l5k6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m6m8o8o8o9o8n8n6l5k7m6l7m7m" +
+    "8o9o9o9o8n8n7l5k6l5k6l6m7n8n8n9o8m7m6k4j6l5l6m6m8n8o8n9o8n8m6l4j6l5l6m6m8o8o8o9o8n8n6l5k6m6l6m7m8o8o" +
+    "9o9o8n8n6l5k6l5k6l6m7n8n8n8o8m7m6k4j6l5l6l6m8n8o8n9o8n8m6l4j6l5l6m6m8o8o8o9o8n8m6l5k6m6l6m7m8o8o9o9o" +
+    "8n8n6l5k6l5k6l6m7n8n8n8o8m7m6k4j6l5k6l6m8n8o8n9o8n7m6l4j6l5l6m6m8o8o8o9o8n8m6l5j6l6l6m7m8o8o9o9o8n8n" +
+    "6l5k6l5k6l6m7n8n8n8o8m7m6k4j6l5k6l6m8n8o8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m7m8o8o9o9o8n8n6l5k" +
+    "6l5k6l6m7n8n8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m7m8o8o8o9o8n8n6l5k6l5k" +
+    "6l6l7n8n8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m6m8o8o8o9o8n8n6l5k6l5k6l6l" +
+    "7n8n8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m6m8o8o8o9o8n8n6l5k6l5k6l6l7n8n" +
+    "8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j6l6l6m6m8o8o8o9o8n8n6l5k6l5k5l6l7n8n8n8n" +
+    "7m7m6k4j6l5k6l6m7n8n8n8o8m7m6k4j6l5l6m6m8n8o8n9o8n8m6l4j6l5l6m6m8o8o8o9o8n8n6l5k5l5k5l6l7n7n8n8n7m7m" +
+    "5k4j6l5k6l6m7n8n8n8o8m7m6k4j6l5k6l6m8n8o8n9o8n8m6l4j6l5l6m6m8o8o8o9o8n8n6l5k5l5k5l6l7n7n8n8n7m7m5k4j" +
+    "6l5k6l6m7n8n8n8o8m7m6k4j6l5k6l6m8n8o8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5k5k5k5l6l7n7n8n8n7m7m5k4j6l5k" +
+    "6l6m7n8n8n8o8m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j5k5k5l6l7n7n7n8n7m7m5k4j6l5k6l6l" +
+    "7n8n8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j5k5k5l6l7n7n7n8n7m7m5k4j6l5k6l6l7n8n" +
+    "8n8n7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j5k5k5l5l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n" +
+    "7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8o9o8n8m6l5j5k5k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n8n8n8n7m7m" +
+    "6k4j6l5k6l6m7n8n8n9o8n7m6l4j6l5l6m6m8n8o8n9o8n8m6l5j5k4k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j" +
+    "6l5k6l6m7n8n8n8o8n7m6k4j6l5l6l6m8n8o8n9o8n8m6l5j5k4k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j6l5k" +
+    "6l6m7n8n8n8o8m7m6k4j6l5k6l6m8n8o8n9o8n8m6l4j5k4k5l5l7m7n7n8n7m7m5k4j5l5k5l6l7n7n8n8n7m7m5k4j6l5k6l6m" +
+    "7n8n8n8o8m7m6k4j6l5k6l6m7n8o8n9o8n7m6l4j5k4k5l5l7m7n7n8n7m7l5k4j5k5k5l6l7n7n7n8n7m7m5k4j6l5k6l6l7n8n" +
+    "8n8o8m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l6l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n" +
+    "7m7m6k4j6l5k6l6m7n8n8n9o8n7m6l4j5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n7m7m" +
+    "6k4j6l5k6l6m7n8n8n9o8n7m6l4j5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n7m7m6k4j" +
+    "6l5k6l6m7n8n8n9o8n7m6l4j5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j6l5k" +
+    "6l6m7n8n8n9o8n7m6l4j5k4k5l5l7m7n7m8n7m7l5k4i5k4k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j6l5k6l6m" +
+    "7n8n8n8o8n7m6l4j5k4k5k5l7m7n7m8n7m7l5k4i5k4k5l5l7m7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j6l5k6l6m7n8n" +
+    "8n8o8m7m6k4j5k4j5k5l7m7n7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7m5k4j5l5k5l6l7n7n8n8n7m7m5k4j6l5k6l6l7n8n8n8o" +
+    "8m7m6k4j5k4j5k5l6m7m7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7l5k4j5k5k5l6l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8o8m7m" +
+    "6k4j5k4j5k5l6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n7m7m6k4j" +
+    "5k4j5k5l6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k6l6l7n8n8n8n7m7m6k4j5k4j" +
+    "5k5l6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j5k4j5k5l" +
+    "6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j5k4j5k5l6m7m" +
+    "7m8n7m6l5k3i5k4k5k5l7m7n7m8n7m7l5k4i5k4k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j5k4j5k5l6m7m7m7n" +
+    "7m6l5k3i5k4j5k5l7m7n7m8n7m7l5k4i5k4k5l5l7m7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m6k4j5k4j5k5k6m7m7m7n7l6l" +
+    "5j3i5k4j5k5l6m7m7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7m5k4j5k5k5l6l7n7n7n8n7m7m5k4j5k4j5k5k6m7m7m7n7l6l5j3i" +
+    "5k4j5k5l6m7m7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7m5k4j5k5k5l5l7n7n7n8n7m7m5k4j5k4j5k5k6m7m7m7n7l6l5j3i5k4j" +
+    "5k5l6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4j5k5k5l5l7n7n7n8n7m7m5k4j5k4j5k5k6m7m7m7m6l6l5j3i5k4j5k5l" +
+    "6m7m7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j5k4j5k5k6m7m7m7m6l6l5j3i5k4j5k5l6m7m" +
+    "7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j5k4j4k5k6m6m7m7m6l6l5j3i5k4j5k5l6m7m7m8n" +
+    "7m6l5k3i5k4k5k5l7m7n7m8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j5k4j4k5k6m6m7m7m6l6l5j3i5k4j5k5l6m7m7m7n7m6l" +
+    "5k3i5k4k5k5l7m7n7m8n7m7l5k4i5k4k5l5l7m7n7n8n7m7m5k4j5k4j4k5k6m6m7m7m6l6l5j3i5k4j5k5l6m7m7m7n7m6l5k3i" +
+    "5k4j5k5l6m7n7m8n7m7l5k4i5k4k5l5l7m7n7n8n7m7m5k4j5k4j4k5k6m6m7m7m6l6l5j3i5k4j5k5k6m7m7m7n7l6l5k3i5k4j" +
+    "5k5l6m7m7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7m5k4j4j4j4k5k6m6m6m7m6l6l4j3i5k4j5k5k6m7m7m7n7l6l5j3i5k4j5k5l" +
+    "6m7m7m8n7m7l5k3i5k4k5l5l7m7n7n8n7m7m5k4j4j4j4k4k6m6m6m7m6l6l4j3i5k4j5k5k6m7m7m7n7l6l5j3i5k4j5k5l6m7m" +
+    "7m8n7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4j4j4j4k4k6m6m6m7m6l6l4j3i5k4j5k5k6m7m7m7m6l6l5j3i5k4j5k5l6m7m7m8n" +
+    "7m6l5k3i5k4k5l5l7m7n7n8n7m7l5k4i4j4j4k4k6m6m6m7m6l6l4j3i5k4j5k5k6m6m7m7m6l6l5j3i5k4j5k5l6m7m7m8n7m6l" +
+    "5k3i5k4k5l5l7m7n7n8n7m7l5k4i5k5k5l5l7n7n7n8n7m7m5k4j6l5k5l6l7n7n8n8n7m7m";
+  var LUNAR_JIEQI_NAMES = ["小寒","大寒","立春","雨水","惊蛰","春分","清明","谷雨","立夏","小满","芒种","夏至","小暑","大暑","立秋","处暑","白露","秋分","寒露","霜降","立冬","小雪","大雪","冬至"];
+  var LUNAR_MONTH_CN = "正二三四五六七八九十冬腊";
+  var LUNAR_GAN = "甲乙丙丁戊己庚辛壬癸";
+  var LUNAR_ZHI = "子丑寅卯辰巳午未申酉戌亥";
+  var LUNAR_SX = "鼠牛虎兔龙蛇马羊猴鸡狗猪";
+  var LUNAR_ANCHOR = Date.UTC(1900, 0, 31) / 86400000;   // 农历 1900 年正月初一
+  var LUNAR_MIN_DAY = Date.UTC(1899, 11, 1) / 86400000;   // 支持范围下限
+  var LUNAR_MAX_DAY = Date.UTC(2100, 11, 31) / 86400000;
+
+  function lYearDays(y) {
+    var info = LUNAR_YEAR_INFO[y - LUNAR_Y0], sum = 348;
+    for (var i = 0x8000; i > 0x8; i >>= 1) if (info & i) sum++;
+    return sum + lLeapDays(y);
+  }
+  function lLeapMonth(y) { return LUNAR_YEAR_INFO[y - LUNAR_Y0] & 0xf; }
+  function lLeapDays(y) { return lLeapMonth(y) ? ((LUNAR_YEAR_INFO[y - LUNAR_Y0] & 0x10000) ? 30 : 29) : 0; }
+  function lMonthDays(y, m) { return m < 0 ? lLeapDays(y) : ((LUNAR_YEAR_INFO[y - LUNAR_Y0] & (0x10000 >> m)) ? 30 : 29); }
+  // 自当年正月初一算起，到「第 m 月」初一经过的天数（m < 0 表示闰月）
+  function lDaysBeforeMonth(y, m) {
+    var lp = lLeapMonth(y), leap = m < 0, t = leap ? -m : m, sum = 0;
+    for (var i = 1; i <= (leap ? t : t - 1); i++) {
+      sum += lMonthDays(y, i);
+      if (i === lp && !(leap && i === t)) sum += lLeapDays(y);
+    }
+    return sum;
+  }
+  // 公历日 → 天数序号。用 UTC 计算，避开夏令时/时区把结果推成 0.5 天
+  function lSolarNum(y, m, d) { return Date.UTC(y, m - 1, d) / 86400000; }
+  function lYearOffset(y) {
+    var n = 0, i;
+    if (y >= 1900) { for (i = 1900; i < y; i++) n += lYearDays(i); }
+    else { for (i = y; i < 1900; i++) n -= lYearDays(i); }
+    return n;
+  }
+  function lToSolarNum(y, m, d) { return lYearOffset(y) + lDaysBeforeMonth(y, m) + (d - 1); }
+  // 天数序号 → 农历 y/m/d（m < 0 表示闰月）
+  function lFromSolarNum(n) {
+    var off = n, y = 1900;
+    if (off >= 0) { while (off >= lYearDays(y)) { off -= lYearDays(y); y++; } }
+    else { while (off < 0) { y--; off += lYearDays(y); } }
+    var lp = lLeapMonth(y), m = 1;
+    for (var i = 1; i <= 12; i++) {
+      var len = lMonthDays(y, i);
+      if (off < len) { m = i; break; }
+      off -= len;
+      if (i === lp) {
+        var ll = lLeapDays(y);
+        if (off < ll) { m = -i; break; }
+        off -= ll;
+      }
+    }
+    return { y: y, m: m, d: off + 1 };
+  }
+  function lJieQiDay(y, n) {
+    var c = LUNAR_JIEQI_DAYS.charCodeAt((y - LUNAR_Y0) * 24 + n);
+    return c < 58 ? c - 48 : c - 87;
+  }
+  function lJieQiOf(y, m, d) {
+    for (var k = 0; k < 2; k++) {
+      var n = (m - 1) * 2 + k;
+      if (lJieQiDay(y, n) === d) return LUNAR_JIEQI_NAMES[n];
+    }
+    return null;
+  }
+  // 下一个节气：严格晚于今天（与旧库 getNextJieQi(true) 一致 —— 当天是节气时返回再下一个）
+  function lNextJieQi(y, m, d) {
+    for (var n = (m - 1) * 2; n < 24; n++) {
+      var nm = (n >> 1) + 1, dd = lJieQiDay(y, n);
+      if (nm > m || dd > d) return { name: LUNAR_JIEQI_NAMES[n], y: y, m: nm, d: dd };
+    }
+    return { name: LUNAR_JIEQI_NAMES[0], y: y + 1, m: 1, d: lJieQiDay(y + 1, 0) };
+  }
+  function lGanZhi(y) { return LUNAR_GAN.charAt((y - 4) % 10) + LUNAR_ZHI.charAt((y - 4) % 12); }
+  function lShengXiao(y) { return LUNAR_SX.charAt((y - 4) % 12); }
+  function lMonthCn(m) { return (m < 0 ? "闰" : "") + LUNAR_MONTH_CN.charAt((m < 0 ? -m : m) - 1); }
+  function lDayCn(d) {
+    var A = "一二三四五六七八九十";
+    if (d === 10) return "初十";
+    if (d === 20) return "二十";
+    if (d === 30) return "三十";
+    return (d < 10 ? "初" : d < 20 ? "十" : "廿") + A.charAt((d < 10 ? d : d % 10) - 1);
+  }
+  // 一天的农历信息（hero 行与侧栏挂件共用）。超出支持范围返回 null，调用方降级显示。
+  function lunarOf(date) {
+    var y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate();
+    var num = lSolarNum(y, m, d);
+    if (num < LUNAR_MIN_DAY || num > LUNAR_MAX_DAY) return null;
+    var lu = lFromSolarNum(num - LUNAR_ANCHOR);
+    return {
+      y: lu.y, m: lu.m, d: lu.d,
+      month: lMonthCn(lu.m), day: lDayCn(lu.d),
+      ganZhi: lGanZhi(lu.y), shengXiao: lShengXiao(lu.y),
+      jieQi: lJieQiOf(y, m, d),
+      next: lNextJieQi(y, m, d),
+    };
+  }
+  function lunarMonthDays(y, m) { return lMonthDays(y, m); }
+  function lunarToSolar(y, m, d) {
+    var dt = new Date((lToSolarNum(y, m, d) + LUNAR_ANCHOR) * 86400000);
+    return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+  }
+  function solarWeekday(y, m, d) { return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
+  // ===== LUNAR-INLINE-END =====
+
   let heroLineKey = "";       // hero 行的渲染签名，避免每秒重建 DOM
   let lunarDetailDayKey = ""; // 详细农历（节气/整月月历）已渲染的日期，避免每秒重算
   const narrowMQ = window.matchMedia("(max-width: 980px)");
@@ -1654,123 +1824,40 @@
     return { idx, name: DI_ZHI[idx] };
   }
 
-  // 判定加载失败：置状态 + 通知 hero 行与侧栏挂件 + 安排下一次退避重试。
-  // 「已就绪」直接返回 —— 用户手动重试与自动重试可能留下多个在途 script，
-  // 迟到的那个报错不能把已经好的状态打回失败。
-  function lunarFail() {
-    if (typeof Lunar !== "undefined") return;
-    lunarLibState = "failed";
-    heroLineKey = "";
-    try { tickClock(); renderLunarStatus(); } catch (e) { console.error("[lunar] 失败态渲染出错", e); }
-    if (lunarAttempts < LUNAR_MAX_ATTEMPTS) {
-      const delay = LUNAR_RETRY_DELAYS[lunarAttempts - 1] || 8000;
-      lunarRetryTimer = setTimeout(function () {
-        if (typeof Lunar === "undefined") loadLunarLib();
-      }, delay);
-    }
-  }
-
-  function loadLunarLib() {
-    if (lunarLibState === "loading" || lunarLibState === "ready") return;
-    if (typeof Lunar !== "undefined") { lunarLibState = "ready"; renderLunarStatus(); return; }
-    lunarLibState = "loading";
-    lunarAttempts++;
-    try { renderLunarStatus(); } catch (e) {}
-    const s = document.createElement("script");
-    s.src = LUNAR_SRC;
-    s.async = true;
-    // 跨境链路上「请求挂着不回来」比「明确失败」更常见：没有看门狗就永远停在 loading
-    clearTimeout(lunarWatchdogTimer);
-    lunarWatchdogTimer = setTimeout(lunarFail, LUNAR_WATCHDOG_MS);
-    s.onload = function () {
-      clearTimeout(lunarWatchdogTimer);
-      // 下载完成 ≠ 可用：被代理/过滤插件替换过内容的响应照样触发 onload
-      if (typeof Lunar === "undefined") { lunarFail(); return; }
-      lunarLibState = "ready";
-      heroLineKey = ""; lunarDetailDayKey = "";
-      try { tickClock(); renderLunarStatus(); renderLunarDetails(); updateSideClock(); }
-      catch (e) { console.error("[lunar] 就绪后渲染出错", e); }
-    };
-    s.onerror = function () { clearTimeout(lunarWatchdogTimer); lunarFail(); };
-    document.head.appendChild(s);
-  }
-
-  // 用户主动重试：重开一次预算（自动重试已用尽也能救回来），并立即发起。
-  function retryLunarNow() {
-    if (typeof Lunar !== "undefined") return;
-    clearTimeout(lunarRetryTimer);
-    lunarAttempts = 0;
-    lunarLibState = "idle";
-    loadLunarLib();
-    heroLineKey = "";
-    try { tickClock(); } catch (e) {}
-  }
-
-  // hero 那行「时辰 + 时间」：每秒调用，必须极轻 —— 只在「跨日 / 换时辰 / 库状态变化」时重建，
-  // 其余每一拍仅改秒数文本。
+  // hero 那行「农历 + 时辰 + 时间」：每秒调用，必须极轻 —— 只在「跨日 / 换时辰」时重建，
+  // 其余每一拍仅改秒数文本。农历数据已内联在 app.js 里，不必再等任何外部资源。
   function tickClock() {
     const el = $("lunarClock");
     if (!el) return;
     const now = new Date();
     const sc = shichenOf(now);
     const time = pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
-    const ready = typeof Lunar !== "undefined";
     const dayKey = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
-    const key = (ready ? "ready" : lunarLibState) + "|" + dayKey + "|" + sc.name;
+    const key = dayKey + "|" + sc.name;
     if (key === heroLineKey) {
       const t = el.querySelector(".lunar-time");
       if (t) { t.textContent = time; return; }
     }
     heroLineKey = key;
-    if (ready) {
-      const lunar = Lunar.fromDate(now);
-      el.innerHTML = "🗓 " + lunar.getYearInGanZhi() + "年（" + lunar.getYearShengXiao() + "）" +
-        lunar.getMonthInChinese() + "月" + lunar.getDayInChinese() +
+    const lu = lunarOf(now);
+    if (lu) {
+      // 生肖单独包一层：窄屏宽度紧张，用 CSS 隐掉它 —— 农历日期本身必须留下，
+      // 因为窄屏右侧栏整体隐藏，这行是唯一能看到农历的地方。
+      el.innerHTML = "🗓 " + lu.ganZhi + "年<span class=\"lunar-sx\">（" + lu.shengXiao + "）</span>" +
+        lu.month + "月" + lu.day +
         " · <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>";
-      el.title = "农历时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
-      el.dataset.lunarCta = "0";
+      el.title = "农历：" + lu.ganZhi + "年" + lu.month + "月" + lu.day +
+        " · " + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
     } else {
-      // 窄屏：这行本来就是「按需加载」的入口（三种状态各有文案，点了才下载）。
-      // 宽屏：正常情况不显示任何提示（视觉零变化），只有失败/重试中才提示 ——
-      // 否则用户永远不知道右侧农历挂件为什么一直空着。
-      let hint = "";
-      if (isNarrow()) {
-        hint = lunarLibState === "loading" ? LUNAR_HINT_LOADING
-          : lunarLibState === "failed" ? LUNAR_HINT_FAIL
-          : LUNAR_HINT_FIND;
-      } else if (lunarLibState === "failed") {
-        hint = LUNAR_HINT_FAIL;
-      } else if (lunarAttempts > 1) {
-        hint = LUNAR_HINT_RETRYING;
-      }
-      el.innerHTML = "🕐 <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>" + hint;
+      // 只可能是系统时间被调到支持范围（1899–2100）之外，降级为纯时辰，不留空
+      el.innerHTML = "🕐 <strong>" + sc.name + "时</strong> <span class=\"lunar-time\">" + time + "</span>";
       el.title = "时辰：" + sc.name + "时（" + SHICHEN_RANGE[sc.idx] + "）";
-      // 宽屏也能点：失败/重试中时把它变成人工救回来的入口（原先只有窄屏可点）
-      const canRetry = isNarrow() ? lunarLibState !== "loading" : (lunarLibState === "failed" || lunarAttempts > 1);
-      el.dataset.lunarCta = canRetry ? "1" : "0";
     }
-  }
-
-  // 侧栏农历挂件的「未就绪」态：库没加载好时，主行别一直挂个「—」（看着就是坏了）。
-  // 只改这一行，其余占位保持原样 —— 长度相近，不会引起侧栏布局跳动；
-  // 就绪后 renderLunarDetails() 会把整块内容填回来。
-  function renderLunarStatus() {
-    const wrap = $("lunarWidget");
-    const gzEl = $("lunarGanZhi");
-    if (!gzEl) return;                          // 挂件不在页面上（如 404 页复用本脚本时）
-    if (typeof Lunar !== "undefined") {         // 就绪：清掉状态痕迹，交给正常渲染
-      if (wrap) delete wrap.dataset.lunarState;
-      return;
-    }
-    const failed = lunarLibState === "failed";
-    gzEl.textContent = failed ? "农历加载失败 · 点按重试" : "农历加载中…";
-    if (wrap) wrap.dataset.lunarState = failed ? "failed" : "loading";
   }
 
   // 详细农历挂件（右侧栏）：节气 + 整月月历属于「一天只变一次」的重活，按日缓存。
   // 原实现把它挂在 1 秒定时器里 —— 等于每秒重算节气并重建 42 个日历格子，必须避免。
   function renderLunarDetails() {
-    if (typeof Lunar === "undefined") return;
     const now = new Date();
     const dayKey = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
     if (dayKey === lunarDetailDayKey) return;
@@ -1779,49 +1866,33 @@
     const jqEl = $("lunarJieQi");
     const daysEl = $("lunarDays");
     const scEl = $("lunarShiChen");
-    if (!gzEl && !monthEl && !jqEl && !daysEl && !scEl) return; // 窄屏没有这些节点，直接跳过
+    if (!gzEl && !monthEl && !jqEl && !daysEl && !scEl) return; // 挂件不在页面上（404 页复用本脚本）
+    const lu = lunarOf(now);
+    if (!lu) return;                                            // 系统时间超出支持范围，保留占位
     lunarDetailDayKey = dayKey;
-    const lunar = Lunar.fromDate(now);
-    const gz = lunar.getYearInGanZhi();
-    const shengxiao = lunar.getYearShengXiao();
-    const month = lunar.getMonthInChinese();
-    const day = lunar.getDayInChinese();
     const sc = shichenOf(now);
-    if (gzEl) gzEl.textContent = `${gz}年 · ${shengxiao}`;
-    if (monthEl) monthEl.textContent = `农历 ${month}月 · ${day}`;
+    if (gzEl) gzEl.textContent = `${lu.ganZhi}年 · ${lu.shengXiao}`;
+    if (monthEl) monthEl.textContent = `农历 ${lu.month}月 · ${lu.day}`;
     if (scEl) scEl.textContent = `${sc.name}时（${SHICHEN_RANGE[sc.idx]}）`;
 
     // 24节气：今日节气 or 下一个节气倒计时
     if (jqEl) {
-      const current = lunar.getCurrentJieQi();
-      if (current) {
-        jqEl.textContent = `今日节气 · ${current.getName()}`;
-      } else {
-        try {
-          const next = lunar.getNextJieQi(true);
-          if (next && next.getSolar) {
-            const s = next.getSolar();
-            const today = Solar.fromYmd(now.getFullYear(), now.getMonth() + 1, now.getDate());
-            const diff = Math.round((new Date(s.getYear(), s.getMonth() - 1, s.getDay()).getTime() - new Date(today.getYear(), today.getMonth() - 1, today.getDay()).getTime()) / 86400000);
-            if (diff === 1) jqEl.textContent = `明日节气 · ${next.getName()}`;
-            else jqEl.textContent = `${diff} 天后 · ${next.getName()}`;
-          } else { jqEl.textContent = ""; }
-        } catch (_) { jqEl.textContent = ""; }
-      }
+      if (lu.jieQi) {
+        jqEl.textContent = `今日节气 · ${lu.jieQi}`;
+      } else if (lu.next) {
+        const todayNum = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+        const diff = Math.round((Date.UTC(lu.next.y, lu.next.m - 1, lu.next.d) - todayNum) / 86400000);
+        jqEl.textContent = diff === 1 ? `明日节气 · ${lu.next.name}` : `${diff} 天后 · ${lu.next.name}`;
+      } else { jqEl.textContent = ""; }
     }
 
     // 当月农历月历格子（像日历那样显示整月）
     if (daysEl) {
       try {
         const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-        const lunarYear = lunar.getYear();
-        const lunarMonth = lunar.getMonth();
-        const lunarDay = lunar.getDay();
-        const month = LunarMonth.fromYm(lunarYear, lunarMonth);
-        const dayCount = month.getDayCount();
-        const firstLunar = Lunar.fromYmd(lunarYear, lunarMonth, 1);
-        const firstSolar = firstLunar.getSolar();
-        const startWeek = firstSolar.getWeek(); // 0=周日
+        const dayCount = lunarMonthDays(lu.y, lu.m);
+        const first = lunarToSolar(lu.y, lu.m, 1);
+        const startWeek = solarWeekday(first.y, first.m, first.d); // 0=周日
         const todayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
         let html = weekdays.map((w) => `<div class="lunar-cal-head">${w}</div>`).join("");
@@ -1829,19 +1900,16 @@
         for (let i = 0; i < startWeek; i++) html += `<div class="lunar-cal-cell empty"></div>`;
         // 日期格子
         for (let d = 1; d <= dayCount; d++) {
-          const ld = Lunar.fromYmd(lunarYear, lunarMonth, d);
-          const sd = ld.getSolar();
-          const solarYmd = `${sd.getYear()}-${sd.getMonth()}-${sd.getDay()}`;
-          const isToday = solarYmd === todayKey;
-          const lunarName = ld.getDayInChinese();
-          html += `<div class="lunar-cal-cell ${isToday ? "today" : ""}"><span class="cal-solar">${sd.getDay()}</span><span class="cal-lunar">${lunarName}</span></div>`;
+          const sd = lunarToSolar(lu.y, lu.m, d);
+          const isToday = `${sd.y}-${sd.m}-${sd.d}` === todayKey;
+          html += `<div class="lunar-cal-cell ${isToday ? "today" : ""}"><span class="cal-solar">${sd.d}</span><span class="cal-lunar">${lDayCn(d)}</span></div>`;
         }
         // 补齐最后一行
         const totalCells = startWeek + dayCount;
         const tail = (7 - (totalCells % 7)) % 7;
         for (let i = 0; i < tail; i++) html += `<div class="lunar-cal-cell empty"></div>`;
         daysEl.innerHTML = `<div class="lunar-calendar">${html}</div>`;
-      } catch (_) { daysEl.textContent = "—"; }
+      } catch (e) { console.error("[lunar] 月历渲染失败", e); daysEl.textContent = "—"; }
     }
   }
 
@@ -2438,37 +2506,16 @@
   if (memberNav) memberNav.addEventListener("click", async () => { const user = await checkSession(); renderMember(user); });
 
   // ===== 启动 =====
+  // 农历数据就在本文件里，随时可算 —— 没有「加载中」这个状态，也不需要任何重试机制。
   tickClock();
-  // 侧栏挂件先进入「农历加载中…」，别让主行挂着「—」等下完 110KB（看着像坏了）
-  try { renderLunarStatus(); } catch (e) {}
-
-  // 农历库（426KB / br 87KB）：宽屏空闲时自动加载；窄屏不自动加载 —— 那里看不到详细农历，
-  // 点 hero 那行才按需拉取（省 87KB）。加载完成前 hero 行显示「时辰 + 时间」，仍然有用。
-  if (!isNarrow()) {
-    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(loadLunarLib, { timeout: 2000 });
-    else setTimeout(loadLunarLib, 0);
-  }
-  // 窄 → 宽（横竖屏切换 / 桌面缩放窗口）时补加载
+  // 窄 → 宽（横竖屏切换 / 桌面缩放窗口）时侧栏才出现，补一次挂件渲染
   try {
     narrowMQ.addEventListener("change", (e) => {
       heroLineKey = "";
-      if (!e.matches && typeof Lunar === "undefined") loadLunarLib();
       tickClock();
-      if (!e.matches) updateSideClock();
+      if (!e.matches) { renderLunarDetails(); updateSideClock(); }
     });
   } catch (_) {}
-  // 点 hero 那行 → 立即重试加载（窄屏是「按需加载」入口；宽屏是失败后的人工补救）
-  const lunarClockEl = $("lunarClock");
-  if (lunarClockEl) {
-    lunarClockEl.addEventListener("click", retryLunarNow);
-  }
-  // 侧栏挂件：只有失败态才整块可点（避免正常浏览时误触）
-  const lunarWidgetEl = $("lunarWidget");
-  if (lunarWidgetEl) {
-    lunarWidgetEl.addEventListener("click", function () {
-      if (lunarLibState === "failed") retryLunarNow();
-    });
-  }
 
   bindInputStates();
   checkSession();
