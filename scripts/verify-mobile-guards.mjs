@@ -435,15 +435,15 @@ console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏
     broken5 !== cssSrc && !mobileCardIsFixedLeft(broken5), "变异没生效，断言可能失效");
 }
 
-console.log("\n[12] Hero 头像：必须居中，窄屏尺寸覆盖必须在基样式之后");
+console.log("\n[12] Hero 头像：贴左版式（左右 margin 不得为 auto）+ 窄屏尺寸覆盖必须在基样式之后");
 {
   // 两个历史坑（都是「看着写了、其实没生效」）：
-  // ① .hero-avatar 是 display:block + 固定宽度，而 hero 靠 text-align:center 居中 ——
-  //    text-align **管不了块级盒子**，少了左右 auto 就贴死在 .hero-text 左边。
-  //    实测改前：hero-text 内容中心 cx=632.5，头像中心 cx=397，偏移 -235.5px（下面 h1 却是居中的）。
-  // ② 窄屏 60px 曾写在 @media (max-width: 980px) 里，但那条规则在 .hero-avatar 基样式**之前** ——
+  // ① 窄屏 60px 曾写在 @media (max-width: 980px) 里，但那条规则在 .hero-avatar 基样式**之前** ——
   //    同优先级下后写的赢 ⇒ 60px 从未生效（实测手机上一直是 72px）。
-  // 所以这里不能只查「有没有写」，要**按层叠顺序**判定哪一条真正生效。
+  // ② 头像的水平位置**只**由左右 margin 决定（hero 整体靠 text-align:center，而 text-align
+  //    **管不了块级盒子**）。用户选定的版式是「头像贴左上角 + 标题与描述居中」⇒ 左右 margin 必须是 0。
+  //    一旦写成 auto 就会被静默居中（曾有一版如此，用户看后要求退回左边）。
+  // 所以这里不能只查「有没有写」，要**按层叠顺序**判定哪一条真正生效，并守住「不许自动居中」。
 
   // ⚠️ 先剥注释：注释里会**提到** .hero-avatar（解释为什么这么写），
   //    不剥的话注释文字会被当成选择器（上一节就踩过这个坑）。
@@ -476,25 +476,42 @@ console.log("\n[12] Hero 头像：必须居中，窄屏尺寸覆盖必须在基�
     const d = body.match(new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)"));
     return d ? d[1].trim() : null;
   };
-  // 「写对了」的判据：base 左右 margin auto + 最后一条设 width 的规则落在 max-width:980px 里且在 base 之后
+  // 水平 margin：兼容 `margin: a b c` 简写与 margin-left / margin-right 长写。
+  // 「上 左右」「上 左右 下」「上 右 下 左」都要认，长写覆盖简写。
+  function horizMargins(body) {
+    const sh = decl(body, "margin");
+    const p = sh ? sh.split(/\s+/).filter(Boolean) : [];
+    const pick = (i) => (p.length === 1 ? p[0] : p.length === 2 ? p[1] : p.length === 3 ? p[1] : p.length >= 4 ? p[i] : null);
+    let left = pick(3), right = pick(1);
+    const el = decl(body, "margin-left"); if (el) left = el;
+    const er = decl(body, "margin-right"); if (er) right = er;
+    return { left, right };
+  }
+  // 「写对了」的判据：① 左右 margin 不许 auto（否则头像被静默居中）
+  //                ② 最后一条设 width 的规则落在 max-width:980px 里且在 base 之后
   function heroAvatarSafe(src) {
     const rules = rulesFor(src, ".hero-avatar");
     const base = rules.find((r) => !r.media);
     if (!base) return false;
-    const parts = (decl(base.body, "margin") || "").split(/\s+/).filter(Boolean);
-    if (parts[1] !== "auto") return false;                    // 「上 左右 下」或「上 左右」两种写法都命中
+    const hm = horizMargins(base.body);
+    if (hm.left === "auto" || hm.right === "auto") return false;
     const withW = rules.filter((r) => decl(r.body, "width"));
     const eff = withW[withW.length - 1];                      // 同优先级 + 无 !important ⇒ 最后一条赢
     return !!eff && !!eff.media && /max-width:\s*980px/.test(eff.media.cond) && eff.idx > base.idx;
   }
 
-  check("基样式左右 margin 为 auto（display:block 不吃 text-align，否则头像贴左、下面是居中的 h1）",
+  check("基样式左右 margin 不得为 auto（否则块级头像被静默居中，与选定版式不符）",
     (() => {
       const base = rulesFor(cssSrc, ".hero-avatar").find((r) => !r.media);
-      const parts = base ? (decl(base.body, "margin") || "").split(/\s+/).filter(Boolean) : [];
-      return parts[1] === "auto";
+      const hm = base ? horizMargins(base.body) : { left: null, right: null };
+      return hm.left !== "auto" && hm.right !== "auto";
     })(),
-    "margin = " + (() => { const b = rulesFor(cssSrc, ".hero-avatar").find((r) => !r.media); return b ? decl(b.body, "margin") : "(没有 base 规则)"; })());
+    "水平 margin = " + (() => {
+      const b = rulesFor(cssSrc, ".hero-avatar").find((r) => !r.media);
+      if (!b) return "(没有 base 规则)";
+      const hm = horizMargins(b.body);
+      return `left=${hm.left} right=${hm.right}`;
+    })());
 
   check("窄屏尺寸由基样式**之后**的 @media (max-width: 980px) 覆盖（曾写在前面 ⇒ 死规则）",
     heroAvatarSafe(cssSrc),
@@ -506,15 +523,18 @@ console.log("\n[12] Hero 头像：必须居中，窄屏尺寸覆盖必须在基�
     })());
 
   // 口径自证：一个「窄屏写在前」的合成样本必须判红，反过来必须判绿
-  const GOOD_ORDER = ".hero-avatar { width: 72px; margin: 0 auto 14px; }\n@media (max-width: 980px) { .hero-avatar { width: 60px; } }";
-  const BAD_ORDER = "@media (max-width: 980px) { .hero-avatar { width: 60px; } }\n.hero-avatar { width: 72px; margin: 0 auto 14px; }";
-  const BAD_MARGIN = ".hero-avatar { width: 72px; margin-bottom: 14px; }\n@media (max-width: 980px) { .hero-avatar { width: 60px; } }";
-  check("自证：窄屏覆盖写在基样式之后 → 判绿（口径正确，不是恒 false）",
+  const GOOD_ORDER = ".hero-avatar { width: 72px; margin: 0 0 14px; }\n@media (max-width: 980px) { .hero-avatar { width: 60px; } }";
+  const BAD_ORDER = "@media (max-width: 980px) { .hero-avatar { width: 60px; } }\n.hero-avatar { width: 72px; margin: 0 0 14px; }";
+  const BAD_CENTER = ".hero-avatar { width: 72px; margin: 0 auto 14px; }\n@media (max-width: 980px) { .hero-avatar { width: 60px; } }";
+  const BAD_CENTER_LONGHAND = ".hero-avatar { width: 72px; margin: 0 0 14px; margin-left: auto; }\n@media (max-width: 980px) { .hero-avatar { width: 60px; } }";
+  check("自证：贴左 + 窄屏覆盖写在基样式之后 → 判绿（口径正确，不是恒 false）",
     heroAvatarSafe(GOOD_ORDER) === true);
   check("负向自检：把窄屏覆盖挪回基样式**之前**必须判红（正是那个死规则病历）",
     heroAvatarSafe(BAD_ORDER) === false);
-  check("负向自检：去掉左右 margin auto 必须判红（正是那个贴左病历）",
-    heroAvatarSafe(BAD_MARGIN) === false);
+  check("负向自检：`margin: 0 auto 14px` 必须判红（会把头像重新居中，正是被用户退回的那一版）",
+    heroAvatarSafe(BAD_CENTER) === false);
+  check("负向自检：长写 `margin-left: auto` 也要判红（简写看着没事，长写偷偷居中）",
+    heroAvatarSafe(BAD_CENTER_LONGHAND) === false);
 }
 
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
