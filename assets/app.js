@@ -90,6 +90,10 @@
   let posts = [];
   let activeTag = "全部";
   let currentSlide = 0, totalSlides = 0, slideTimer = null, hoverPaused = false;
+  // 轮播滑动手势（触屏）。suppressSlideClick 记「刚刚滑动过」的时间戳：
+  // 滑动结束后浏览器还会补发一次 click，不挡住就会顺手打开一篇文章。
+  let touchStartX = 0, touchStartY = 0, touchDx = 0, touchOnSlider = false;
+  let suppressSlideClick = 0;
   let searchQuery = "";
   let tocScrollHandler = null;
   // ⚠️ 以下状态变量必须全部声明在 IIFE 顶部。
@@ -341,6 +345,20 @@
     return fetchDynamicPosts();
   }
 
+  // 摘要与标题一字不差时就不渲染。两层都要判：
+  //   ① 数据里本来就写成了标题；② loadPosts() 会把「空摘要」回落成标题（见下方 posts 归一化）
+  // 实测线上 5 篇文章的 summary 全是空串 → 回落后那行就是标题的复制品，
+  // 在只有 200px 高的卡片里白吃一整行（「心理学的领域」上下重复出现两次）。
+  // ② 的回落做了 `[#>*` -空格]` → 空格 的替换，所以不能只比原标题。
+  function slideSummaryHtml(p) {
+    const t = String(p.title || "").trim();
+    const s = String(p.summary || "").trim();
+    const autoFromTitle = t.replace(/[#>*`\-\s]/g, " ").slice(0, 80).trim();
+    return s && s !== t && s !== autoFromTitle ? `<p class="slide-summary">${escapeHtml(s)}</p>` : "";
+  }
+  // 滑动结束后浏览器还会补发一次 click，不挡住就会顺手打开一篇文章
+  function swipeJustHappened() { return Date.now() - suppressSlideClick < 400; }
+
   // ===== 轮播 =====
   function renderSlider() {
     const top = posts.slice(0, Math.min(5, posts.length));
@@ -349,21 +367,22 @@
     // 封面按需下载：不可见时只把 URL 记在 data-bg 上，等首页真的显示出来再设背景
     // （旧实现给全部 5 张 slide 都设了 background-image，首屏一次性抢 3–5 张封面带宽）
     const ready = homeCoversReady();
+    // 非活动 slide 加 inert：读屏不会把 5 篇标题连着念一遍，里面的按钮也不进 Tab 序
     slidesEl.innerHTML = top.map((p, i) => {
       const url = coverUrl(p);
       const deferred = url && !ready;
       return `
-      <div class="slide ${i === 0 ? "active" : ""} ${url ? "" : "no-cover"}" data-slug="${escapeHtml(p.slug)}"${deferred ? ` data-bg="${escapeHtml(url)}"` : ""} style="${deferred ? "" : coverStyle(p)}">
-        <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h2 class="slide-title">${escapeHtml(p.title)}</h2><p class="slide-summary">${escapeHtml(p.summary || "")}</p><button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
+      <div class="slide ${i === 0 ? "active" : ""} ${url ? "" : "no-cover"}"${i === 0 ? "" : " inert"} data-slug="${escapeHtml(p.slug)}"${deferred ? ` data-bg="${escapeHtml(url)}"` : ""} style="${deferred ? "" : coverStyle(p)}">
+        <div class="slide-overlay"><span class="slide-tag">${escapeHtml(p.tag)}</span><h2 class="slide-title">${escapeHtml(p.title)}</h2>${slideSummaryHtml(p)}<button class="slide-read" data-slug="${escapeHtml(p.slug)}">阅读全文 →</button></div>
       </div>`;
     }).join("");
-    slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}"></button>`).join("");
-    slidesEl.querySelectorAll(".slide-read").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openPost(b.dataset.slug); }));
-    slidesEl.querySelectorAll(".slide").forEach((s) => s.addEventListener("click", () => openPost(s.dataset.slug)));
+    slideDotsEl.innerHTML = top.map((_, i) => `<button class="dot ${i === 0 ? "active" : ""}" data-i="${i}" aria-current="${i === 0 ? "true" : "false"}" aria-label="第 ${i + 1} 张，共 ${top.length} 张"></button>`).join("");
+    slidesEl.querySelectorAll(".slide-read").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); if (swipeJustHappened()) return; openPost(b.dataset.slug); }));
+    slidesEl.querySelectorAll(".slide").forEach((s) => s.addEventListener("click", () => { if (swipeJustHappened()) return; openPost(s.dataset.slug); }));
     slideDotsEl.querySelectorAll(".dot").forEach((d) => d.addEventListener("click", () => goSlide(+d.dataset.i)));
     currentSlide = 0; totalSlides = top.length; startAuto();
   }
-  function goSlide(i) { if (!totalSlides) return; currentSlide = (i + totalSlides) % totalSlides; slidesEl.querySelectorAll(".slide").forEach((s, ix) => s.classList.toggle("active", ix === currentSlide)); slideDotsEl.querySelectorAll(".dot").forEach((d, ix) => d.classList.toggle("active", ix === currentSlide)); }
+  function goSlide(i) { if (!totalSlides) return; currentSlide = (i + totalSlides) % totalSlides; slidesEl.querySelectorAll(".slide").forEach((s, ix) => { s.classList.toggle("active", ix === currentSlide); s.toggleAttribute("inert", ix !== currentSlide); }); slideDotsEl.querySelectorAll(".dot").forEach((d, ix) => { d.classList.toggle("active", ix === currentSlide); d.setAttribute("aria-current", ix === currentSlide ? "true" : "false"); }); }
   function startAuto() { if (hoverPaused) return; stopAuto(); slideTimer = setInterval(() => goSlide(currentSlide + 1), 5000); }
   function stopAuto() { if (slideTimer) clearInterval(slideTimer); slideTimer = null; }
 
@@ -2202,6 +2221,10 @@
   if (sliderEl) {
     sliderEl.addEventListener("mouseenter", () => { hoverPaused = true; stopAuto(); });
     sliderEl.addEventListener("mouseleave", () => { hoverPaused = false; startAuto(); });
+    // 触屏：左右滑动切图 + 按下即暂停。
+    // ⚠️ 触屏上上面那对 mouseenter/mouseleave 基本不会触发（合成事件不可靠），
+    // 所以「悬停暂停」对手机用户等于不存在 —— 5 秒自动轮播变成不可中断，这里必须自己接管。
+    enableSliderSwipe();
     // 滚出视口暂停自动播放，回到视口恢复（省电 + 不打扰阅读）
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver((entries) => {
@@ -2214,6 +2237,35 @@
     } else {
       startAuto();
     }
+  }
+  // 滑动判定：横向位移够大且「横向明显大于纵向」才切图 ——
+  // 一旦纵向占优就立刻让位给页面滚动（否则在轮播上下滑会被吃掉，页面滚不动）。
+  // 常量就放函数里，避免「顶层 const 声明在调用点之后」这类 TDZ 隐患。
+  function enableSliderSwipe() {
+    const SWIPE_MIN = 40, SWIPE_SLOPE = 1.2;
+    sliderEl.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) { touchOnSlider = false; return; }
+      touchOnSlider = true; touchDx = 0;
+      touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY;
+      hoverPaused = true; stopAuto();     // 手指按住期间不自动翻页
+    }, { passive: true });
+    sliderEl.addEventListener("touchmove", (e) => {
+      if (!touchOnSlider || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      if (Math.abs(dy) > Math.abs(dx) * SWIPE_SLOPE) { touchOnSlider = false; return; }  // 纵向为主 → 交给页面滚动
+      touchDx = dx;
+    }, { passive: true });
+    const endSwipe = () => {
+      if (touchOnSlider && Math.abs(touchDx) >= SWIPE_MIN) {
+        goSlide(currentSlide + (touchDx < 0 ? 1 : -1));
+        suppressSlideClick = Date.now();   // 挡住滑动后补发的 click
+      }
+      touchOnSlider = false; touchDx = 0;
+      hoverPaused = false; startAuto();    // 抬手恢复（触屏没有 mouseleave 来兜底）
+    };
+    sliderEl.addEventListener("touchend", endSwipe, { passive: true });
+    sliderEl.addEventListener("touchcancel", endSwipe, { passive: true });
   }
   if (slidePrev) slidePrev.addEventListener("click", () => goSlide(currentSlide - 1));
   if (slideNext) slideNext.addEventListener("click", () => goSlide(currentSlide + 1));

@@ -310,5 +310,83 @@ console.log("\n[10] P2 打磨：浏览器 UI 配色 / 点按反馈 / 滚动链 /
     "assets/logo.jpg 存在（476KB）却没有任何页面引用");
 }
 
+console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏可滑动");
+{
+  // 起因（真机实测，390/360px 移动视口）：
+  //   ① `.slider{height:240px}` + 卡片 align-items:flex-end ⇒ 卡片内容一高（2 行标题/2 行摘要）
+  //      就向上顶出容器，被 overflow:hidden 裁掉 —— 390px 裁 11.9px、360px 裁 37.4px，
+  //      标签药丸被拦腰切断、箭头压住标题。
+  //   ② `.slide-overlay{width:auto}` 在 flex 里是 shrink-to-fit ⇒ 同一组 5 张卡片宽度
+  //      在 46%~91%（163px~324px）之间跳，翻页时边界来回弹。
+  //   ③ 轮播没有任何 touch 监听，且 hoverPaused 只由 mouseenter 驱动 ⇒
+  //      手机既不能滑动切图、也永远无法暂停自动播放。
+  //   ④ 圆点 8×8 且无热区，箭头 42×42，都在 44px 之下。
+  const block = (css, sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
+    return m ? m[1] : null;
+  };
+  // 「.slider 里有没有写死 height」——min-height 不算（前面那个连字符被 [\s;] 挡住）
+  const sliderHasFixedHeight = (css) => {
+    const b = block(css, ".slider");
+    return !b || /(^|[\s;])height\s*:/.test(b);
+  };
+  // 「移动端卡片占满一行」——flex:1 1 auto 才能抗住内容宽度变化
+  const mobileCardIsFullWidth = (css) =>
+    /\.slide-overlay\s*\{[^}]*flex:\s*1 1 auto/.test(css);
+
+  check("轮播容器不再写死高度（改由「内容 + min-height 下限」决定）",
+    !sliderHasFixedHeight(cssSrc), "`.slider{}` 里仍有 height:" + block(cssSrc, ".slider"));
+  check("5 张 slide 叠在同一个 grid 单元格（行高 = 最高那张，容器自己长高）",
+    /\.slides\s*\{[^}]*display:\s*grid/.test(cssSrc) && /\.slide\s*\{[^}]*grid-area:\s*1\s*\/\s*1/.test(cssSrc),
+    "未使用 grid 叠放，或 .slide 缺少 grid-area");
+  check("slide 有 min-height 下限 + padding-top 呼吸位（短内容也保持画幅、长内容不贴顶）",
+    /\.slide\s*\{[^}]*min-height:\s*\d+px/.test(cssSrc) && /\.slide\s*\{[^}]*padding-top:\s*\d+px/.test(cssSrc),
+    "缺少 min-height 或 padding-top");
+  check("移动端卡片固定占满一行（不再按内容收缩）",
+    mobileCardIsFullWidth(cssSrc), "未找到 flex: 1 1 auto");
+  check("窄屏隐藏箭头（卡片满宽后箭头必然压住标题，改用滑动 + 圆点）",
+    /\.slider-arrow\s*\{\s*display:\s*none/.test(cssSrc),
+    "≤640px 仍在显示箭头（实测与卡片重叠 42px）");
+  check("封面加了底部渐变遮罩，且无封面 slide 排除在外",
+    /\.slide:not\(\.no-cover\)::after\s*\{[^}]*linear-gradient\(to top/.test(cssSrc),
+    "未找到封面渐变遮罩");
+  check("触屏圆点有 44px 纵向热区（横向只到节距，避免相邻热区重叠点错）",
+    /\.slider-dots \.dot::after\s*\{[^}]*height:\s*44px/.test(cssSrc),
+    "未找到圆点热区");
+  check("触屏箭头放大到 44×44",
+    /@media \(pointer: coarse\)\s*\{[\s\S]{0,400}?\.slider-arrow\s*\{\s*width:\s*44px/.test(cssSrc),
+    "coarse 块里没有把箭头放大到 44px");
+
+  check("轮播补了 touch 滑动监听（touchstart/move/end/cancel 四件套）",
+    ["touchstart", "touchmove", "touchend", "touchcancel"].every((t) => appSrc.includes(`addEventListener("${t}"`)),
+    "缺少某些 touch 监听");
+  check("滑动只在「横向明显占优」时才切图，纵向让位给页面滚动",
+    /Math\.abs\(dy\) > Math\.abs\(dx\) \* SWIPE_SLOPE/.test(appSrc),
+    "没有纵向让位判定（在轮播上下滑会滚不动页面）");
+  check("滑动后抑制补发的 click（否则顺手打开一篇文章）",
+    /suppressSlideClick = Date\.now\(\)/.test(appSrc) && /function swipeJustHappened\(\)/.test(appSrc),
+    "缺少 click 抑制");
+  check("手指按住即暂停自动播放（触屏没有 mouseleave 兜底，抬手必须恢复）",
+    /hoverPaused = true; stopAuto\(\);/.test(appSrc) && /hoverPaused = false; startAuto\(\);    \/\/ 抬手恢复/.test(appSrc),
+    "触屏暂停/恢复不完整");
+  check("摘要与标题重复时不渲染（空摘要会被 loadPosts 回落成标题）",
+    /autoFromTitle/.test(appSrc) && /s !== t && s !== autoFromTitle/.test(appSrc),
+    "缺少摘要去重");
+  check("非活动 slide 标 inert（读屏不连读 5 篇标题、按钮不进 Tab 序）",
+    appSrc.includes('" inert"') && /toggleAttribute\("inert"/.test(appSrc),
+    "未使用 inert");
+  check("轮播圆点有可读名称 + 当前位置",
+    appSrc.includes('aria-label="第 ${i + 1} 张') && /aria-current=/.test(appSrc),
+    "圆点缺少 aria-label / aria-current");
+
+  // 负向自检：把两条关键规则改坏，同一批判定必须变红（否则断言是空的）
+  const broken1 = cssSrc.replace(".slider { position: relative;", ".slider { height: 240px; position: relative;");
+  check("负向自检：给 .slider 写回 height 必须判红",
+    broken1 !== cssSrc && sliderHasFixedHeight(broken1), "变异没生效，断言可能失效");
+  const broken2 = cssSrc.replace("flex: 1 1 auto; margin: 0 16px 34px 16px;", "width: auto; margin: 0 16px 34px 16px;");
+  check("负向自检：把卡片退回 width:auto 必须判红",
+    broken2 !== cssSrc && !mobileCardIsFullWidth(broken2), "变异没生效，断言可能失效");
+}
+
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
 process.exit(fail === 0 ? 0 : 1);

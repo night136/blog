@@ -448,12 +448,24 @@ body.lightbox-open { overflow: hidden; }
 .prose a { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
 @media (hover: hover) and (pointer: fine) { .prose a:hover { text-decoration-thickness: 2px; } }
 
-/* ── 轮播 ── */
-.slider { position: relative; margin-bottom: 30px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); height: 320px; background: var(--surface-2); border: 1px solid var(--border); }
-.slides { position: relative; height: 100%; }
-.slide { position: absolute; inset: 0; opacity: 0; pointer-events: none; background-size: cover; background-position: center; transition: opacity .6s ease; display: flex; align-items: flex-end; will-change: opacity; }
-.slide.active { opacity: 1; pointer-events: auto; }
-.slide-overlay { width: auto; max-width: 600px; margin: 0 0 26px 58px; padding: 22px 26px 24px; color: #fff; background: rgba(33,29,25,.30); border: 1px solid rgba(255,255,255,.26); border-radius: 22px; backdrop-filter: blur(10px) saturate(120%); -webkit-backdrop-filter: blur(10px) saturate(120%); box-shadow: 0 14px 40px rgba(0,0,0,.24); display: flex; flex-direction: column; align-items: flex-start; }
+/* ── 轮播 ──
+   ⚠️ 容器高度必须是「内容驱动 + 下限」，**不要**再写死 .slider 的 height。
+   旧实现是 `height: 320px`（窄屏 240px）+ 卡片 `align-items: flex-end`：
+   卡片内容一变高（2 行标题 / 2 行摘要）就向上顶出容器，被 `overflow: hidden` 裁掉
+   —— 实测 390px 裁 11.9px、360px 裁 37.4px，标签药丸被拦腰切断、箭头压住标题。
+   现在 5 张 slide 叠在同一个 grid 单元格里，行高 = 最高的那张 ⇒ 容器自己长高，永不裁切；
+   `.slide` 的 min-height 负责「内容都短时仍保持固定画幅」，padding-top 负责卡片顶边的呼吸位。 */
+.slider { position: relative; margin-bottom: 30px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); background: var(--surface-2); border: 1px solid var(--border); }
+.slides { display: grid; }
+.slide { grid-area: 1 / 1; position: relative; z-index: 1; min-height: 320px; padding-top: 26px; opacity: 0; pointer-events: none; background-size: cover; background-position: center; transition: opacity .6s ease; display: flex; align-items: flex-end; will-change: opacity; }
+.slide.active { opacity: 1; pointer-events: auto; z-index: 2; }
+/* 封面底部渐变遮罩：封面取的是文章正文首图，常常是书页照片/截图（满屏汉字），
+   只靠卡片自身那层 30% 平铺黑压不住 —— 卡片窄时，卡片之外的背景原图文字和标题同框。
+   无封面 slide 是奶油底，排除掉，否则会多出一块突兀的深色。 */
+.slide:not(.no-cover)::after { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(to top, rgba(20,17,14,.62) 0%, rgba(20,17,14,.34) 36%, rgba(20,17,14,0) 70%); }
+/* z-index 高于上面那层遮罩（同为 .slide 的子元素，靠 z-index 定序） */
+.slide-overlay { width: auto; max-width: 600px; margin: 0 0 26px 58px; padding: 22px 26px 24px; color: #fff; background: rgba(33,29,25,.30); border: 1px solid rgba(255,255,255,.26); border-radius: 22px; backdrop-filter: blur(10px) saturate(120%); -webkit-backdrop-filter: blur(10px) saturate(120%); box-shadow: 0 14px 40px rgba(0,0,0,.24); display: flex; flex-direction: column; align-items: flex-start; z-index: 1; }
 /* 无封面轮播图：背景是奶油色，用浅色玻璃卡 + 深色文字，避免褐色块 */
 .slide.no-cover .slide-overlay { background: rgba(255,255,255,.46); color: var(--text); border-color: rgba(255,255,255,.72); box-shadow: 0 14px 40px rgba(0,0,0,.12); }
 .slide.no-cover .slide-tag { background: rgba(255,255,255,.58); color: var(--text); border-color: rgba(255,255,255,.85); }
@@ -473,13 +485,17 @@ body.lightbox-open { overflow: hidden; }
 .slide-summary { font-size: 15px; max-width: 540px; opacity: .95; margin-bottom: 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 1px 4px rgba(0,0,0,.30); }
 .slide-read { background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.55); cursor: pointer; padding: 9px 20px; border-radius: 999px; font-size: 14px; font-weight: 700; transition: background .15s, transform .15s; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 @media (hover: hover) and (pointer: fine) { .slide-read:hover { background: rgba(255,255,255,.26); transform: translateX(3px); } }
-.slider-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border-radius: 50%; border: none; cursor: pointer; background: rgba(255,251,247,.92); color: var(--text); font-size: 22px; line-height: 1; display: grid; place-items: center; box-shadow: var(--shadow-sm); transition: background .15s; }
-[data-theme="dark"] .slider-arrow { background: rgba(58,53,46,.94); color: var(--text); }
+/* z-index 必须高于 .slide（slides 现在是 z-index 1/2；.slider 因 backdrop-filter 已是层叠上下文，
+   同为 z-index:auto 时「正值 z-index 的 slide」会盖住按钮 —— 实测过，箭头会消失） */
+.slider-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border-radius: 50%; cursor: pointer; background: rgba(255,251,247,.92); color: var(--text); border: 1px solid rgba(45,40,34,.16); font-size: 22px; line-height: 1; display: grid; place-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.18); transition: background .15s; z-index: 3; }
+/* 描边不能省：无封面 slide 是奶油底，浅色圆钮在浅底上几乎没有边界（原来 border:none 直接看不见） */
+[data-theme="dark"] .slider-arrow { background: rgba(58,53,46,.94); color: var(--text); border-color: rgba(255,255,255,.22); }
 @media (hover: hover) and (pointer: fine) { .slider-arrow:hover { background: #fff; } }
 .slider-arrow.prev { left: 16px; }
 .slider-arrow.next { right: 16px; }
-.slider-dots { position: absolute; bottom: 18px; right: 20px; display: flex; gap: 8px; }
-.slider-dots .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.6); cursor: pointer; padding: 0; background: rgba(255,255,255,.35); transition: all .2s; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.slider-dots { position: absolute; bottom: 18px; right: 20px; display: flex; gap: 8px; z-index: 3; }
+/* 深色描边 + 更实的填充：原来的 rgba(255,255,255,.35) 在白底/亮底背景图上完全消失 */
+.slider-dots .dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(45,40,34,.30); cursor: pointer; padding: 0; background: rgba(255,255,255,.55); transition: all .2s; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
 .slider-dots .dot.active { background: var(--accent); border-color: var(--accent); width: 24px; border-radius: 999px; }
 
 /* ── 分类筛选 ── */
@@ -639,15 +655,25 @@ body.lightbox-open { overflow: hidden; }
   .hero { flex-direction: column; align-items: stretch; }
   .hero-actions { align-items: center; text-align: center; }
   .card-grid { columns: 1; }
-  .slider { height: 240px; }
-  .slide-title { font-size: 20px; }
-  .slide-overlay { margin: 0 16px 16px 16px; max-width: none; padding: 16px 18px 18px; border-radius: 16px; }
-  .slide-summary { -webkit-line-clamp: 2; }
-  .slider-dots { right: 14px; bottom: 14px; }
-  /* 移动端卡片近满宽，把左右箭头收到右上角，避免压住卡片 */
-  .slider-arrow { top: 14px; transform: none; }
-  .slider-arrow.prev { left: auto; right: 54px; }
-  .slider-arrow.next { right: 14px; }
+  /* 高度不再写死（见 .slide 那段注释）。240px 只是「内容都短」时的下限。 */
+  .slide { min-height: 240px; padding-top: 20px; }
+  .slide-title { font-size: 20px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* flex: 1 1 auto 是关键：把卡片从「按内容收缩」（width:auto 在 flex 里 = shrink-to-fit，
+     实测同一组 5 张卡片宽度在 46%~91% 之间跳）改成「固定占满一行」。
+     不能用 width:100% —— 还要减去左右各 16px 外边距，否则横向溢出。 */
+  .slide-overlay { flex: 1 1 auto; margin: 0 16px 34px 16px; max-width: none; padding: 14px 16px 16px; border-radius: 16px; }
+  /* 窄屏把卡片内距收紧，抵消上面为「圆点让位」多出来的底部外边距 */
+  .slide-tag { margin-bottom: 8px; }
+  .slide-title { margin-bottom: 6px; }
+  .slide-summary { -webkit-line-clamp: 2; margin-bottom: 10px; }
+  /* 圆点位置下移到卡片外面那 34px 留白带里（卡片满宽后，bottom:14 会压在卡片底边上） */
+  .slider-dots { right: 16px; bottom: 12px; }
+  /* 窄屏直接隐藏箭头：卡片近满宽后，右上角那对 42px 圆钮必然压住卡片
+     （实测 360px 时重叠 42px，`常有` 两个字被盖住）。
+     只把箭头挪位置解决不了 —— 要么留 58px+ 的顶部空带（容器会高到 335px+），
+     要么给箭头留侧边栏（卡片又要变窄），两者都更差。移动端改用「滑动 + 圆点」，
+     这也是主流做法；滑动见 app.js 的 enableSliderSwipe()。 */
+  .slider-arrow { display: none; }
   .compose-full { height: calc(100vh - 100px); height: calc(100dvh - 100px); min-height: auto; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .compose-panels { grid-template-columns: 1fr; }
   .compose-preview { max-height: 260px; padding: 16px 18px; }
@@ -1566,6 +1592,22 @@ body.lightbox-open { overflow: hidden; }
   .share-link-copy, .share-copy-title { min-height: 44px; }
   /* Turnstile 降级里的「重试」：触屏也是要能点准的目标 */
   .ts-fallback-retry { min-height: 44px; padding: 8px 16px; }
+}
+
+/* 轮播控件的触屏目标（单开一块，避免动到上面那个 coarse 块的既有断言）。
+   箭头在 ≤640px 已被隐藏（那边改用滑动），这里管的是「宽屏触屏」（iPad 等）。
+   圆点是密集小目标，按 .g-del 同样的取舍：视觉 10px、纵向热区 44px，横向只扩到节距 ——
+   再宽相邻热区就重叠，点击会落到邻居身上。 */
+@media (pointer: coarse) {
+  .slider-arrow { width: 44px; height: 44px; }
+  .slider-arrow.prev { left: 12px; }   /* 44px 比原来的 42px 宽，外移 4px 才不碰卡片左边缘 */
+  .slider-arrow.next { right: 12px; }
+  .slider-dots { gap: 14px; }
+  .slider-dots .dot { position: relative; width: 10px; height: 10px; }
+  .slider-dots .dot::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 32px; height: 44px; transform: translate(-50%, -50%);
+  }
 }
 
 /* ===== 键盘可达性：全局可见焦点 ===== */

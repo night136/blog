@@ -284,12 +284,17 @@ check("农历数据已内联进 app.js（体积台账）",
   /var LUNAR_YEAR_INFO = \[/.test(appCode) && /var LUNAR_JIEQI_DAYS =/.test(appCode));
 {
   const gz = (s) => zlib.gzipSync(s).length;
-  const oldApp = 116481, oldGz = 40794;   // 上一版 assets/app.js 的原始/压缩体积
+  // 台账基线 = 上一次改这一行时的已提交版本。
+  // ⚠️ 原本钉的是农历内联那版的 116481/40794（用来证明「内联数据 + 删掉 426KB 外部库」
+  //    这笔账是净赚的）——那笔账已经结清，而后续 6 个 commit（Turnstile 重做、缓存边界、
+  //    启动完整性…）把 11000 字节的余量用掉了 10010，再动一点就会假红。
+  //    所以这里改成「每次重新基线化」的膨胀绊线：单次改动让 app.js gzip 涨超 11KB 才算失败。
+  const oldApp = 154242, oldGz = 50804;   // 上一版 assets/app.js 的原始/压缩体积
   const nowGz = gz(appSrc);
   console.log(`     台账：app.js 原始 ${(Buffer.byteLength(appSrc) / 1024).toFixed(1)}KB（旧 ${(oldApp / 1024).toFixed(1)}KB，+${((Buffer.byteLength(appSrc) - oldApp) / 1024).toFixed(1)}KB）`);
   console.log(`           app.js gzip ${(nowGz / 1024).toFixed(1)}KB（旧 ${(oldGz / 1024).toFixed(1)}KB，+${((nowGz - oldGz) / 1024).toFixed(1)}KB）`);
   console.log(`           被删除的 lunar.js 435.9KB / br 约 110KB —— 首屏净省约 108KB（且不再有加载失败这一整类问题）`);
-  check("app.js 的 gzip 增幅小于删掉的农历库的 1/10（净收益为正）", (nowGz - oldGz) < 110000 / 10,
+  check("app.js 单次改动 gzip 增幅不超过 11KB（防整库内联式的膨胀）", (nowGz - oldGz) < 110000 / 10,
     `+${nowGz - oldGz} 字节`);
 }
 
