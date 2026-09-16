@@ -658,21 +658,28 @@ body.lightbox-open { overflow: hidden; }
   /* 高度不再写死（见 .slide 那段注释）。240px 只是「内容都短」时的下限。 */
   .slide { min-height: 240px; padding-top: 20px; }
   .slide-title { font-size: 20px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  /* flex: 1 1 auto 是关键：把卡片从「按内容收缩」（width:auto 在 flex 里 = shrink-to-fit，
-     实测同一组 5 张卡片宽度在 46%~91% 之间跳）改成「固定占满一行」。
-     不能用 width:100% —— 还要减去左右各 16px 外边距，否则横向溢出。 */
-  .slide-overlay { flex: 1 1 auto; margin: 0 16px 34px 16px; max-width: none; padding: 14px 16px 16px; border-radius: 16px; }
+  /* 卡片：**固定比例宽度 + 左侧锚定**（既不是 shrink-to-fit，也不再满宽）。
+     ① 不能退回 `width: auto`：flex 里那是 shrink-to-fit，实测同一组 5 张卡片宽度
+        在 46%~91%（163px~324px）之间跳，翻页时边界来回弹。
+     ② 也不该再满宽（上一版的 `flex: 1 1 auto`，左右各只留 16px）：卡片占了容器高的
+        62%~76%、横向 91%，封面基本被整张盖住 —— 轮播的意义就没了。
+        现在让出右侧约 24%，卡片靠左，右侧是一条完整的照片。
+     ③ 用百分比而不是 px：容器在 360/390/430 各档宽度不同，百分比能保证
+        「露出的封面比例」在三档上一致。左侧锚定靠 margin 左小右大实现
+        （右外边距 0，剩下的空白由 flex 的剩余空间自然给出）。
+     想再窄/再宽只改下面这个百分比，右边界会跟着动，不需要同步改别的数。 */
+  .slide-overlay { flex: 0 0 76%; margin: 0 0 34px 14px; max-width: none; padding: 14px 16px 16px; border-radius: 16px; }
   /* 窄屏把卡片内距收紧，抵消上面为「圆点让位」多出来的底部外边距 */
   .slide-tag { margin-bottom: 8px; }
   .slide-title { margin-bottom: 6px; }
   .slide-summary { -webkit-line-clamp: 2; margin-bottom: 10px; }
-  /* 圆点位置下移到卡片外面那 34px 留白带里（卡片满宽后，bottom:14 会压在卡片底边上） */
+  /* 圆点靠右下角：卡片改成左锚 76% 后，这一带已经是封面而非卡片（卡片右边距 0 但
+     宽度只占 76%，右侧留白约 24%），所以圆点是压在照片上而不是玻璃卡上 —— 保留深色描边。 */
   .slider-dots { right: 16px; bottom: 12px; }
-  /* 窄屏直接隐藏箭头：卡片近满宽后，右上角那对 42px 圆钮必然压住卡片
-     （实测 360px 时重叠 42px，`常有` 两个字被盖住）。
-     只把箭头挪位置解决不了 —— 要么留 58px+ 的顶部空带（容器会高到 335px+），
-     要么给箭头留侧边栏（卡片又要变窄），两者都更差。移动端改用「滑动 + 圆点」，
-     这也是主流做法；滑动见 app.js 的 enableSliderSwipe()。 */
+  /* 窄屏隐藏箭头：卡片左锚之后，右箭头（右 12px）确实落在封面空白里、不再压卡片，
+     但左箭头（左 12px）仍会压在卡片上（卡片左边缘 14px）；只留一个「下一篇」
+     会变成左右不对称的半套控件。触屏主路径本来就是「滑动 + 圆点」
+     （见 app.js 的 enableSliderSwipe()），箭头留给鼠标/笔设备。 */
   .slider-arrow { display: none; }
   .compose-full { height: calc(100vh - 100px); height: calc(100dvh - 100px); min-height: auto; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .compose-panels { grid-template-columns: 1fr; }

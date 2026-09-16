@@ -321,6 +321,9 @@ console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏
   //   ③ 轮播没有任何 touch 监听，且 hoverPaused 只由 mouseenter 驱动 ⇒
   //      手机既不能滑动切图、也永远无法暂停自动播放。
   //   ④ 圆点 8×8 且无热区，箭头 42×42，都在 44px 之下。
+  //   ⑤ （第二版）卡片满宽（flex:1 1 auto，左右各 16px）时横向占 91%、纵向占 62%~76%，
+  //      封面几乎被整张盖住，用户反馈「挡到照片」⇒ 改成 76% 固定宽度 + 左侧锚定。
+  //      副作用：宽度改用百分比后，360/390/430 三档露出的封面比例一致。
   const block = (css, sel) => {
     const m = css.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}"));
     return m ? m[1] : null;
@@ -330,9 +333,23 @@ console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏
     const b = block(css, ".slider");
     return !b || /(^|[\s;])height\s*:/.test(b);
   };
-  // 「移动端卡片占满一行」——flex:1 1 auto 才能抗住内容宽度变化
-  const mobileCardIsFullWidth = (css) =>
-    /\.slide-overlay\s*\{[^}]*flex:\s*1 1 auto/.test(css);
+  // 「移动端卡片 = 固定比例宽度 + 左侧锚定」：两头都不许走回头路 ——
+  //   `width: auto`（flex 里是 shrink-to-fit，宽度随内容抖）
+  //   `flex: 1 1 auto`（满宽，左右各 16px，封面被整张盖住，用户反馈「挡到照片」）
+  // 取文件里带 `flex: 0 0 <n>%` 的那条 .slide-overlay（桌面那条是 width:auto/max-width:600px）。
+  // ⚠️ 别在这里断言「左边距 < 右边距」：卡片靠左不是因为外边距不对称，而是 flex-basis 只有
+  //    76%，剩余空间按 justify-content:flex-start 全落在右边（所以右边距写 0 才是对的）。
+  const mobileCardRule = (css) =>
+    [...css.matchAll(/\.slide-overlay\s*\{([^}]*)\}/g)].map((m) => m[1])
+      .find((b) => /flex:\s*0 0 [\d.]+%/.test(b)) || null;
+  const mobileCardIsFixedLeft = (css) => {
+    const b = mobileCardRule(css);
+    if (!b) return false;
+    const basis = parseFloat((b.match(/flex:\s*0 0 ([\d.]+)%/) || [])[1]);
+    const m = b.match(/margin:\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/);   // top right bottom left
+    if (!m || !(basis > 0 && basis < 100)) return false;             // 满宽（100%）不算
+    return parseFloat(m[4]) <= 16 && !/width:\s*auto/.test(b) && !/flex:\s*1/.test(b);
+  };
 
   check("轮播容器不再写死高度（改由「内容 + min-height 下限」决定）",
     !sliderHasFixedHeight(cssSrc), "`.slider{}` 里仍有 height:" + block(cssSrc, ".slider"));
@@ -342,11 +359,11 @@ console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏
   check("slide 有 min-height 下限 + padding-top 呼吸位（短内容也保持画幅、长内容不贴顶）",
     /\.slide\s*\{[^}]*min-height:\s*\d+px/.test(cssSrc) && /\.slide\s*\{[^}]*padding-top:\s*\d+px/.test(cssSrc),
     "缺少 min-height 或 padding-top");
-  check("移动端卡片固定占满一行（不再按内容收缩）",
-    mobileCardIsFullWidth(cssSrc), "未找到 flex: 1 1 auto");
-  check("窄屏隐藏箭头（卡片满宽后箭头必然压住标题，改用滑动 + 圆点）",
+  check("移动端卡片固定比例宽度 + 左侧锚定（右侧留出封面，不再满宽盖住整张照片）",
+    mobileCardIsFixedLeft(cssSrc), "未找到 `flex: 0 0 <n>%`，或左外边距不小于右外边距（卡片没靠左）");
+  check("窄屏隐藏箭头（左箭头与卡片重叠，触屏走「滑动 + 圆点」）",
     /\.slider-arrow\s*\{\s*display:\s*none/.test(cssSrc),
-    "≤640px 仍在显示箭头（实测与卡片重叠 42px）");
+    "≤640px 仍在显示箭头（左箭头会压住卡片左上角的标签/标题）");
   check("封面加了底部渐变遮罩，且无封面 slide 排除在外",
     /\.slide:not\(\.no-cover\)::after\s*\{[^}]*linear-gradient\(to top/.test(cssSrc),
     "未找到封面渐变遮罩");
@@ -379,13 +396,26 @@ console.log("\n[11] 首页轮播：高度自适应、卡片尺寸稳定、触屏
     appSrc.includes('aria-label="第 ${i + 1} 张') && /aria-current=/.test(appSrc),
     "圆点缺少 aria-label / aria-current");
 
-  // 负向自检：把两条关键规则改坏，同一批判定必须变红（否则断言是空的）
+  // 负向自检：把三条关键规则分别改坏，同一批判定必须变红（否则断言是空的）
   const broken1 = cssSrc.replace(".slider { position: relative;", ".slider { height: 240px; position: relative;");
   check("负向自检：给 .slider 写回 height 必须判红",
     broken1 !== cssSrc && sliderHasFixedHeight(broken1), "变异没生效，断言可能失效");
-  const broken2 = cssSrc.replace("flex: 1 1 auto; margin: 0 16px 34px 16px;", "width: auto; margin: 0 16px 34px 16px;");
+  // 旧病历 ①：width:auto（shrink-to-fit，宽度随内容抖）
+  const broken2 = cssSrc.replace("flex: 0 0 76%;", "width: auto;");
   check("负向自检：把卡片退回 width:auto 必须判红",
-    broken2 !== cssSrc && !mobileCardIsFullWidth(broken2), "变异没生效，断言可能失效");
+    broken2 !== cssSrc && !mobileCardIsFixedLeft(broken2), "变异没生效，断言可能失效");
+  // 旧病历 ②：flex:1 满宽（盖住整张封面）
+  const broken3 = cssSrc.replace("flex: 0 0 76%;", "flex: 1 1 auto;");
+  check("负向自检：把卡片改回满宽必须判红",
+    broken3 !== cssSrc && !mobileCardIsFixedLeft(broken3), "变异没生效，断言可能失效");
+  // 旧病历 ③：flex-basis 拉满 100%（等于又变回满宽）
+  const broken4 = cssSrc.replace("flex: 0 0 76%;", "flex: 0 0 100%;");
+  check("负向自检：把卡片 flex-basis 拉到 100% 必须判红",
+    broken4 !== cssSrc && !mobileCardIsFixedLeft(broken4), "变异没生效，断言可能失效");
+  // 旧病历 ④：左边距被推远（卡片不再贴左，「整体变左一点」的诉求失效）
+  const broken5 = cssSrc.replace("margin: 0 0 34px 14px;", "margin: 0 0 34px 40px;");
+  check("负向自检：把卡片左边距推到 40px 必须判红",
+    broken5 !== cssSrc && !mobileCardIsFixedLeft(broken5), "变异没生效，断言可能失效");
 }
 
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
