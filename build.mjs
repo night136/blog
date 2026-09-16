@@ -183,7 +183,7 @@ function publicDetail(row, cover, words, bodyMd) {
   };
 }
 
-// 资源版本化：给 app.js / style.css 的引用加 ?v=<内容哈希>（**不改文件名**）。
+// 资源版本化：给 app.js / style.css / logo-*.png 的引用加 ?v=<内容哈希>（**不改文件名**）。
 // 内容变 → URL 变 → 浏览器视为全新资源自动拉取，无需手动硬刷新/清缓存。
 // 为什么不用「哈希文件名」：那种文件是构建产物、只存在于当次部署，而 HTML 外壳可能被
 // 缓存一段时间，旧壳会引用到已删除的文件 → 404 → 整站 JS 全废（线上实测见函数内注释）。
@@ -203,12 +203,22 @@ function hashAssets() {
   // Cloudflare 的 _headers 匹配忽略查询串，所以 /assets/* 的长缓存策略依然生效（已实测）。
   const appVersion = versionOf("app.js");
   const styleVersion = versionOf("style.css");
+  // 图片也要版本化：/assets/* 的策略是 max-age=86400 + swr=604800，同名换图会被
+  // 缓存最多一天，用户会以为「改了没生效」。同样只加查询串、不改文件名。
+  const logos = {
+    "logo-avatar.png": versionOf("logo-avatar.png"),
+    "logo-hero.png": versionOf("logo-hero.png"),
+  };
 
   const htmlAbs = join(__dirname, "index.html");
   let html = readFileSync(htmlAbs, "utf8");
   // 兼容三种历史形态：仓库里的源码引用、旧实现留下的哈希文件名、本函数重跑时已带 ?v=
   html = html.replace(/assets\/app(?:\.[a-f0-9]{6,64})?\.js(?:\?v=[a-z0-9]+)?/g, `assets/app.js?v=${appVersion}`);
   html = html.replace(/assets\/style(?:\.[a-f0-9]{6,64})?\.css(?:\?v=[a-z0-9]+)?/g, `assets/style.css?v=${styleVersion}`);
+  for (const [name, v] of Object.entries(logos)) {
+    const re = new RegExp(`assets/${name.replace(".", "\\.")}(?:\\?v=[a-z0-9]+)?`, "g");
+    html = html.replace(re, `assets/${name}?v=${v}`);
+  }
   writeFileSync(htmlAbs, html);
 
   // 自检：HTML 里引用的站内资源（去掉查询串后）必须真实存在，防止再产出「引用了不存在文件」的壳
@@ -220,7 +230,8 @@ function hashAssets() {
     console.warn("[build] ⚠️ index.html 引用了不存在的资源（会导致页面直接挂掉）：\n  " + missing.join("\n  "));
   }
 
-  console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}（稳定文件名，不再生成哈希副本）`);
+  console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}`
+    + `, logo-avatar.png?v=${logos["logo-avatar.png"]}, logo-hero.png?v=${logos["logo-hero.png"]}`);
 }
 
 async function main() {
