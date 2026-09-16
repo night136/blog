@@ -35,7 +35,7 @@ else
   failed+=("app.js --check")
 fi
 
-for s in verify-no-tdz verify-seo-render verify-heading-outline verify-og-cover verify-cover-delivery verify-xss verify-jwt-secret verify-manage-update verify-cover-persist verify-asset-versioning verify-frontend-guards verify-first-paint verify-mobile-guards verify-share verify-lunar-core smoke-app; do
+for s in verify-no-tdz verify-seo-render verify-heading-outline verify-og-cover verify-cover-delivery verify-xss verify-jwt-secret verify-manage-update verify-cover-persist verify-asset-versioning verify-frontend-guards verify-first-paint verify-mobile-guards verify-contrast-tokens verify-share verify-lunar-core smoke-app; do
   echo
   echo "===== $s ====="
   out=$(timeout "$PER_SCRIPT_TIMEOUT" "$NODE" "scripts/$s.mjs" 2>&1)

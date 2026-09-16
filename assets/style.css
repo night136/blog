@@ -5,12 +5,18 @@
   --bg: #F5EFE6;
   --bg-soft: #FAF6F0;
   --surface: rgba(255, 251, 247, 0.82);
+  /* 弹窗专用：弹窗是「玻璃层叠在 45% 暗遮罩上」，0.82 的透明度会把实际底色压到
+     ≈#E4E0DB，--text-faint 立刻掉到 4.19:1（实测）。弹窗内文字多，底色要够亮。 */
+  --surface-strong: rgba(255, 251, 247, 0.94);
   --surface-2: rgba(255, 253, 250, 0.60);
   --surface-3: #FFF8F0;
   --surface-solid: #FFFBF7;
   --text: #3D3A36;
-  --text-soft: #7A756D;
-  --text-faint: #A8A095;
+  /* 次要文字的对比度是按 token 算出来的（守护 scripts/verify-contrast-tokens.mjs）：
+     浅色主题最亮的底是 --surface-solid #FFFBF7，两个 token 在它上面都必须 ≥4.5:1。
+     旧的 #A8A095 只有 2.51:1、#7A756D 只有 4.44:1 —— 全站的日期/元信息/提示文案都在这两档上。 */
+  --text-soft: #665F57;
+  --text-faint: #6E6860;
   --accent: #E89B4C;
   --accent-soft: rgba(232, 155, 76, 0.14);
   --accent-dark: #C77E34;
@@ -39,12 +45,13 @@
   --bg: #2A2621;
   --bg-soft: #322D27;
   --surface: rgba(50, 46, 40, 0.78);
+  --surface-strong: rgba(50, 46, 40, 0.94);
   --surface-2: rgba(58, 53, 46, 0.55);
   --surface-3: #3A3530;
   --surface-solid: #3A3530;
   --text: #F5EFE6;
   --text-soft: #B8B0A5;
-  --text-faint: #8A837A;
+  --text-faint: #A8A096;   /* 旧的 #8A837A 在 --surface-solid #3A3530 上只有 3.24:1，不达 AA */
   --accent: #F0B06E;
   --accent-soft: rgba(240, 176, 110, 0.15);
   --accent-dark: #E89B4C;
@@ -347,10 +354,14 @@ img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: b
 /* 分享按钮 */
 .post-share { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
 .share-btn {
+  display: inline-flex; align-items: center; gap: 6px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-  padding: 6px 14px; font-size: 13px; color: var(--text-soft); cursor: pointer;
+  padding: 5px 14px 5px 6px; font-size: 13px; color: var(--text-soft); cursor: pointer;
   transition: all .15s;
 }
+/* 按钮图标 = 分享面板同一套「字母头像」的紧凑版（同一个动作在两处长一样）。
+   原来按钮用 emoji 📋/📤、面板用彩色字母，同一功能两套图标语言。 */
+.share-btn .share-ico { width: 22px; height: 22px; font-size: 10.5px; flex: none; }
 @media (hover: hover) and (pointer: fine) { .share-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); } }
 
 /* 上一篇/下一篇 + 相关文章 */
@@ -1495,7 +1506,8 @@ body.lightbox-open { overflow: hidden; }
     min-height: 40px; display: inline-flex; align-items: center; justify-content: center;
   }
   .post-actions button { padding: 9px 12px; }
-  .share-btn { padding: 9px 16px; }
+  /* 分享按钮原来只有 40px 高（低于 44 下限）；它带图标，够高才好点 */
+  .share-btn { padding: 9px 16px 9px 10px; min-height: 44px; }
   .back-btn { padding: 9px 16px; font-size: 14px; }
 
   /* 4) 原先靠 :hover 揭示的按钮，触屏上没有任何办法触发 → 必须常显
@@ -1524,7 +1536,27 @@ body.lightbox-open { overflow: hidden; }
 [data-theme="dark"] .toast { background: rgba(245, 239, 230, .95); color: #2A2621; }
 
 /* ══ 分享面板 ══ */
-.share-panel { width: min(400px, 92vw); }
+/* 面板自己是滚动容器（而不是让遮罩滚）：遮罩滚会把整块面板一起位移，
+   「关闭」跟着内容跑出视口（横屏 844×390 实测 top:-299，只能点遮罩或 ESC 关）。
+   面板自己滚 + × 用 sticky 钉住 ⇒ 滚多远都关得掉，且遮罩不再需要滚动。 */
+.share-panel {
+  width: min(400px, 92vw);
+  background: var(--surface-strong);   /* 见 --surface-strong 的注释：0.82 会让面板内小字掉到 4.2:1 */
+  max-height: calc(100vh - 32px);      /* 遮罩上下各 16px 内边距 */
+  max-height: calc(100dvh - 32px);     /* iOS 地址栏收起时 100vh 会大出一截，成对声明 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* × 从 14×24 提到 44×44（WCAG 2.2 目标尺寸下限 24×24，桌面细指针下原本宽只有 14）。
+   sticky 钉在面板上沿；负外边距抵消占位 ⇒ 标题行位置与改动前完全一致。
+   ⚠️ position 必须是 sticky（不能是 relative/static）：原来的 ::after 44px 热区要靠它定位。 */
+.share-panel .modal-close {
+  position: sticky; top: 8px; right: auto; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; margin: -14px -10px -30px auto;
+  border-radius: 50%; font-size: 20px;
+  background: var(--surface-solid); border: 1px solid var(--border);
+}
 .share-heading { font-family: var(--serif); font-size: 18px; font-weight: 700; margin-bottom: 14px; }
 .share-post { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
 .share-thumb { width: 76px; height: 52px; flex: none; border-radius: 10px; object-fit: cover; background: var(--surface-3); }
@@ -1541,11 +1573,13 @@ body.lightbox-open { overflow: hidden; }
   margin-bottom: 14px; padding: 10px 12px; border-radius: var(--radius-xs);
   background: var(--accent-soft); color: var(--accent-dark); font-size: 13px; line-height: 1.6;
 }
-.share-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 8px; margin-bottom: 16px; }
+/* 固定 4 列会让 6 个渠道排成 4+2、桌面隐藏「系统分享」后是 4+1（末行永远不齐）。
+   3 列 = 2 行 × 3，手机（带系统分享，6 项）与桌面（5 项）都齐整。 */
+.share-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; margin-bottom: 16px; }
 .share-item {
   display: flex; flex-direction: column; align-items: center; gap: 7px;
   background: none; border: 0; padding: 4px 0; cursor: pointer;
-  font-size: 11.5px; color: var(--text-soft); border-radius: var(--radius-xs);
+  font-size: 12.5px; color: var(--text-soft); border-radius: var(--radius-xs);
 }
 .share-ico {
   width: 42px; height: 42px; border-radius: 50%;
@@ -1560,7 +1594,11 @@ body.lightbox-open { overflow: hidden; }
 .share-ico-cp { background: var(--text-soft); }
 [data-theme="dark"] .share-ico-x { background: #3A3530; }
 .share-qr-wrap { text-align: center; margin-bottom: 16px; }
-.share-qr { width: 160px; height: 160px; background: #FFF; border-radius: 10px; image-rendering: pixelated; }
+/* 显示尺寸 196px：文章链接很长 ⇒ 41 模块（+8 静区 = 49），196/49 = 4 CSS px 一模块，
+   这是「手机对着屏幕扫」的经验下限（原来 160px 只有 3.3 CSS px）。
+   位图尺寸不在这里定 —— 由 app.js 按 devicePixelRatio 出「整数倍物理像素」的图，
+   否则像旧写法那样 147 位图拉到 160 显示，pixelated 会显出锯齿不均的摩尔纹。 */
+.share-qr { width: 196px; height: 196px; background: #FFF; border-radius: 10px; image-rendering: pixelated; }
 .share-qr-tip { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
 .share-link-row { display: flex; gap: 8px; margin-bottom: 10px; }
 .share-link {
@@ -1592,6 +1630,13 @@ body.lightbox-open { overflow: hidden; }
 /* 分享面板的触屏补充（单开媒体查询，避免动到上面那个 coarse 块的既有断言） */
 @media (max-width: 980px) {
   .share-link { font-size: 16px; }        /* iOS 对 <16px 输入框聚焦会放大整页 */
+}
+/* 窄屏：面板顶部「缩略图 + 标题 + 2 行摘要」占掉约 90px，而用户刚读完这篇文章，
+   摘要与正文重复 —— 收成 1 行标题，把高度让给渠道按钮和二维码（矮屏少滚一次）。 */
+@media (max-width: 640px) {
+  .share-post { margin-bottom: 12px; }
+  .share-post-title { -webkit-line-clamp: 1; }
+  .share-post-sum { display: none; }
 }
 @media (pointer: coarse) {
   .share-item { padding: 8px 0; }

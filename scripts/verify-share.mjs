@@ -262,5 +262,90 @@ console.log("\n[10] 供应链：二维码库是本地冻结的干净文件");
   }
 }
 
+console.log("\n[11] 面板可用性（2026-09-16 真浏览器审计后的修复项）");
+{
+  // ① 焦点锁：aria-modal 只是声明，浏览器不会替你把 Tab 关在面板里
+  //    （实测连按 10 次落到 body、第 11 次跑到顶栏的站点名 / 主题按钮）
+  const trapFn = (appSrc.match(/function trapShareFocus[\s\S]{0,900}?\n  \}/) || [""])[0];
+  check("存在 trapShareFocus（Tab 在面板内回卷）",
+    !!trapFn && /e\.preventDefault\(\)/.test(trapFn) && /\.focus\(\)/.test(trapFn),
+    "未找到焦点锁实现");
+  check("焦点锁绑在面板的 keydown 上",
+    /host\.addEventListener\("keydown", trapShareFocus\)/.test(appSrc),
+    "未绑定 trapShareFocus");
+  check("焦点候选按「真的可见」过滤（display:none 的渠道按钮要排除）",
+    /function shareFocusables[\s\S]{0,700}?getClientRects\(\)\.length > 0/.test(appSrc),
+    "未按可见性过滤");
+  const noBind = appSrc.replace('host.addEventListener("keydown", trapShareFocus);', "");
+  check("负向自检：去掉 keydown 绑定必须判红",
+    noBind !== appSrc && !/host\.addEventListener\("keydown", trapShareFocus\)/.test(noBind),
+    "变异没生效，断言可能失效");
+
+  // ② 图标字符不能并进可访问名（读屏会念「微 微信」）
+  const iconSpans = [...htmlSrc.matchAll(/<span class="share-ico share-ico-[\w-]+"[^>]*>/g)].map((m) => m[0]);
+  check("六个渠道图标都标了 aria-hidden",
+    iconSpans.length === 6 && iconSpans.every((s) => /aria-hidden="true"/.test(s)),
+    `${iconSpans.filter((s) => !/aria-hidden="true"/.test(s)).length}/${iconSpans.length} 个未标`);
+  check("X 渠道补了 aria-label（可见标签只有一个字母，说不清是哪个平台）",
+    /data-channel="x" aria-label="[^"]+"/.test(htmlSrc), "X 渠道没有 aria-label");
+
+  // ③ 面板自己是滚动容器：让遮罩滚会把整块面板位移，× 跟着跑出视口（横屏实测 top:-299）
+  const panelRule = (cssSrc.match(/\.share-panel\s*\{[^}]*\}/) || [""])[0];
+  check("面板自己滚（overflow-y:auto），不靠遮罩滚",
+    /overflow-y:\s*auto/.test(panelRule), panelRule.slice(0, 160));
+  check("面板限高：100vh + 100dvh 成对声明",
+    /max-height:\s*calc\(100vh - 32px\)/.test(panelRule) && /max-height:\s*calc\(100dvh - 32px\)/.test(panelRule),
+    "缺限高（横屏矮屏下面板会顶出视口）");
+  check("面板内的 × 用 sticky 钉住（不随内容滚走）",
+    /\.share-panel\s+\.modal-close\s*\{[^}]*position:\s*sticky/.test(cssSrc), "× 未 sticky");
+  check("× 的点击目标 ≥44×44（原来桌面细指针下只有 14×24）",
+    /\.share-panel\s+\.modal-close\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/.test(cssSrc),
+    "× 目标尺寸不足");
+  const noSticky = cssSrc.replace("position: sticky; top: 8px; right: auto; z-index: 3;", "position: absolute; top: 14px; right: 16px;");
+  check("负向自检：把 × 改回 absolute 必须判红",
+    noSticky !== cssSrc && !/\.share-panel\s+\.modal-close\s*\{[^}]*position:\s*sticky/.test(noSticky),
+    "变异没生效，断言可能失效");
+
+  // ④ 生成二维码后必须自动滚进视野（矮屏点「微信」否则像点了没反应，实测 inView:false）
+  check("二维码生成后 scrollIntoView（block:nearest，本就在视野内就不动）",
+    /renderShareQr[\s\S]{0,2400}?scrollIntoView\(\{\s*block:\s*"nearest"/.test(appSrc),
+    "未做二维码自动入视野");
+
+  // ⑤ 二维码位图按物理像素整数倍出图（旧写法 147 位图拉到 CSS 160 显示 → 摩尔纹）
+  const dprLine = /const dpr = Math\.min\(3, Math\.max\(1, window\.devicePixelRatio \|\| 1\)\)/.test(appSrc);
+  const scaleLine = /const scale = Math\.max\(1, Math\.round\(cssSize \* dpr \/ total\)\)/.test(appSrc);
+  check("二维码按 devicePixelRatio 出整数倍位图", dprLine && scaleLine,
+    `dpr=${dprLine} scale=${scaleLine}`);
+  check("显示尺寸写回 canvas.style（位图 ÷ dpr ⇒ 1 物理像素对 1 位图像素）",
+    /canvas\.style\.width = canvas\.style\.height = \(px \/ dpr\) \+ "px"/.test(appSrc),
+    "未写回显示尺寸");
+  check("CSS 显示尺寸 ≥196px（长链接 41 模块 ⇒ 每模块 ≥4 CSS px）",
+    /\.share-qr\s*\{[^}]*width:\s*196px/.test(cssSrc), "显示尺寸仍偏小");
+
+  // ⑥ 渠道网格 3 列（4 列会排成 4+2 / 隐藏系统分享后 4+1，末行永远不齐）
+  check("渠道网格 3 列（6 项 = 2 行 × 3）",
+    /\.share-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/.test(cssSrc), "网格不是 3 列");
+  check("负向自检：改回 4 列必须判红",
+    !/\.share-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/.test(
+      cssSrc.replace("grid-template-columns: repeat(3, minmax(0, 1fr))", "grid-template-columns: repeat(4, minmax(0, 1fr))")),
+    "变异没生效，断言可能失效");
+
+  // ⑦ 详情页按钮与面板统一图标语言；标签替换不能再打在按钮本身（会把图标一起抹掉）
+  check("详情页分享按钮用面板同一套字母头像（不再是 emoji 📋/📤）",
+    /<span class="share-ico share-ico-cp" aria-hidden="true">链<\/span><span class="share-btn-label">复制链接<\/span>/.test(appSrc) &&
+    !/📋 复制链接/.test(appSrc),
+    "按钮仍是 emoji 图标");
+  check("「已复制」文案打在内层 .share-btn-label 上",
+    /const labelEl = shareBtn\.querySelector\("\.share-btn-label"\) \|\| shareBtn/.test(appSrc) &&
+    /labelEl\.textContent = "✅ 已复制"/.test(appSrc) &&
+    !/shareBtn\.textContent = "✅ 已复制"/.test(appSrc),
+    "仍直接改按钮 textContent");
+
+  // ⑧ 窄屏别再重复展示摘要（用户刚把正文读完）
+  check("窄屏隐藏面板里的摘要",
+    /@media \(max-width: 640px\)\s*\{[\s\S]{0,240}?\.share-post-sum\s*\{\s*display:\s*none/.test(cssSrc),
+    "窄屏仍占 2 行摘要");
+}
+
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
 process.exit(fail === 0 ? 0 : 1);

@@ -572,9 +572,12 @@
       const toc = buildToc(post.body || "");
       const tocHtml = toc.length ? `<nav class="toc"><div class="toc-title">📑 目录</div><ul class="toc-list">${toc.map((t) => `<li class="toc-l${t.level}"><a href="#${t.id}">${escapeHtml(t.text)}</a></li>`).join("")}</ul></nav>` : "";
       const shareUrl = postShareUrl(slug);
-      const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享</button></div>`;
+      // 图标用与分享面板同一套「字母头像」标记：同一个动作在两个界面上长一样
+      // （原来按钮是 emoji 📋/📤、面板是彩色字母，同一功能两套图标语言）。
+      // 标签必须包在 .share-btn-label 里 —— 下面换「已复制」文案时要靠它，不能动整个按钮。
+      const shareBtns = `<div class="post-share"><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button"><span class="share-ico share-ico-cp" aria-hidden="true">链</span><span class="share-btn-label">复制链接</span></button><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button"><span class="share-ico share-ico-sys" aria-hidden="true">享</span><span class="share-btn-label">分享</span></button></div>`;
       // 文末入口：长文读到底想分享时，不必再滚回顶部（两个入口共用同一个面板）
-      const shareBtnsEnd = `<div class="post-share post-share-end"><span class="share-end-label">觉得有用？</span><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button">📤 分享给朋友</button><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button">📋 复制链接</button></div>`;
+      const shareBtnsEnd = `<div class="post-share post-share-end"><span class="share-end-label">觉得有用？</span><button class="share-btn" data-share="open" data-slug="${escapeHtml(slug)}" type="button"><span class="share-ico share-ico-sys" aria-hidden="true">享</span><span class="share-btn-label">分享给朋友</span></button><button class="share-btn" data-share="copy" data-url="${escapeHtml(shareUrl)}" type="button"><span class="share-ico share-ico-cp" aria-hidden="true">链</span><span class="share-btn-label">复制链接</span></button></div>`;
       const nav = buildPostNav(slug);
       postDetail.innerHTML = `<div class="post-meta"><span class="tag">${post.tag}</span><span>${formatDate(post.date)}</span><span class="author">✍ ${post.author}</span><span class="read-time"></span>${manageBtns}</div>${hero}<h1>${post.title}</h1>${shareBtns}${tocHtml}<div class="post-body">${mdToHtml(post.body || "")}</div>${nav}${shareBtnsEnd}<section class="comments" id="comments"><div class="comments-head"><h2 class="comments-title">💬 评论</h2><div class="comment-sort"><button class="sort-btn active" data-sort="new" type="button">最新</button><button class="sort-btn" data-sort="hot" type="button">最热</button></div></div><div class="comment-list" id="commentList"><p class="comments-loading">加载评论中…</p></div><div class="reply-hint" id="replyHint" hidden>回复 <b id="replyName"></b><button type="button" id="replyCancel" class="reply-cancel" title="取消回复">✕</button></div><form class="comment-form" id="commentForm"><textarea class="comment-input" id="commentInput" placeholder="说点什么…" maxlength="2000"></textarea><div class="comment-actions"><span class="comment-msg" id="commentMsg"></span><button class="btn-submit" type="submit">发表评论</button></div></form></section>`;
       renderReadTime(post);   // 与 patchPostMeta 共用同一处格式化，避免两份文案漂移
@@ -726,21 +729,53 @@
     return qrLibLoading;
   }
 
+  // Tab 焦点锁：aria-modal 只是「声明」，浏览器不会因此把 Tab 关在面板里。
+  // 实测（.diag/share-audit.mjs）连按 Tab 到第 10 次就落到 body、第 11 次起跑到顶栏的
+  // 站点名 / 主题按钮 / 汉堡菜单 —— 键盘用户会走到被遮住的页面里去。
+  // 注意：只加函数、不加状态变量（IIFE 后半段声明的变量进不去顶部，见 verify-no-tdz）。
+  function shareFocusables() {
+    const panel = document.querySelector(".share-panel");
+    if (!panel) return [];
+    // getClientRects().length 而不是 offsetParent：display:none 的渠道按钮要被排除
+    return [...panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter((el) => !el.disabled && el.getClientRects().length > 0);
+  }
+  function trapShareFocus(e) {
+    if (e.key !== "Tab") return;
+    const list = shareFocusables();
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1], active = document.activeElement;
+    const inside = list.indexOf(active) >= 0;
+    // 在两端（或焦点已经跑出面板）就回卷；否则交给浏览器按 DOM 顺序走
+    if (e.shiftKey ? (active === first || !inside) : (active === last || !inside)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  }
+
   // 画二维码：固定「白底深码」不跟随主题 —— 深色主题下用主题色会拉低对比度导致扫不出来
   async function renderShareQr(url) {
     const canvas = $("shareQr"), wrap = $("shareQrWrap");
     if (!canvas || !wrap) return;
     try {
       await ensureQrLib();
+      canvas.style.width = canvas.style.height = "";   // 复位成样式表的显示尺寸再量
+      wrap.hidden = false;                             // 藏着的元素量不到宽
       const qr = window.qrcode(0, "M");     // 版本 0 = 自动选择，M = 15% 纠错
       qr.addData(url);
       qr.make();
       const n = qr.getModuleCount();
       const quiet = 4;                      // 静区：扫码规范要求四周留 4 个模块
-      const scale = Math.max(2, Math.floor(160 / (n + quiet * 2)));
-      const px = (n + quiet * 2) * scale;
+      const total = n + quiet * 2;
+      // 位图必须按「物理像素的整数倍」出图：显示尺寸下非整数 scale 配 image-rendering:pixelated
+      // 会出锯齿不均的摩尔纹（旧写法就是 147 位图拉到 CSS 160）。
+      const cssSize = Math.max(160, Math.round(canvas.getBoundingClientRect().width) || 196);
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const scale = Math.max(1, Math.round(cssSize * dpr / total));
+      const px = total * scale;
       canvas.width = px;
       canvas.height = px;
+      canvas.style.width = canvas.style.height = (px / dpr) + "px";   // 1 物理像素 == 1 位图像素
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, px, px);
@@ -750,9 +785,13 @@
           if (qr.isDark(r, c)) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
         }
       }
-      wrap.hidden = false;
+      // 矮屏 / 横屏：二维码长在面板下半截，不滚过去用户会以为点了没反应（实测 inView:false）
+      if (typeof wrap.scrollIntoView === "function") {
+        try { wrap.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) { }
+      }
     } catch (_) {
       wrap.hidden = true;
+      canvas.style.width = canvas.style.height = "";
       toast("二维码加载失败，可先复制链接");
     }
   }
@@ -807,6 +846,8 @@
     const closeBtn = $("shareClose");
     if (closeBtn) closeBtn.addEventListener("click", closeShare);
     host.addEventListener("click", (e) => { if (e.target === host) closeShare(); });
+    // Tab 焦点锁：aria-modal 只是声明，必须自己把 Tab 关在面板里（见 trapShareFocus）
+    host.addEventListener("keydown", trapShareFocus);
     const grid = $("shareGrid");
     if (grid) grid.addEventListener("click", (e) => {
       const btn = e.target.closest(".share-item");
@@ -1132,11 +1173,13 @@
         return;
       }
       const url = shareBtn.dataset.url || (currentPost ? postShareUrl(currentPost.slug) : "");
-      if (!shareBtn.dataset.label) shareBtn.dataset.label = shareBtn.textContent.trim();
+      // 文案节点在内层 span：按钮里还有图标节点，直接改按钮的 textContent 会把图标一起抹掉
+      const labelEl = shareBtn.querySelector(".share-btn-label") || shareBtn;
+      if (!labelEl.dataset.orig) labelEl.dataset.orig = labelEl.textContent.trim();
       copyShareUrl(url).then((ok) => {
         if (!ok) return;
-        shareBtn.textContent = "✅ 已复制";
-        setTimeout(() => { shareBtn.textContent = shareBtn.dataset.label; }, 1800);
+        labelEl.textContent = "✅ 已复制";
+        setTimeout(() => { labelEl.textContent = labelEl.dataset.orig; }, 1800);
       });
       return;
     }

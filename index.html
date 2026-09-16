@@ -464,12 +464,14 @@
       </div>
       <p class="share-tip" id="shareTip" hidden></p>
       <div class="share-grid" id="shareGrid">
-        <button class="share-item" type="button" data-channel="system" hidden><span class="share-ico share-ico-sys">享</span>系统分享</button>
-        <button class="share-item" type="button" data-channel="wechat"><span class="share-ico share-ico-wx">微</span>微信</button>
-        <button class="share-item" type="button" data-channel="weibo"><span class="share-ico share-ico-wb">博</span>微博</button>
-        <button class="share-item" type="button" data-channel="x"><span class="share-ico share-ico-x">X</span>X</button>
-        <button class="share-item" type="button" data-channel="telegram"><span class="share-ico share-ico-tg">TG</span>Telegram</button>
-        <button class="share-item" type="button" data-channel="copy"><span class="share-ico share-ico-cp">链</span>复制链接</button>
+        <!-- 图标字符必须 aria-hidden：否则会和后面的文字标签连成可访问名，读屏念成「微 微信」。
+             X 渠道的可见标签只有一个字母，补 aria-label 把名字说全（可访问名包含可见文本，合规）。 -->
+        <button class="share-item" type="button" data-channel="system" hidden><span class="share-ico share-ico-sys" aria-hidden="true">享</span>系统分享</button>
+        <button class="share-item" type="button" data-channel="wechat"><span class="share-ico share-ico-wx" aria-hidden="true">微</span>微信</button>
+        <button class="share-item" type="button" data-channel="weibo"><span class="share-ico share-ico-wb" aria-hidden="true">博</span>微博</button>
+        <button class="share-item" type="button" data-channel="x" aria-label="分享到 X（原 Twitter）"><span class="share-ico share-ico-x" aria-hidden="true">X</span>X</button>
+        <button class="share-item" type="button" data-channel="telegram"><span class="share-ico share-ico-tg" aria-hidden="true">TG</span>Telegram</button>
+        <button class="share-item" type="button" data-channel="copy"><span class="share-ico share-ico-cp" aria-hidden="true">链</span>复制链接</button>
       </div>
       <div class="share-qr-wrap" id="shareQrWrap" hidden>
         <canvas class="share-qr" id="shareQr" width="160" height="160" role="img" aria-label="文章链接二维码"></canvas>
