@@ -174,7 +174,7 @@ console.log("\n[5] 正文构建产物绊线（防止把 /generated/body-images/ 
   ];
   const mustNot = [
     ["原始 base64（正常正文）", "![图](data:image/jpeg;base64,AAAA)"],
-    ["站内普通图片", "![图](/assets/logo-hero.png)"],
+    ["站内普通图片", "![图](/assets/logo-avatar.png)"],
     ["正文提到该路径（代码示例）", "产物路径形如 /generated/body-images/abcdef01.jpg 的文件"],
     ["封面产物路径", "![图](/generated/covers/ab12cd34-deadbeef.jpg)"],
     ["空正文", ""],

@@ -247,7 +247,12 @@
       <section class="view view-home active">
         <header class="hero">
           <div class="hero-text">
-            <img class="hero-avatar" src="assets/logo-hero.png" alt="昉昕" width="72" height="72">
+            <!-- ⚠️ 与侧边栏头像**故意用同一个 URL**（assets/logo-avatar.png）。
+                 两份图历史上内容完全相同（md5 一致），却用了两个文件名 ⇒ 冷缓存首屏
+                 把同一张图下载两次（实测 49665 B，白付 24.8 KB）。
+                 浏览器缓存键是完整 URL，URL 相同才会复用；渲染尺寸不同由 width/height 决定，
+                 与下载份数无关。改动前请先看 scripts/verify-avatar-asset.mjs 的 [3]。 -->
+            <img class="hero-avatar" src="assets/logo-avatar.png" alt="昉昕" width="72" height="72">
             <h1>记录与思考</h1>
             <p>这里是昉昕的角落，写代码、读好书、想明白一些事。</p>
             <div class="lunar-clock" id="lunarClock" title="农历与时辰">—</div>

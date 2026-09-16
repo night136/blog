@@ -205,20 +205,25 @@ function hashAssets() {
   const styleVersion = versionOf("style.css");
   // 图片也要版本化：/assets/* 的策略是 max-age=86400 + swr=604800，同名换图会被
   // 缓存最多一天，用户会以为「改了没生效」。同样只加查询串、不改文件名。
-  const logos = {
-    "logo-avatar.png": versionOf("logo-avatar.png"),
-    "logo-hero.png": versionOf("logo-hero.png"),
-  };
+  //
+  // ⚠️ logo 只有**一份文件、一个 URL**。详见下方 logo 归一化那段的注释。
+  const logoVersion = versionOf("logo-avatar.png");
 
   const htmlAbs = join(__dirname, "index.html");
   let html = readFileSync(htmlAbs, "utf8");
   // 兼容三种历史形态：仓库里的源码引用、旧实现留下的哈希文件名、本函数重跑时已带 ?v=
   html = html.replace(/assets\/app(?:\.[a-f0-9]{6,64})?\.js(?:\?v=[a-z0-9]+)?/g, `assets/app.js?v=${appVersion}`);
   html = html.replace(/assets\/style(?:\.[a-f0-9]{6,64})?\.css(?:\?v=[a-z0-9]+)?/g, `assets/style.css?v=${styleVersion}`);
-  for (const [name, v] of Object.entries(logos)) {
-    const re = new RegExp(`assets/${name.replace(".", "\\.")}(?:\\?v=[a-z0-9]+)?`, "g");
-    html = html.replace(re, `assets/${name}?v=${v}`);
-  }
+  // ⚠️ logo 只允许**一个 URL**。侧边栏（56px）与首屏 hero（72px）两处头像共用
+  // assets/logo-avatar.png —— 浏览器缓存键是完整 URL，URL 相同才会复用；渲染尺寸由
+  // width/height 决定，与下载份数无关。历史上这两处是**两份 md5 相同的文件、两个 URL**，
+  // 冷缓存首屏实测下载两次共 49665 B（白付 24.8 KB，占首屏图片流量的一半）。
+  // 这条正则把 `logo-hero.png` 的历史引用一并收敛回唯一 URL，防止以后又被写回去
+  // （守护 scripts/verify-avatar-asset.mjs 的 [3] 会盯「去重后是否只有 1 个 logo URL」）。
+  html = html.replace(
+    /assets\/logo-(?:avatar|hero)\.png(?:\?v=[a-z0-9]+)?/g,
+    `assets/logo-avatar.png?v=${logoVersion}`,
+  );
   writeFileSync(htmlAbs, html);
 
   // 自检：HTML 里引用的站内资源（去掉查询串后）必须真实存在，防止再产出「引用了不存在文件」的壳
@@ -231,8 +236,8 @@ function hashAssets() {
   }
 
   console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}`
-    + `, logo-avatar.png?v=${logos["logo-avatar.png"]}, logo-hero.png?v=${logos["logo-hero.png"]}`
-    + `（稳定文件名，不再生成哈希副本）`);
+    + `, logo-avatar.png?v=${logoVersion}（稳定文件名，不再生成哈希副本）`
+    + `；两处头像共用一个 URL ⇒ 首屏只下一次`);
 }
 
 async function main() {

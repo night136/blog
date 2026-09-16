@@ -21,6 +21,7 @@
 // 所以：① 解码器显式读 alpha，遇 tRNS 直接报错；② 量之前必须先 `compositeOver`；
 //       ③ 素材**必须不透明**（否则底圈颜色随页面底色变，暗色模式糊成一团）。
 import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -223,7 +224,12 @@ export function synth({ w = 120, h = w, disc = 86, offsetX = 0, offsetY = 0, bg 
 
 function main() {
   console.log("[1] 素材不变量：正方形 + 图案居中 + 底圈等宽");
-  const files = ["assets/logo-avatar.png", "assets/logo-hero.png"];
+  // logo-avatar.png 是**唯一被 HTML 引用的**素材；logo-hero.png 只作为「陈旧 HTML 外壳」
+  // 的兜底副本保留（旧壳还引用着它，删掉就 404。见 [3]）。所以：
+  //   avatar → 必须存在且合规；hero → 允许不存在（将来清掉不该判红），存在就必须合规。
+  const PRIMARY = "assets/logo-avatar.png";
+  const files = [PRIMARY, "assets/logo-hero.png"]
+    .filter((rel) => rel === PRIMARY || existsSync(join(ROOT, rel)));
   for (const rel of files) {
     const abs = join(ROOT, rel);
     if (!existsSync(abs)) { check(`${rel} 存在`, false, "文件缺失"); continue; }
@@ -237,6 +243,16 @@ function main() {
       + `  底圈 ${g.gaps.left}/${g.gaps.top}/${g.gaps.right}/${g.gaps.bottom}px`
       + `  图案占盒 ${(100 * g.discRatio).toFixed(1)}%`
       + `  ${g.alpha.transparent === 0 ? "不透明" : `透明像素 ${g.alpha.transparent}`}`, j.pass, detail);
+  }
+
+  // 兜底副本必须与主素材**字节相同**：它存在的唯一理由是「陈旧外壳引用它时不 404」，
+  // 一旦漂移就会在旧壳上画出旧头像 —— 这种「只在缓存命中时才出现的差异」最难查。
+  if (existsSync(join(ROOT, "assets/logo-hero.png"))) {
+    const sha = (rel) => createHash("sha256").update(readFileSync(join(ROOT, rel))).digest("hex");
+    const a = sha(PRIMARY), b = sha("assets/logo-hero.png");
+    check("兜底副本 assets/logo-hero.png 与主素材字节相同（陈旧外壳仍会请求它）",
+      a === b,
+      `主 ${a.slice(0, 12)}… vs 兜底 ${b.slice(0, 12)}…  →  重新生成：python scripts/build-avatar-asset.py`);
   }
 
   console.log("\n[2] 判据自证：合成样本必须正负分明（不是恒真/恒假）");
@@ -262,15 +278,29 @@ function main() {
       `合成前 ${a.l},${a.t},${a.r},${a.b} vs 合成后 ${b.l},${b.t},${b.r},${b.b}`);
   }
 
-  console.log("\n[3] 换图后必须能刷掉缓存（/assets/* 是 max-age=86400 + swr=604800）");
+  console.log("\n[3] 首屏只能下一份 logo（两个 URL ⇒ 同一张图下两次，实测 49665 B）");
   const bm = readFileSync(join(ROOT, "build.mjs"), "utf8");
-  check("build.mjs 的 hashAssets() 给两个 logo 都加了 ?v=",
-    /logo-avatar\.png/.test(bm) && /logo-hero\.png/.test(bm) && /assets\/\$\{name\}\?v=/.test(bm),
-    "没注入 ?v= 的话，用户会继续看到旧头像（最长一天）");
+  check("build.mjs 给 logo 注入 ?v=<内容哈希>（/assets/* 是 max-age=86400 + swr=604800）",
+    /assets\/logo-avatar\.png\?v=\$\{logoVersion\}/.test(bm),
+    "没注入 ?v= 的话，换图后用户会继续看到旧头像（最长一天）");
+  check("build.mjs 把 `logo-hero.png` 的历史引用收敛回唯一 URL（防复发）",
+    bm.includes("logo-(?:avatar|hero)"),
+    "少了这条正则，以后有人写回两个 URL 时构建期不会收敛");
   const html = readFileSync(join(ROOT, "index.html"), "utf8");
-  check("index.html 用固定文件名引用 logo（不玩哈希文件名，避免陈旧外壳 404）",
-    /src="assets\/logo-avatar\.png(\?v=[a-z0-9]+)?"/.test(html)
-    && /src="assets\/logo-hero\.png(\?v=[a-z0-9]+)?"/.test(html));
+  // 抓所有 <img src="assets/logo-*.png">（去 ?v=），断言去重后只剩一个 URL
+  const logoRefs = [...html.matchAll(/src="(assets\/logo-[a-z]+\.png)(?:\?v=[a-z0-9]+)?"/g)].map((m) => m[1]);
+  const uniq = [...new Set(logoRefs)];
+  check(`index.html 里 ${logoRefs.length} 处 logo 引用，去重后 ${uniq.length} 个 URL`
+    + (uniq.length ? `（${uniq.join(", ")}）` : ""),
+    uniq.length === 1,
+    uniq.length > 1
+      ? `${uniq.length} 个 URL ⇒ 冷缓存首屏把同一张图下载 ${uniq.length} 次（白付 ${(uniq.length - 1) * 24.8} KB）`
+      : "一处都没引用");
+  check("侧边栏（56px）与首屏 hero（72px）指向同一 URL（渲染尺寸不同 ≠ 要下两份）",
+    logoRefs.length === 2 && uniq[0] === "assets/logo-avatar.png",
+    `实际 ${logoRefs.length} 处：${logoRefs.join(", ") || "无"}`);
+  check("用固定文件名引用 logo（不玩哈希文件名，避免陈旧外壳 404）",
+    /^assets\/logo-avatar\.png$/.test(uniq[0] || ""));
 
   console.log("\n[4] 母版保留（微信临时文件曾消失过，丢了就没法重建）");
   check("高清母版 assets/src/logo-original.jpg 在仓库里",
