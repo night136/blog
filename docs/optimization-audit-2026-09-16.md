@@ -95,15 +95,35 @@
 250: <img class="hero-avatar" src="assets/logo-hero.png"   ... width="72" height="72">
 ```
 
-⇒ 浏览器按 URL 做缓存键，**同一张图被下载了两次**，首屏白付 24.8KB + 一次往返。
+⇒ 浏览器按 URL 做缓存键，**同一张图被下载了两次**。
 
-### 修法
+### ✅ 已修（提交 `2733ab4`）
 
-两份文件内容既然相同，就**只留一份**（保留 `logo-hero.png` 这个名字，语义更贴当前用途），另一处改成同一 URL。
-省 24.8KB、少一个请求。
+用 `.diag/count-logo-requests.mjs`（真浏览器 + 全新 profile + `Network.clearBrowserCache`）前后各量一次：
 
-⚠️ 改动会触碰 `verify-asset-versioning`（资源版本化）与 `verify-avatar-asset`（素材几何），改完必须两个守护都复跑。
-⚠️ 替换后 `/assets/*` 是 `max-age=86400`，**必须换 `?v=`**（`build.mjs` 的 `hashAssets()` 已登记这两个名字，删掉一个要同步调整）。
+| | logo 请求数 | 传输字节 |
+|---|---|---|
+| 改前（线上） | 2（两个 URL 各 1 次） | **49665 B** |
+| 改后 | **1** | **24724 B** |
+
+⇒ 首屏省 **24941 B（≈24.4 KB）**、少一次往返，渲染零变化。
+
+**实际做法与原计划有一处不同：没有删文件。** 原计划写「只留一份、删掉另一个」，但任何
+**陈旧 HTML 外壳**（Cloudflare 边缘 `swr` 副本、用户已缓存的 HTML）仍引用着
+`assets/logo-hero.png`，删了就 404 破图 —— 这正是 `build.mjs` 注释里记录过的 2026-09-12
+事故类型（哈希文件名随部署消失 ⇒ 陈旧外壳 4/4 次 404）。
+
+收益来自「**只有一个被引用的 URL**」，与文件是否删除无关。所以 `logo-hero.png` 保留为
+**兜底副本**（不再被引用）。配套：
+
+- `index.html` 两处头像统一用 `assets/logo-avatar.png`（渲染尺寸由 `width/height` 决定，与下载份数无关）；
+- `build.mjs` 注入正则写成 `logo-(?:avatar|hero)`，把历史引用顺手收敛回唯一 URL（构建期防复发）；
+- `verify-avatar-asset` 新增 4 条不变量：`index.html` 里 logo 引用**去重后必须只有 1 个 URL**、
+  两侧头像指向同一 URL、兜底副本与主素材**字节必须相同**（漂移会「只在缓存命中时画出旧头像」，
+  这种差异最难查）、`build.mjs` 必须保留归一化与 `?v=` 注入；
+  同时把 `logo-hero.png` 改成「允许不存在」，将来清掉兜底副本不该判红。
+
+⚠️ 将来真要删兜底副本，先确认线上已无 `logo-hero.png` 引用、且过了至少一个 `swr` 周期。
 
 ---
 
