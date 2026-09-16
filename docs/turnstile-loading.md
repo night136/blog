@@ -159,6 +159,9 @@ https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/f/av0
 
 ## 铁律
 
+- ⚠️ **诊断判据**：`container.querySelectorAll('iframe')` 数**永远是 0**（挑战 iframe 在 closed shadow root 里），
+  `render()` 返回非空 id 也**不代表成功**。**唯一可靠判据是隐藏 input 的 value / `getResponse()` 是否拿到 token。**
+  线上「一直转圈」若属 110200（域名未授权），见 `docs/turnstile-110200.md`。
 - 🚫 **绝不用 `turnstile.ready()`**，api.js 必须由 `ensureTurnstileScript()` 注入、只认 `load`/`error`。
 - 🚫 **别把 api.js 的 `<script>` 写回 `index.html`** —— 一是会重新抢首屏带宽，二是又变回「与 app.js 抢执行顺序」。
 - 🚫 **别把降级提示退回成空灰框 + 「请先完成人机验证」** —— 那是让用户去点一个不存在的验证框。
