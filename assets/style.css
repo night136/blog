@@ -671,7 +671,8 @@ body.lightbox-open { overflow: hidden; }
   .content { padding: 64px 0 20px; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .hero { padding: 28px 20px; }
   .hero h1 { font-size: 26px; }
-  .hero-avatar { width: 60px; height: 60px; }
+  /* .hero-avatar 的窄屏尺寸不在这里：本块在 .hero-avatar 基样式（文件后半段）之前，
+     写这儿会被基样式覆盖成死规则。挪到后面「Hero 头像（窄屏）」块。 */
   .search-box { width: 100%; }
   .topbar-inner { height: 54px; gap: 10px; padding: 0 14px; }
   /* 安全区：必须写在 padding 简写之后，否则会被它重置（配合 viewport-fit=cover，
@@ -1075,8 +1076,13 @@ body.lightbox-open { overflow: hidden; }
 .lunar-cal-cell.today .cal-lunar { color: var(--accent-dark); }
 .lunar-shichen { margin-top: 8px; font-size: 11px; color: var(--text-faint); text-align: center; }
 
-/* ===== Hero 头像 ===== */
-.hero-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: transparent; display: block; box-shadow: var(--shadow); margin-bottom: 14px; }
+/* ===== Hero 头像 =====
+   ⚠️ 左右 margin 必须是 auto。hero 整体靠 text-align:center 居中，但 text-align **管不了块级盒子**
+   —— 头像是 display:block + 固定宽度，少了 auto 就贴死在 .hero-text 左边（实测 hero-text 中心
+   cx=632.5 而头像 cx=397），下面居中的 h1 和描述立刻显得歪。
+   ⚠️ 窄屏尺寸**不能**写在前面的 @media (max-width: 980px) 块里 —— 那条在本规则之前，
+   会被这里的 width 覆盖成死规则（60px 从来没生效过）。窄屏覆盖见文件后半段同名块。 */
+.hero-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: transparent; display: block; box-shadow: var(--shadow); margin: 0 auto 14px; }
 
 /* ===== 首页错落 Bento 网格（首篇头条大卡） ===== */
 .card.feature { column-span: all; }
@@ -1139,6 +1145,8 @@ body.lightbox-open { overflow: hidden; }
   .card.feature { grid-column: span 1; }
   .card.feature .card-cover { height: 200px; }
   .content { padding-top: 72px; }
+  /* Hero 头像窄屏尺寸：必须落在 .hero-avatar 基样式**之后**才生效（见「Hero 头像」注释）。 */
+  .hero-avatar { width: 60px; height: 60px; }
 }
 
 /* 暗色模式下顶栏也保持透明 */
