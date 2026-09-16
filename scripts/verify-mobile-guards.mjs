@@ -175,10 +175,27 @@ console.log("\n[7] 触控目标 ≥44×44 与正文操作字号");
   const coarse = coarseIdx >= 0 ? cssSrc.slice(coarseIdx) : "";
   check("块内用 ::after 提供 44×44 热区（视觉尺寸不变）",
     /width:\s*max\(100%,\s*44px\)/.test(coarse), "未找到 max(100%, 44px) 热区");
-  check("给 .modal-close 加了 44 热区、但没有给它 position:relative（会脱出弹窗定位）",
-    /\.modal-close::after\s*\{[^}]*44px/.test(coarse) &&
-    !/\.modal-close[^{]*\{[^}]*position:\s*relative/.test(coarse),
-    "modal-close 的 44 热区 / 定位处理有误");
+  // × 的 44 热区已从「只在触屏块」提到全局：细指针桌面下 14×24 连 WCAG 2.2 SC 2.5.8 的
+  // 24×24 下限都不到，不该只在触屏补。这里改为查全局 + 守住「不能加 position:relative」。
+  // ⚠️ 必须先剥掉 CSS 注释再匹配选择器：本文件的正则是 `[^{}]*\.modal-close[^{}]*\{`，
+  //    而注释里也常出现 `.modal-close` 这个词（比如解释「44 热区已提到全局」）。注释不是
+  //    选择器，却会因为前面没有 `}` 被一并吞进选择器捕获组，于是**下一条无关规则**（实测是
+  //    `.theme-toggle, .social-link { position: relative }`）被算作「.modal-close 写了 relative」，
+  //    报出假故障。注释剥掉后捕获组才是真正的选择器。
+  const cssNoComments = cssSrc.replace(/\/\*[\s\S]*?\*\//g, "");
+  const closeBase = (cssNoComments.match(/\.modal-close\s*\{[^}]*\}/) || [""])[0];
+  const closeRules = [...cssNoComments.matchAll(/([^{}]*\.modal-close[^{}]*)\{([^}]*)\}/g)];
+  check("× 的 44 热区对所有指针生效（服务细指针桌面，不只是触屏）",
+    /\.modal-close::after\s*\{[^}]*width:\s*44px/.test(cssSrc), "未找到 .modal-close::after 的 44px 热区");
+  check("× 保持 position:absolute，任何 .modal-close 规则都不得写 relative（会脱出弹窗定位）",
+    /position:\s*absolute/.test(closeBase) && !closeRules.some((m) => /position:\s*relative/.test(m[2])),
+    "closeBase = " + closeBase.slice(0, 140));
+  check("负向自检：把 .modal-close 本体改成 relative 必须判红",
+    closeRules.some((m) => /position:\s*relative/.test(m[2])) === false &&
+      /position:\s*relative/.test(
+        (cssNoComments.replace(/\.modal-close\s*\{/, ".modal-close { position: relative;")
+          .match(/\.modal-close\s*\{[^}]*\}/) || [""])[0]),
+    "replace 没命中");
   check("正文操作按钮字号在触屏下 ≥13px（原来是 11px，已低于可读下限）",
     /\.post-actions button[^{]*\{[^}]*font-size:\s*13px/.test(coarse),
     "未在触屏块里提升 .post-actions 字号");

@@ -191,5 +191,171 @@ console.log("\n[4] 弹窗底色不能把它自己的小字拖到 AA 以下");
   }
 }
 
+console.log("\n[5] 实心强调色上的文字（登录按钮 / 筛选 chip / 顶栏当前导航 / 发布按钮都用它）");
+{
+  // --accent-text 是「画在实心 --accent 上」的字，跟 --text 那三档无关，必须单独算。
+  // 2026-09-16 登录弹窗审计：浅色主题旧值 #FFFFFF 实测只有 2.28:1（「登录」主按钮！）。
+  const onAccent = (label, block) => {
+    if (!block) return;
+    const t = parseColor(block.vars["--accent-text"] || "");
+    const bg = parseColor(block.vars["--accent"] || "");
+    if (!t || !bg) { check(`${label}：--accent-text / --accent 可解析`, false,
+      `${block.vars["--accent-text"]} / ${block.vars["--accent"]}`); return; }
+    const r = contrast(t.rgb, bg.rgb);
+    check(`${label}：--accent-text(${block.vars["--accent-text"]}) on --accent(${block.vars["--accent"]}) = ${r.toFixed(2)}:1`,
+      r >= 4.5, "实心按钮上的字也受 AA 约束");
+  };
+  onAccent("浅色", light);
+  onAccent("深色", dark);
+  if (light) {
+    const rWhite = contrast(parseColor("#FFFFFF").rgb, parseColor(light.vars["--accent"]).rgb);
+    check("负向自检：白字写回同一个 --accent 必须判红",
+      rWhite < 4.5, `#FFFFFF on ${light.vars["--accent"]} = ${rWhite.toFixed(2)}:1`);
+  }
+}
+
+console.log("\n[6] 链接色与校验提示色（同样是文字，同样要 AA）");
+{
+  // 链接可能落在任何面上，取该主题**最深**的浅底当最苛刻条件。
+  const worstBg = (block) => {
+    let worst = null;
+    for (const s of SURFACES) {
+      const c = parseColor(block.vars[s] || "");
+      if (!c) continue;
+      const bg0 = parseColor(block.vars["--bg"]);
+      const rgb = c.a < 1 ? over(c, bg0.rgb) : c.rgb;
+      if (!worst || lum(rgb) < lum(worst)) worst = rgb;
+    }
+    return worst;
+  };
+  const linkOnWorstBg = (label, block) => {
+    if (!block) return;
+    const c = parseColor(block.vars["--accent-dark"] || "");
+    if (!c) { check(`${label}：--accent-dark 可解析`, false, String(block.vars["--accent-dark"])); return; }
+    const bg = worstBg(block);
+    const r = contrast(c.rgb, bg);
+    check(`${label}：--accent-dark(${block.vars["--accent-dark"]}) 在最苛刻底色 ${hex(bg)} 上 = ${r.toFixed(2)}:1`,
+      r >= 4.5, "正文链接 / 评论作者名都用它");
+  };
+  linkOnWorstBg("浅色", light);
+  linkOnWorstBg("深色", dark);
+  if (light) {
+    const r = contrast(parseColor("#C77E34").rgb, worstBg(light));
+    check("负向自检：链接色退回 #C77E34 必须判红", r < 4.5, `= ${r.toFixed(2)}:1`);
+  }
+
+  // .form-msg.err / .ok 是按颜色硬写在 CSS 里的（不走 token），单独把值抠出来算
+  const pick = (re) => { const m = cssSrc.match(re); return m && parseColor(m[1]); };
+  const errL = pick(/\.form-msg\.err\s*\{\s*color:\s*(#[0-9a-fA-F]{6})/);
+  const okL = pick(/\.form-msg\.ok\s*\{\s*color:\s*(#[0-9a-fA-F]{6})/);
+  const errD = pick(/\[data-theme=["']dark["']\]\s*\.form-msg\.err\s*\{\s*color:\s*(#[0-9a-fA-F]{6})/);
+  const okD = pick(/\[data-theme=["']dark["']\]\s*\.form-msg\.ok\s*\{\s*color:\s*(#[0-9a-fA-F]{6})/);
+  check("四条 .form-msg 颜色规则都能抠出来", !!(errL && okL && errD && okD), "正则没命中");
+  if (errL && okL && light) {
+    const bgL = worstBg(light);
+    for (const [n, c] of [["err", errL], ["ok", okL]]) {
+      const r = contrast(c.rgb, bgL);
+      check(`浅色 .form-msg.${n} = ${r.toFixed(2)}:1`, r >= 4.5, "提示读不清等于没提示");
+    }
+    const rOld = contrast(parseColor("#D1665A").rgb, bgL);
+    check("负向自检：.form-msg.err 退回 #D1665A 必须判红", rOld < 4.5, `= ${rOld.toFixed(2)}:1`);
+  }
+  if (errD && okD && dark) {
+    // 深色下最苛刻的是**最亮**的深底（亮字暗底，底越亮对比越低）
+    let bgD = null;
+    for (const s of SURFACES) {
+      const c = parseColor(dark.vars[s] || "");
+      if (!c) continue;
+      const bg0 = parseColor(dark.vars["--bg"]);
+      const rgb = c.a < 1 ? over(c, bg0.rgb) : c.rgb;
+      if (!bgD || lum(rgb) > lum(bgD)) bgD = rgb;
+    }
+    for (const [n, c] of [["err", errD], ["ok", okD]]) {
+      const r = contrast(c.rgb, bgD);
+      check(`深色 .form-msg.${n} = ${r.toFixed(2)}:1`, r >= 4.5, `底 ${hex(bgD)}`);
+    }
+  }
+}
+
+console.log("\n[7] 登录弹窗（含注册）与分享面板同源：底色、焦点、关闭按钮");
+{
+  // .modal 是「玻璃叠在 45% 暗遮罩上」，必须和 .share-panel 一样用 --surface-strong
+  const modalRule = (cssSrc.match(/(?:^|\n)\.modal\s*\{[^}]*\}/) || [""])[0];
+  check(".modal 用 --surface-strong（不是半透明的 --surface）",
+    /background:\s*var\(--surface-strong\)/.test(modalRule), modalRule.slice(0, 160));
+  const darkModal = (cssSrc.match(/\[data-theme=["']dark["']\]\s*\.modal-auth\s*\{[^}]*\}/) || [""])[0];
+  check("深色主题下的 .modal-auth 也用 --surface-strong",
+    /background:\s*var\(--surface-strong\)/.test(darkModal), darkModal.slice(0, 120));
+
+  // P0：× 是 .auth-side 的**兄弟**，旧写法 `.auth-side .modal-close` 永不匹配，
+  // 于是 ≤640px 时 .auth-side（DOM 在后、z-index 都是 auto）把 × 整块盖住 —— 手机上看不见也点不到。
+  check("存在给 × 抬层级的规则，且选择器真的能命中（子选择器 / 后代选择器都行，但不能是 .auth-side 的后代）",
+    /\.modal-auth\s*>\s*\.modal-close\s*\{[^}]*z-index:\s*[1-9]/.test(cssSrc),
+    "未找到 `.modal-auth > .modal-close { z-index: … }`");
+  check("负向自检：旧写法 `.auth-side .modal-close` 必须已移除（× 不是 .auth-side 的子元素）",
+    !/\.auth-side\s+\.modal-close\s*\{/.test(cssSrc), "死代码选择器又回来了");
+
+  // 焦点锁
+  const appJs = fs.readFileSync(path.join(root, "assets", "app.js"), "utf8");
+  check("登录弹窗有 authFocusables（按「真的可见」过滤焦点候选）",
+    /function\s+authFocusables\s*\(/.test(appJs) && /getClientRects\(\)\.length\s*>\s*0/.test(appJs));
+  check("登录弹窗有 trapAuthFocus", /function\s+trapAuthFocus\s*\(/.test(appJs));
+  check("焦点锁绑在弹窗的 keydown 上", /authModal\.addEventListener\(\s*["']keydown["']\s*,\s*trapAuthFocus\s*\)/.test(appJs));
+  check("负向自检：去掉 keydown 绑定必须判红",
+    !/authModal\.addEventListener\(\s*["']keydown["']\s*,\s*trapAuthFocus\s*\)/.test(
+      appJs.replace(/authModal\.addEventListener\(\s*["']keydown["']\s*,\s*trapAuthFocus\s*\)/, "")),
+    "replace 没命中");
+
+  // ⚠️ 候选集必须按「原生可顺序聚焦」过滤 —— 这是 2026-09-16 实测踩到的坑：
+  // 选择器里的 [href] 会匹配到 tabindex="-1" 的占位链接（.forgot / .social-link），
+  // 它们排在 .btn-submit 之后 ⇒ last 指错人 ⇒ 回卷条件 active === last 永不成立
+  // ⇒ 连按 Tab 第 7 次逃出面板（.diag/out/auth/after-390.txt）。
+  // 光有 getClientRects() 那道可见性过滤挡不住它：那些链接是可见的，只是不可 Tab 达。
+  const focusFilter = /\.filter\(\s*\(el\)\s*=>\s*!el\.disabled\s*&&\s*el\.tabIndex\s*>=\s*0\s*&&\s*el\.getClientRects\(\)\.length\s*>\s*0\s*\)/g;
+  check("两个焦点候选集都按 tabIndex >= 0 过滤（否则 last 会指向 tabindex=-1 的元素）",
+    (appJs.match(focusFilter) || []).length === 2,
+    "命中 " + (appJs.match(focusFilter) || []).length + " 处，期望 2 处（shareFocusables + authFocusables）");
+  check("负向自检：删掉 tabIndex 过滤必须判红",
+    (appJs.replace(/el\.tabIndex\s*>=\s*0\s*&&\s*/g, "").match(focusFilter) || []).length === 0,
+    "replace 没命中");
+  check("负向自检：断言器真的能区分「有 last 无回卷」的写法",
+    (appJs.replace(/el\.tabIndex\s*>=\s*0\s*&&\s*/g, "").match(focusFilter) || []).length !== 2);
+  check("打开弹窗时把焦点移进去", /openAuth[\s\S]{0,600}?\.focus\(\)/.test(appJs));
+  check("关闭弹窗时把焦点还给触发按钮", /authReturnFocus[\s\S]{0,200}?\.focus\(\)/.test(appJs));
+  check("authReturnFocus 声明在 IIFE 顶部（免得落进 TDZ，见 verify-no-tdz）",
+    appJs.indexOf("let authReturnFocus") < appJs.indexOf("// ===== Markdown → HTML ====="),
+    "index=" + appJs.indexOf("let authReturnFocus"));
+
+  // dialog 命名 + × 的可访问名 + 状态播报
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const authDialog = (html.match(/<div class="modal modal-auth"[^>]*>/) || [""])[0];
+  check("弹窗 dialog 有 aria-labelledby（读屏才知道进的是哪个对话框）",
+    /aria-labelledby="authTitle"/.test(authDialog), authDialog);
+  const authCloseTag = (html.match(/<button class="modal-close" id="authClose"[^>]*>/) || [""])[0];
+  check("× 有 aria-label（否则可访问名就是一个「×」）", /aria-label="[^"]+"/.test(authCloseTag), authCloseTag);
+  check("登录结果有 role=status + aria-live（读屏要播报登录失败）",
+    /id="loginMsg"[^>]*role="status"[^>]*aria-live="polite"/.test(html) &&
+    /id="registerMsg"[^>]*role="status"[^>]*aria-live="polite"/.test(html));
+
+  // 死链：留着但必须是明确的禁用态
+  check("第三方登录 / 忘记密码 标了 aria-disabled + tabindex=-1（点不动的东西不该进 Tab 序）",
+    (html.match(/class="social-link" aria-disabled="true" tabindex="-1"/g) || []).length === 3 &&
+    /class="forgot" aria-disabled="true" tabindex="-1"/.test(html));
+  check("第三方登录的可访问名是有意义的（不再只是「G / ● / ✕」）",
+    /aria-label="Google 登录/.test(html) && /aria-label="微博登录/.test(html) && /aria-label="X 登录/.test(html));
+  check("禁用态的颜色也不低于 AA 的 token（用 --text-faint，不用 opacity 压暗）",
+    /\.social-link\[aria-disabled="true"\][\s\S]{0,200}?color:\s*var\(--text-faint\)/.test(cssSrc) ||
+    /\.social-link\[aria-disabled="true"\],?[\s\S]{0,200}?color:\s*var\(--text-faint\)/.test(cssSrc));
+
+  // 触控目标 / 输入体验
+  check("两个 tab 都给到 44px 高（原来 43，差 1px）", /\.tab\s*\{[^}]*min-height:\s*44px/.test(cssSrc));
+  check("placeholder 颜色写死成 --text-faint（不写就走 UA 默认 #757575，实测只有 3.4:1）",
+    /input::placeholder,\s*textarea::placeholder\s*\{[^}]*color:\s*var\(--text-faint\)/.test(cssSrc));
+  check("placeholder 带 opacity:1（Firefox 默认给 placeholder 加不透明度）",
+    /input::placeholder,\s*textarea::placeholder\s*\{[^}]*opacity:\s*1/.test(cssSrc));
+  check("表单开了 autocomplete 语义（原来 form 上是 off，密码管理器填不了）",
+    /autocomplete="username"/.test(html) && /autocomplete="current-password"/.test(html) && /autocomplete="new-password"/.test(html));
+}
+
 console.log(`\n${fail === 0 ? "✅ 全部通过" : "❌ 有失败项"}（${pass + fail} 项，通过 ${pass}，失败 ${fail}）`);
 process.exit(fail === 0 ? 0 : 1);

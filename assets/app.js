@@ -114,6 +114,7 @@
   let openSeq = 0;                // openPost 请求序号：用于丢弃过期响应（快速切文章防串内容）
   let progressHandler = null;     // 阅读进度 scroll 监听：每次打开文章前先移除旧的，避免叠加
   let deferHomeCovers = false;    // 深链打开文章时，首页封面先不下载（首页此时是 display:none，下了也看不到）
+  let authReturnFocus = null;     // 打开登录弹窗前焦点在哪：关闭时要还回去（键盘用户的关键回路）
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
@@ -736,9 +737,14 @@
   function shareFocusables() {
     const panel = document.querySelector(".share-panel");
     if (!panel) return [];
-    // getClientRects().length 而不是 offsetParent：display:none 的渠道按钮要被排除
-    return [...panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-      .filter((el) => !el.disabled && el.getClientRects().length > 0);
+    // 两道过滤，缺一不可：
+    //  ① getClientRects().length（而不是 offsetParent）：display:none 的渠道按钮要被排除；
+    //  ② tabIndex >= 0：选择器里的 [href] 会把 tabindex="-1" 的占位链接也匹配进来，
+    //     但它们**不是原生 Tab 会停在的元素** —— 一旦它们排在末尾，last 就指错人，
+    //     「末元素回卷」永不触发，Tab 会直接跳出面板（登录弹窗实测：第 7 次 Tab 逃逸）。
+    //     所以先按选择器收集候选，再用真实的可顺序聚焦性（tabIndex）过滤。
+    return [...panel.querySelectorAll("button, [href], input, select, textarea, [tabindex]")]
+      .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0);
   }
   function trapShareFocus(e) {
     if (e.key !== "Tab") return;
@@ -2410,8 +2416,57 @@
       document.head.appendChild(link);
     } catch (e) { console.error("[font] 网页字体注入失败", e); }
   }
-  function openAuth(tab) { if (!authModal) return; authModal.hidden = false; switchTab(tab || "login"); if (typeof startCharInteraction === "function") startCharInteraction(); }
-  function closeAuth() { if (authModal) authModal.hidden = true; if (loginMsg) loginMsg.textContent = ""; if (registerMsg) registerMsg.textContent = ""; if (typeof stopCharInteraction === "function") stopCharInteraction(); setAuthState("idle"); }
+  // Tab 焦点锁：和分享面板同款（见 trapShareFocus 的注释）。
+  // 登录弹窗原先完全没有：打开后焦点还在 <body>，实测连按 Tab 第 1 次就落到顶栏站点名、
+  // 后面全是被遮罩挡住的页面元素 —— 键盘用户根本走不进表单。
+  function authFocusables() {
+    const panel = document.querySelector(".modal-auth");
+    if (!panel) return [];
+    // 同样两道过滤（详见 shareFocusables 的注释）：
+    //  ① getClientRects().length 排除 display:none 的注册表单控件；
+    //  ② tabIndex >= 0 排除 tabindex="-1" 的「忘记密码 / 第三方登录」占位链接 ——
+    //     这正是登录弹窗踩到的坑：它们排在 .btn-submit 之后，被 [href] 匹配进候选集后
+    //     last 变成了那个 ✕ 链接，而原生 Tab 根本不停在那儿，于是回卷条件永不成立。
+    return [...panel.querySelectorAll("button, [href], input, select, textarea, [tabindex]")]
+      .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0);
+  }
+  function trapAuthFocus(e) {
+    if (e.key !== "Tab") return;
+    const list = authFocusables();
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1], active = document.activeElement;
+    const inside = list.indexOf(active) >= 0;
+    if (e.shiftKey ? (active === first || !inside) : (active === last || !inside)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  }
+  function openAuth(tab) {
+    if (!authModal) return;
+    const wasOpen = !authModal.hidden;
+    authModal.hidden = false;
+    switchTab(tab || "login");
+    if (typeof startCharInteraction === "function") startCharInteraction();
+    // 锁背景滚动：与分享面板一致，否则弹窗开着还能把后面的页面滚走
+    document.body.style.overflow = "hidden";
+    // 焦点移进弹窗。只在「从关到开」时记返回点，重复调用（比如会员区再点一次登录）不该覆盖。
+    if (!wasOpen) authReturnFocus = document.activeElement;
+    const first = authFocusables()[0];
+    if (first) { try { first.focus(); } catch (_) {} }
+  }
+  function closeAuth() {
+    if (!authModal) return;
+    const wasOpen = !authModal.hidden;
+    authModal.hidden = true;
+    if (loginMsg) loginMsg.textContent = "";
+    if (registerMsg) registerMsg.textContent = "";
+    if (typeof stopCharInteraction === "function") stopCharInteraction();
+    setAuthState("idle");
+    if (!wasOpen) return;   // 本来就没开：别动滚动锁，也别抢焦点
+    document.body.style.overflow = "";
+    if (authReturnFocus && typeof authReturnFocus.focus === "function") { try { authReturnFocus.focus(); } catch (_) {} }
+    authReturnFocus = null;
+  }
   function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register" && typeof renderRegisterTurnstile === "function") renderRegisterTurnstile(); }
 
   // ===== 卡通角色互动 =====
@@ -2802,6 +2857,8 @@
   if (authClose) authClose.addEventListener("click", closeAuth);
   bindSharePanel();
   if (authModal) authModal.addEventListener("click", (e) => { if (e.target === authModal) closeAuth(); });
+  // Tab 焦点锁：aria-modal 只是声明，必须自己把 Tab 关在弹窗里（见 trapAuthFocus）
+  if (authModal) authModal.addEventListener("keydown", trapAuthFocus);
   document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
   if (loginForm) loginForm.addEventListener("submit", handleLogin);
   if (registerForm) registerForm.addEventListener("submit", handleRegister);

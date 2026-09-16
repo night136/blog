@@ -389,7 +389,7 @@
           </div>
           <div class="compose-actions">
             <button class="btn-submit" id="composeSubmit" type="button">发布文章</button>
-            <p class="form-msg" id="composeMsg"></p>
+            <p class="form-msg" id="composeMsg" role="status" aria-live="polite"></p>
           </div>
         </div>
       </section>
@@ -490,8 +490,8 @@
 
   <!-- 登录/注册弹窗（含卡通角色互动） -->
   <div class="modal-mask" id="authModal" hidden>
-    <div class="modal modal-auth" role="dialog" aria-modal="true" data-state="idle">
-      <button class="modal-close" id="authClose" type="button">×</button>
+    <div class="modal modal-auth" role="dialog" aria-modal="true" aria-labelledby="authTitle" data-state="idle">
+      <button class="modal-close" id="authClose" type="button" aria-label="关闭登录窗口">×</button>
 
       <!-- 左侧卡通角色舞台 -->
       <div class="auth-side">
@@ -571,25 +571,28 @@
           <button class="tab" data-tab="register" type="button">注册</button>
         </div>
 
-        <form id="loginForm" class="auth-form active" autocomplete="off">
-          <label>用户名 / 邮箱<input name="username" type="text" placeholder="用户名或邮箱" required /></label>
-          <label>密码<input name="password" type="password" placeholder="请输入密码" required /></label>
+        <form id="loginForm" class="auth-form active" autocomplete="on">
+          <label>用户名 / 邮箱<input name="username" type="text" autocomplete="username" placeholder="用户名或邮箱" required /></label>
+          <label>密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required /></label>
           <div class="auth-row">
             <label class="remember"><input type="checkbox" />记住我</label>
-            <a href="#" class="forgot">忘记密码？</a>
+            <!-- 以下四个都是 href="#" 的占位入口：站点还没有重置密码流程 / 第三方 OAuth。
+                 保留 UI 位置，但用 aria-disabled + tabindex="-1" 让它们**读起来不可用**，
+                 并避免 Tab 停在点不动的链接上（读屏原名是「G」「●」「✕」，等于没名字）。 -->
+            <a href="#" class="forgot" aria-disabled="true" tabindex="-1" aria-label="忘记密码（暂未开放）">忘记密码？</a>
           </div>
           <button type="submit" class="btn-submit">登录</button>
-          <p class="form-msg" id="loginMsg"></p>
-          <p class="social-row">或使用第三方登录：<a href="#" class="social-link">G</a><a href="#" class="social-link">●</a><a href="#" class="social-link">✕</a></p>
+          <p class="form-msg" id="loginMsg" role="status" aria-live="polite"></p>
+          <p class="social-row">或使用第三方登录：<a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="Google 登录（暂未开放）">G</a><a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="微博登录（暂未开放）">●</a><a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="X 登录（暂未开放）">✕</a></p>
         </form>
 
-        <form id="registerForm" class="auth-form" autocomplete="off">
-          <label>用户名<input name="username" type="text" placeholder="2–32 位" required /></label>
-          <label>邮箱（可选）<input name="email" type="email" placeholder="用于找回账号" /></label>
-          <label>密码<input name="password" type="password" placeholder="至少 6 位" required /></label>
+        <form id="registerForm" class="auth-form" autocomplete="on">
+          <label>用户名<input name="username" type="text" autocomplete="username" placeholder="2–32 位" required /></label>
+          <label>邮箱（可选）<input name="email" type="email" autocomplete="email" placeholder="用于找回账号" /></label>
+          <label>密码<input name="password" type="password" autocomplete="new-password" placeholder="至少 6 位" required /></label>
           <div class="auth-turnstile" id="registerTurnstile"></div>
           <button type="submit" class="btn-submit">注册并登录</button>
-          <p class="form-msg" id="registerMsg"></p>
+          <p class="form-msg" id="registerMsg" role="status" aria-live="polite"></p>
         </form>
       </div>
     </div>

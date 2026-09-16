@@ -19,8 +19,14 @@
   --text-faint: #6E6860;
   --accent: #E89B4C;
   --accent-soft: rgba(232, 155, 76, 0.14);
-  --accent-dark: #C77E34;
-  --accent-text: #FFFFFF;
+  /* ⚠️ 这两个是**文字色**，必须按 AA 算（守护 scripts/verify-contrast-tokens.mjs [5][6]）：
+     --accent-text 画在实心 --accent 上，旧值 #FFFFFF 实测只有 2.28:1 —— 登录按钮、筛选 chip
+     选中态、顶栏当前导航、回到顶部、发布/排序按钮全都在这条上。改成 --text 的深棕 → 4.97:1，
+     与深色主题（同样是深字 + 浅橙）逻辑一致，橙色本身一点没动。
+     --accent-dark 当链接色用（正文链接/评论作者名），旧值 #C77E34 在最苛刻底色 --bg 上 3.16:1
+     → #94591E 实测 4.96:1。 */
+  --accent-dark: #94591E;
+  --accent-text: #3D3A36;
   --border: rgba(210, 200, 185, 0.50);
   --border-strong: rgba(210, 200, 185, 0.80);
   --radius: 24px;
@@ -117,6 +123,11 @@ h1, h2, h3, .brand-name, .compose-meta #composeTitle {
 
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; height: auto; border-radius: var(--radius-xs); display: block; background: var(--surface-solid); }
+
+/* placeholder 的颜色必须显式写死：不写就走浏览器 UA 默认（Chromium 是 #757575），
+   实测在弹窗底色上只有 3.4:1 —— 输入框提示语等于看不清。用 --text-faint 既能到 5.3:1，
+   也和全站次要文字同一档；`opacity: 1` 是给 Firefox 的（它默认给 placeholder 加不透明度）。 */
+input::placeholder, textarea::placeholder { color: var(--text-faint); opacity: 1; }
 
 /* ── 玻璃拟态通用 ── */
 .sidebar, .card, .modal, .lunar-clock, .user-chip, .btn-auth, .chip,
@@ -539,12 +550,21 @@ body.lightbox-open { overflow: hidden; }
 .modal-mask[hidden] { display: none; }
 .modal, .modal-auth { margin: auto; }
 @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-.modal { position: relative; width: min(420px, 92vw); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 26px 24px; box-shadow: var(--shadow-hover); animation: popIn .22s ease; }
+/* 弹窗底色用 --surface-strong（不是 --surface）：
+   弹窗是「玻璃层叠在 45% 暗遮罩上」，0.82 的 --surface 会把实际底色压到 ≈#E4E0DB ——
+   里面所有次要文字都跟着掉到 4.2~4.4:1。共享面板已经在用 strong，这里统一。 */
+.modal { position: relative; width: min(420px, 92vw); background: var(--surface-strong); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 26px 24px; box-shadow: var(--shadow-hover); animation: popIn .22s ease; }
 @keyframes popIn { from{transform:translateY(12px) scale(.98);opacity:0} to{transform:none;opacity:1} }
+/* 关闭按钮：热区 44×44 由 ::after 提供（见文件末尾），这里只管视觉。
+   ⚠️ 绝不能加 position:relative —— 会脱出 .modal 的绝对定位，按钮会跑到页面左上角。 */
 .modal-close { position: absolute; top: 14px; right: 16px; border: none; background: none; font-size: 24px; line-height: 1; color: var(--text-faint); cursor: pointer; }
+/* 热区 44×44 —— 对所有指针都开，不只触屏：
+   「×」这个字形自身只有 14×24，低于 WCAG 2.2 SC 2.5.8 的 24×24 下限（细指针桌面同样适用）。
+   ::after 不参与布局，视觉不动；父级 overflow 会把它裁到弹窗内，不会溢出到页面。 */
+.modal-close::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 @media (hover: hover) and (pointer: fine) { .modal-close:hover { color: var(--text); } }
 .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
-.tab { flex: 1; padding: 10px; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius-xs); cursor: pointer; font-size: 15px; font-weight: 700; color: var(--text-soft); transition: all .18s; }
+.tab { flex: 1; min-height: 44px; padding: 10px; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius-xs); cursor: pointer; font-size: 15px; font-weight: 700; color: var(--text-soft); transition: all .18s; }
 .tab.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .auth-form { display: none; flex-direction: column; gap: 14px; }
 .auth-form.active { display: flex; }
@@ -554,9 +574,13 @@ body.lightbox-open { overflow: hidden; }
 .btn-submit { padding: 12px; border: none; border-radius: var(--radius-xs); cursor: pointer; background: var(--accent); color: var(--accent-text); font-size: 15px; font-weight: 800; transition: filter .18s, transform .18s; }
 @media (hover: hover) and (pointer: fine) { .btn-submit:hover { filter: brightness(1.06); transform: translateY(-1px); } }
 .btn-submit:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+/* 校验提示：浅色主题下要在**最苛刻的底色 --bg #F5EFE6** 上也到 4.5:1（提示会出现在编辑器里）。
+   旧值 #D1665A 在弹窗底色实测 3.02:1、#6DA67A 更是只有 2.76:1 —— 报错信息读不清等于没有报错。 */
 .form-msg { font-size: 13px; color: var(--text-faint); min-height: 16px; margin: 0; }
-.form-msg.err { color: #D1665A; }
-.form-msg.ok { color: #6DA67A; }
+.form-msg.err { color: #AB4939; }
+.form-msg.ok { color: #3C764E; }
+[data-theme="dark"] .form-msg.err { color: #E8907F; }
+[data-theme="dark"] .form-msg.ok { color: #86C79B; }
 
 /* ── 会员 ── */
 .member-gate { background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 34px; text-align: center; color: var(--text-soft); }
@@ -736,7 +760,7 @@ body.lightbox-open { overflow: hidden; }
   -webkit-box-align: stretch; -webkit-align-items: stretch; -ms-flex-align: stretch; align-items: stretch;
   min-height: 480px; border-radius: var(--radius); box-sizing: border-box;
 }
-[data-theme="dark"] .modal-auth { background: var(--surface); }
+[data-theme="dark"] .modal-auth { background: var(--surface-strong); }
 .auth-side {
   background: linear-gradient(160deg, #FAF0E3 0%, #F5E6D0 100%); padding: 24px; position: relative;
   -webkit-box-flex: 0; -webkit-flex: 0 0 320px; -ms-flex: 0 0 320px; flex: 0 0 320px;
@@ -748,7 +772,15 @@ body.lightbox-open { overflow: hidden; }
   overflow: hidden; box-sizing: border-box;
 }
 [data-theme="dark"] .auth-side { background: linear-gradient(160deg, #3A3530 0%, #2E2924 100%); }
-.auth-side .modal-close { color: var(--text); z-index: 2; }
+/* ⚠️ P0（v22 实测）：× 是 .auth-side 的**兄弟**（同级），不是它的子元素 ——
+   所以旧写法 `.auth-side .modal-close` 永不匹配（实测 querySelector 命中 false），
+   那条 `z-index: 2` 从来没生效过。而 .auth-side 本身是 position:relative，
+   两者 z-index 都是 auto ⇒ 层叠顺序 = DOM 顺序，而 .auth-side 在 × **后面**
+   ⇒ ≤640px（弹窗改纵向堆叠、.auth-side 铺到顶部）时，.auth-side 把 × 整块盖住：
+   命中测试最上层是 `chars-stage`（不是按钮本身），手机上看不见也点不到关闭按钮，
+   而触屏又没有 ESC —— 只能靠点遮罩，属于「弹窗关不掉」级别的问题。
+   改法：子选择器 + 明确 z-index；颜色在渐变上也要够深（旧规则里的 --text 意图保留）。 */
+.modal-auth > .modal-close { z-index: 3; color: var(--text); }
 .chars-stage { position: relative; width: 100%; height: 280px; flex-shrink: 0; }
 .char { position: absolute; transition: transform .35s cubic-bezier(.34,1.56,.64,1); animation: char-breathe 3s ease-in-out infinite; max-width: 100%; box-sizing: border-box; will-change: transform; }
 @media (hover: hover) and (pointer: fine) { .char:hover { animation-play-state: paused; } }
@@ -829,11 +861,19 @@ body.lightbox-open { overflow: hidden; }
 .auth-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
 .remember { flex-direction: row !important; align-items: center; gap: 6px !important; color: var(--text-soft) !important; font-weight: 400 !important; }
 .remember input { width: 14px; height: 14px; accent-color: var(--accent); }
-.forgot { color: var(--accent-dark); }
+.forgot { color: var(--accent-dark); padding: 4px 0; }   /* 行内元素的纵向 padding 不撑行高，只扩热区（22 → 30，够 WCAG 2.5.8 的 24） */
 @media (hover: hover) and (pointer: fine) { .forgot:hover { text-decoration: underline; } }
 .social-row { margin-top: 6px; font-size: 13px; color: var(--text-soft); display: flex; align-items: center; gap: 10px; }
 .social-link { width: 34px; height: 34px; border-radius: 50%; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: var(--text-soft); transition: background .15s, color .15s; }
 @media (hover: hover) and (pointer: fine) { .social-link:hover { background: var(--accent); color: var(--accent-text); } }
+/* 死链的禁用态（见 index.html 注释）：必须一眼看出不可用，但**禁用态也不许低于 AA** ——
+   所以不用 opacity 压暗（那会把 5.8:1 压到 3:1 以下），只降到 --text-faint（实测 ≈4.9:1）。
+   pointer-events:none 是必要的：href="#" 会跳到页顶，比「没反应」更让人困惑。 */
+.forgot[aria-disabled="true"],
+.social-link[aria-disabled="true"] {
+  color: var(--text-faint); text-decoration: none; cursor: default; pointer-events: none;
+}
+.social-link[aria-disabled="true"] { background: transparent; border: 1px dashed var(--border-strong); }
 
 @media (max-width: 640px) {
   .modal-auth { -webkit-box-orient: vertical; -webkit-box-direction: normal; -webkit-flex-direction: column; -ms-flex-direction: column; flex-direction: column; min-height: auto; }
@@ -1480,22 +1520,25 @@ body.lightbox-open { overflow: hidden; }
    背景：Apple HIG 与 Material 都要求触控目标 ≥44×44；而 .post-actions 的 11px 字号
    在手机上已低于可读下限。 */
 @media (pointer: coarse) {
-  /* 1) 只把「热区」扩到 44×44，视觉尺寸保持不变（::after 不参与布局，不会撑破顶栏高度） */
+  /* 1) 只把「热区」扩到 44×44，视觉尺寸保持不变（::after 不参与布局，不会撑破顶栏高度）。
+     .modal-close 的 44 热区已提到全局（见 .modal-close 定义处），这里不重复。 */
   .theme-toggle, .social-link { position: relative; }
   .theme-toggle::after, .social-link::after {
     content: ""; position: absolute; left: 50%; top: 50%;
     width: max(100%, 44px); height: max(100%, 44px);
     transform: translate(-50%, -50%);
   }
-  /* .modal-close 本身已是 absolute，给出 44 热区即可（不能再改 position，否则会脱出弹窗定位） */
-  .modal-close::after {
-    content: ""; position: absolute; left: 50%; top: 50%;
-    width: 44px; height: 44px; transform: translate(-50%, -50%);
-  }
 
-  /* 2) 这些在触屏上本就该更大，直接给足实际尺寸 */
+  /* 2) 这些在触屏上本就该更大，直接给足实际尺寸（别只靠 ::after —— 
+        视觉尺寸本身小于 24px 时，即使热区够大，误触率仍然高） */
   .theme-toggle { width: 42px; height: 42px; }
-  .social-link { width: 40px; height: 40px; }
+  .social-link { width: 44px; height: 44px; }
+  /* 登录弹窗里的两个小控件：
+     「记住我」的实际命中区是整条 label（复选框本体只有 14×14，够不着）；
+     「忘记密码？」用行内纵向 padding 把热区撑到 44 —— 行内元素纵向 padding 不参与行盒计算，
+     所以视觉位置一动不动，只是可点范围变大。 */
+  .remember { min-height: 44px; }
+  .forgot { padding: 11px 0; }
   .editor-toolbar { gap: 8px; }
   .editor-toolbar button, .editor-toolbar .toolbar-btn { width: 40px; height: 40px; font-size: 15px; }
 
