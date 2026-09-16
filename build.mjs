@@ -231,7 +231,8 @@ function hashAssets() {
   }
 
   console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}`
-    + `, logo-avatar.png?v=${logos["logo-avatar.png"]}, logo-hero.png?v=${logos["logo-hero.png"]}`);
+    + `, logo-avatar.png?v=${logos["logo-avatar.png"]}, logo-hero.png?v=${logos["logo-hero.png"]}`
+    + `（稳定文件名，不再生成哈希副本）`);
 }
 
 async function main() {

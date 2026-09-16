@@ -11,8 +11,15 @@
 // 所以这里必须真的解码 PNG、量图案的实际包围盒。Node 没有内置图像解码，本文件内置了
 // 一个最小 PNG 解码器（zlib + 反滤波），保持零依赖。
 //
-// 断言的是**不变量**（居中、等宽、正方形），不是设计选择：
+// 断言的是**不变量**（居中、等宽、正方形、不透明），不是设计选择：
 // 底圈该多宽是审美问题（改 `--disc-ratio` 即可），所以只做「区间」断言，不钉死数值。
+//
+// ⚠️ 2026-09-16 第二个病历：透明度会让测量变成**虚构**。
+// 旧素材 `logo-*.png` 其实是 **RGBA（透明底 + 软边）**。第一版解码器只展开 RGB、把 alpha 丢了，
+// 于是量到「图案 94px、底圈 上6.1/下13.8」，而浏览器实际只画 **39×39**（合成到奶油卡片上后
+// 软边整片消失）。差 36% —— 数字看着很精确，其实一半是透明像素的原始 RGB。
+// 所以：① 解码器显式读 alpha，遇 tRNS 直接报错；② 量之前必须先 `compositeOver`；
+//       ③ 素材**必须不透明**（否则底圈颜色随页面底色变，暗色模式糊成一团）。
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { join, dirname } from "node:path";
@@ -31,7 +38,7 @@ const SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export function decodePng(path) {
   const buf = readFileSync(path);
   if (!buf.subarray(0, 8).equals(SIG)) throw new Error("不是 PNG（签名不符）");
-  let off = 8, ihdr = null, plte = null, idat = [];
+  let off = 8, ihdr = null, plte = null, idat = [], trns = false;
   while (off < buf.length) {
     const len = buf.readUInt32BE(off);
     const type = buf.toString("ascii", off + 4, off + 8);
@@ -42,10 +49,16 @@ export function decodePng(path) {
         depth: data[8], color: data[9], interlace: data[12],
       };
     } else if (type === "PLTE") plte = Buffer.from(data);
+    else if (type === "tRNS") trns = true;
     else if (type === "IDAT") idat.push(data);
     else if (type === "IEND") break;
     off += 12 + len;
   }
+  // ⚠️ 调色板 / 灰度 / RGB 的 tRNS 也是透明度，但不在 alpha 通道里。
+  // 宁可显式拒绝，也不能静默忽略——**忽略透明度 = 量到的数字是「透明像素的原始 RGB」，纯属虚构**
+  // （本轮真踩过：旧 logo 是 RGBA 透明底，旧版解码器丢掉 alpha 后量出「图案 106px」，
+  //   而浏览器实际只画 78px，差 36%；据此写出的「底圈 6px」结论整条是错的）。
+  if (trns) throw new Error("PNG 含 tRNS 透明chunk（本解码器只认 alpha 通道，请先转成不透明素材）");
   if (!ihdr) throw new Error("缺少 IHDR");
   if (ihdr.interlace) throw new Error("不支持隔行 PNG");
   if (ihdr.depth !== 8) throw new Error(`只支持 8bit/通道，当前 ${ihdr.depth}bit`);
@@ -77,17 +90,45 @@ export function decodePng(path) {
     prev = cur;
   }
 
-  // 统一展开成 RGB
-  const rgb = Buffer.alloc(ihdr.width * ihdr.height * 3);
-  for (let i = 0, n = ihdr.width * ihdr.height; i < n; i++) {
+  // 统一展开成 RGB + alpha（alpha 缺失时全 255）
+  const n = ihdr.width * ihdr.height;
+  const hasAlpha = ihdr.color === 4 || ihdr.color === 6;
+  const rgb = Buffer.alloc(n * 3);
+  const alpha = hasAlpha ? Buffer.alloc(n, 255) : null;
+  for (let i = 0; i < n; i++) {
     const s = i * CH;
     let r, g, b;
     if (ihdr.color === 0 || ihdr.color === 4) { r = g = b = out[s]; }
     else if (ihdr.color === 2 || ihdr.color === 6) { r = out[s]; g = out[s + 1]; b = out[s + 2]; }
     else { const p = out[s] * 3; r = plte[p]; g = plte[p + 1]; b = plte[p + 2]; }
     rgb[i * 3] = r; rgb[i * 3 + 1] = g; rgb[i * 3 + 2] = b;
+    if (alpha) alpha[i] = out[s + CH - 1];
   }
-  return { width: ihdr.width, height: ihdr.height, rgb };
+  return { width: ihdr.width, height: ihdr.height, rgb, alpha, colorType: ihdr.color };
+}
+
+/** 把素材按 alpha 合成到给定底色上 —— 这才是浏览器实际画出来的像素。 */
+export function compositeOver(img, bg) {
+  if (!img.alpha) return { width: img.width, height: img.height, rgb: img.rgb };
+  const n = img.width * img.height;
+  const rgb = Buffer.alloc(n * 3);
+  for (let i = 0; i < n; i++) {
+    const a = img.alpha[i] / 255;
+    for (let k = 0; k < 3; k++) rgb[i * 3 + k] = Math.round(img.rgb[i * 3 + k] * a + bg[k] * (1 - a));
+  }
+  return { width: img.width, height: img.height, rgb };
+}
+
+/** 四角众数色 —— 当作「底色」。 */
+export function cornerMode(img) {
+  const { width: w, height: h, rgb } = img;
+  const px = (x, y) => [rgb[(y * w + x) * 3], rgb[(y * w + x) * 3 + 1], rgb[(y * w + x) * 3 + 2]];
+  const count = new Map();
+  for (const c of [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)]) {
+    const k = c.join(",");
+    count.set(k, (count.get(k) || 0) + 1);
+  }
+  return [...count.entries()].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
 }
 
 // ── 图案包围盒：与底色差得够远的像素 ─────────────────────────────────────────
@@ -95,15 +136,11 @@ export function decodePng(path) {
 // 所以圆环外那 1px 白边不会被算成「图案」——正好只框住真正的图案（黑环）。
 const TOL = 18;
 
-export function contentBBox(img) {
-  const { width: w, height: h, rgb } = img;
-  const px = (x, y) => [rgb[(y * w + x) * 3], rgb[(y * w + x) * 3 + 1], rgb[(y * w + x) * 3 + 2]];
-  const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
-  // 四角众数色当底色（防某一角有杂点）
-  const key = (c) => c.join(",");
-  const count = new Map();
-  for (const c of corners) count.set(key(c), (count.get(key(c)) || 0) + 1);
-  const bg = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
+export function contentBBox(img, bgArg) {
+  // ⚠️ 必须先按 alpha 合成再量。透明像素的「原始 RGB」不是屏幕上能看到的颜色，
+  // 直接拿它量会得到一个现实中不存在的包围盒（本轮实测差 36%）。
+  const bg = bgArg || cornerMode(img);
+  const { width: w, height: h, rgb } = compositeOver(img, bg);
   let l = w, t = h, r = -1, b = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -125,6 +162,8 @@ export function geometry(img) {
   };
   const disc = { w: bb.r - bb.l, h: bb.b - bb.t };
   const cx = (bb.l + bb.r) / 2, cy = (bb.t + bb.b) / 2;
+  let transparent = 0;
+  if (img.alpha) for (let i = 0; i < img.alpha.length; i++) if (img.alpha[i] < 255) transparent++;
   return {
     ok: true, bb, gaps, disc,
     square: img.width === img.height,
@@ -135,6 +174,7 @@ export function geometry(img) {
     },
     discRatio: (disc.w / img.width + disc.h / img.height) / 2,
     gapMean: (gaps.left + gaps.top + gaps.right + gaps.bottom) / 4,
+    alpha: { transparent, ratio: transparent / (img.width * img.height) },
   };
 }
 
@@ -156,21 +196,29 @@ export function judge(img) {
   }
   if (g.gapMean < 3) why.push(`底圈几乎没有留白（平均 ${g.gapMean.toFixed(1)}px），图案贴边`);
   if (g.discRatio < 0.5 || g.discRatio > 0.98) why.push(`图案占盒 ${(100 * g.discRatio).toFixed(1)}%，超出合理区间`);
+  // 素材必须不透明：透明处的颜色由页面底色决定 —— 暗色模式下底圈会变成深色，
+  // 深墨图案会和它糊在一起；而且「透明像素的原始 RGB」会让任何位图测量失真。
+  if (g.alpha.transparent > 0) {
+    why.push(`含 ${g.alpha.transparent} 个透明/半透明像素（占 ${(100 * g.alpha.ratio).toFixed(1)}%）`
+      + `—— 素材必须不透明，否则底圈颜色随页面底色变`);
+  }
   return { pass: why.length === 0, g, why };
 }
 
 // ── 合成样本：证明判据不是「恒绿」也不是「恒红」─────────────────────────────
-export function synth({ w = 120, h = w, disc = 86, offsetX = 0, offsetY = 0, bg = [253, 245, 236], fg = [20, 20, 20] } = {}) {
+export function synth({ w = 120, h = w, disc = 86, offsetX = 0, offsetY = 0, bg = [253, 245, 236], fg = [20, 20, 20], opaque = true } = {}) {
   const rgb = Buffer.alloc(w * h * 3);
   for (let i = 0; i < w * h; i++) { rgb[i * 3] = bg[0]; rgb[i * 3 + 1] = bg[1]; rgb[i * 3 + 2] = bg[2]; }
+  const alpha = opaque ? null : Buffer.alloc(w * h, 0); // 不透明样本：底色区域 alpha=0
   const x0 = Math.round((w - disc) / 2 + offsetX), y0 = Math.round((h - disc) / 2 + offsetY);
   for (let y = y0; y < y0 + disc; y++)
     for (let x = x0; x < x0 + disc; x++) {
       if (x < 0 || y < 0 || x >= w || y >= h) continue;
       const s = (y * w + x) * 3;
       rgb[s] = fg[0]; rgb[s + 1] = fg[1]; rgb[s + 2] = fg[2];
+      if (alpha) alpha[y * w + x] = 255;
     }
-  return { width: w, height: h, rgb };
+  return { width: w, height: h, rgb, alpha };
 }
 
 function main() {
@@ -187,7 +235,8 @@ function main() {
       `${j.why.join("；")}  →  重新生成：python scripts/build-avatar-asset.py`;
     check(`${rel} ${img.width}×${img.height}  图案居中（偏移 ${g.offset.x.toFixed(1)}, ${g.offset.y.toFixed(1)}px）`
       + `  底圈 ${g.gaps.left}/${g.gaps.top}/${g.gaps.right}/${g.gaps.bottom}px`
-      + `  图案占盒 ${(100 * g.discRatio).toFixed(1)}%`, j.pass, detail);
+      + `  图案占盒 ${(100 * g.discRatio).toFixed(1)}%`
+      + `  ${g.alpha.transparent === 0 ? "不透明" : `透明像素 ${g.alpha.transparent}`}`, j.pass, detail);
   }
 
   console.log("\n[2] 判据自证：合成样本必须正负分明（不是恒真/恒假）");
@@ -201,6 +250,17 @@ function main() {
     judge(synth({ offsetY: 6 })).pass === false);
   check("负向自检：图案贴边（无底圈）必须判红",
     judge(synth({ w: 120, h: 120, disc: 119 })).pass === false);
+  check("负向自检：**透明底素材**必须判红（旧素材的第二个病历：RGBA 透明底，浏览器只画 78/144）",
+    judge(synth({ opaque: false })).pass === false,
+    "透明度会让「量出来的图案」变成透明像素的原始 RGB，纯属虚构");
+  // 合成不得改变几何：同一个透明样本，合成前后量到的包围盒必须一致（否则 compositeOver 有 bug）
+  {
+    const t = synth({ opaque: false });
+    const a = contentBBox(t), b = contentBBox(compositeOver(t, cornerMode(t)));
+    check("自证：compositeOver 只换颜色不改几何（透明样本合成前后包围盒一致）",
+      a.l === b.l && a.t === b.t && a.r === b.r && a.b === b.b,
+      `合成前 ${a.l},${a.t},${a.r},${a.b} vs 合成后 ${b.l},${b.t},${b.r},${b.b}`);
+  }
 
   console.log("\n[3] 换图后必须能刷掉缓存（/assets/* 是 max-age=86400 + swr=604800）");
   const bm = readFileSync(join(ROOT, "build.mjs"), "utf8");
