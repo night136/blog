@@ -23,7 +23,7 @@
 //     （写成 `onRequestGet` 就会漏掉全部 POST/DELETE 写接口）。
 // [4] 三个端点的缓存头：成功可缓存且带 `s-maxage`（没有它边缘根本不缓存函数响应，
 //     #11 的病根就在这里）、失败必须 `no-store`、`catch` 里必须留痕（不许静默吞错）。
-// 外加**负向自证**：三种故障（删一个安全头 / 改一边拷贝 / 去掉错误分支的 no-store）
+// 外加**负向自证**：四种故障（删一个安全头 / 改一边拷贝 / 去掉错误分支的 no-store）
 // 必须各自让判据变红 —— 否则这个守护只是恒真的摆设。
 //
 // 用法：node scripts/verify-security-headers.mjs
@@ -83,8 +83,33 @@ function parseHeadersFile(text) {
 }
 
 // 假 D1
-const okDb = { prepare: () => ({ all: async () => ({ results: [{ slug: "hello-world", date: "2026-09-17", title: "标题", summary: "摘要", tag: "技术" }] }) }) };
-const throwDb = { prepare: () => ({ all: async () => { throw new Error("D1 挂了"); } }) };
+let d1Calls = 0;
+const makeOkDb = () => ({
+  prepare: () => {
+    d1Calls++;
+    return { all: async () => ({ results: [{ slug: "hello-world", date: "2026-09-17", title: "标题", summary: "摘要", tag: "技术" }] }) };
+  },
+});
+const throwDb = { prepare: () => { d1Calls++; return { all: async () => { throw new Error("D1 挂了"); } }; } };
+
+// 假 Cache API：**必须存在**，否则 `caches.default` 直接 ReferenceError。
+// 这三个端点靠它才真的不进 D1（只加 Cache-Control 标头是不够的，见 sitemap.xml.js 注释）。
+function fakeCaches() {
+  const store = new Map();
+  const log = { match: 0, put: 0, puts: [] };
+  return {
+    log,
+    default: {
+      match: async (req) => { log.match++; const hit = store.get(req.url); return hit ? hit.clone() : undefined; },
+      put: async (req, res) => {
+        log.put++;
+        log.puts.push({ url: req.url, status: res.status, cc: String(res.headers.get("cache-control")) });
+        store.set(req.url, res);
+      },
+    },
+  };
+}
+const REQ = (p) => new Request("https://blog-6p3.pages.dev" + p);
 
 // console.error 间谍：catch 里必须留痕，不留痕就是「静默失败」
 async function spyErr(fn) {
@@ -243,72 +268,122 @@ try {
       calls.some((c) => c.includes("安全头")), calls.join(" | ") || "（一次都没打）");
   }
 
-  // ══ [4] 三个端点的缓存头（audit §七 #11）══
-  console.log("\n[4] /sitemap.xml /feed.xml /robots.txt 的缓存头");
+  // ══ [4] 三个端点的缓存（audit §七 #11）══
+  console.log("\n[4] /sitemap.xml /feed.xml /robots.txt 的缓存头与边缘缓存");
   const ccOf = (res) => String(res.headers.get("cache-control") || "");
   const hasSmaxage = (res) => /s-maxage=\d+/.test(ccOf(res));
   const isPublic = (res) => /^\s*public\b/.test(ccOf(res));
   const maxAge = (res) => Number((ccOf(res).match(/max-age=(\d+)/) || [])[1] || 0);
+  // 每个端点用**独立**的 cache + url，避免互相污染
+  const fc = { sitemap: fakeCaches(), feed: fakeCaches(), robots: fakeCaches() };
+  const isFreshCache = (f) => f.log.match > 0;
 
   {
-    const r = await sitemap.onRequestGet({ env: { BLOG_DB: okDb } });
+    globalThis.caches = fc.sitemap;
+    d1Calls = 0;
+    const r = await sitemap.onRequestGet({ env: { BLOG_DB: makeOkDb() }, request: REQ("/sitemap.xml") });
     check("sitemap 成功响应可缓存 public", r.status === 200 && isPublic(r), `${r.status} ${ccOf(r)}`);
-    check("sitemap 成功响应带 s-maxage（没有它边缘根本不缓存函数响应，#11 的病根就在这）", hasSmaxage(r), ccOf(r));
+    check("sitemap 成功响应带 s-maxage", hasSmaxage(r), ccOf(r));
     check("sitemap 成功响应 max-age 在合理区间（60s~1h）", maxAge(r) >= 60 && maxAge(r) <= 3600, ccOf(r));
     check("sitemap 成功响应注入了文章 URL（顺带证明假 D1 真的被调用）", (await r.text()).includes("hello-world"), "正文里没有文章");
+    check("sitemap 冷启动时确实查了一次 D1", d1Calls === 1, `d1Calls=${d1Calls}`);
+    check("sitemap 冷启动把成功响应写进了边缘缓存（Cache API）",
+      fc.sitemap.log.put === 1 && /^\s*public\b/.test((fc.sitemap.log.puts[0] || {}).cc || ""),
+      JSON.stringify(fc.sitemap.log.puts));
+
+    // ⚠️ 这条是 #11 的核心判据：**命中边缘缓存时不许碰 D1**。
+    //    用「把 D1 换成必炸的实现」来证：只要还能拿到 200 + 文章，就说明它压根没走到 D1。
+    d1Calls = 0;
+    const warm = await sitemap.onRequestGet({ env: { BLOG_DB: throwDb }, request: REQ("/sitemap.xml") });
+    check("sitemap 命中边缘缓存时**完全不碰 D1**（D1 被换成必炸的实现也照样 200）",
+      warm.status === 200 && (await warm.text()).includes("hello-world") && d1Calls === 0,
+      `status=${warm.status} d1Calls=${d1Calls} ⇒ 边缘缓存没挡住 D1，#11 等于没修`);
+    check("命中缓存的响应没有重新写缓存（put 次数仍为 1）", fc.sitemap.log.put === 1, `put=${fc.sitemap.log.put}`);
   }
   {
-    const { value: r } = await spyErr(() => sitemap.onRequestGet({ env: {} }));
+    globalThis.caches = fc.sitemap; // 复用同一个 cache：下面这几次请求会命中，所以不会覆盖 put 计数
+    const before = fc.sitemap.log.put;
+    const { value: r } = await spyErr(() => sitemap.onRequestGet({ env: {}, request: REQ("/sitemap.xml?err=1") }));
     check("sitemap 没配 D1 时 500 + no-store（错误绝不能被缓存）",
       r.status === 500 && /no-store/.test(ccOf(r)), `${r.status} ${ccOf(r)}`);
-    const { value: r2, calls: c2 } = await spyErr(() => sitemap.onRequestGet({ env: { BLOG_DB: throwDb } }));
+    const { value: r2, calls: c2 } = await spyErr(() => sitemap.onRequestGet({ env: { BLOG_DB: throwDb }, request: REQ("/sitemap.xml?err=2") }));
     check("sitemap 读库抛异常时 500 + no-store", r2.status === 500 && /no-store/.test(ccOf(r2)), `${r2.status} ${ccOf(r2)}`);
     check("sitemap 读库异常时不静默（catch 里必须 console.error）", c2.length > 0, "一次都没打 ⇒ 只把错误塞进 XML 注释，日志里查不到");
+    check("sitemap 错误响应绝不写入边缘缓存（否则坏 sitemap 会被钉在所有爬虫面前）",
+      fc.sitemap.log.put === before, `put 从 ${before} 变成了 ${fc.sitemap.log.put}`);
   }
   {
-    const r = await feed.onRequestGet({ env: { BLOG_DB: okDb } });
+    globalThis.caches = fc.feed;
+    d1Calls = 0;
+    const r = await feed.onRequestGet({ env: { BLOG_DB: makeOkDb() }, request: REQ("/feed.xml") });
     check("feed 成功响应可缓存 public", r.status === 200 && isPublic(r), `${r.status} ${ccOf(r)}`);
     check("feed 成功响应带 s-maxage", hasSmaxage(r), ccOf(r));
     check("feed 成功响应 max-age 在合理区间（60s~1h）", maxAge(r) >= 60 && maxAge(r) <= 3600, ccOf(r));
     check("feed 成功响应注入了文章 item", (await r.text()).includes("<item>"), "正文里没有 item");
+    check("feed 冷启动把成功响应写进了边缘缓存", fc.feed.log.put === 1, `put=${fc.feed.log.put}`);
+
+    d1Calls = 0;
+    const warm = await feed.onRequestGet({ env: { BLOG_DB: throwDb }, request: REQ("/feed.xml") });
+    check("feed 命中边缘缓存时完全不碰 D1", warm.status === 200 && (await warm.text()).includes("<item>") && d1Calls === 0,
+      `status=${warm.status} d1Calls=${d1Calls}`);
   }
   {
-    const { value: r, calls } = await spyErr(() => feed.onRequestGet({ env: { BLOG_DB: throwDb } }));
-    check("feed 读库异常时 no-store（否则一个空 feed 会被边缘缓存 30 分钟，全部订阅者一起空窗）",
+    globalThis.caches = fc.feed;
+    const before = fc.feed.log.put;
+    const { value: r, calls } = await spyErr(() => feed.onRequestGet({ env: { BLOG_DB: throwDb }, request: REQ("/feed.xml?err=1") }));
+    check("feed 读库异常时 no-store（否则一个空 feed 会被缓存 30 分钟，全部订阅者一起空窗）",
       /no-store/.test(ccOf(r)), `${r.status} ${ccOf(r)}`);
     check("feed 读库异常时不静默（catch 里必须 console.error）", calls.length > 0, "一次都没打");
-    const { value: r2 } = await spyErr(() => feed.onRequestGet({ env: {} }));
+    const { value: r2 } = await spyErr(() => feed.onRequestGet({ env: {}, request: REQ("/feed.xml?nodb=1") }));
     check("feed 没配 D1 时也是 no-store", /no-store/.test(ccOf(r2)), ccOf(r2));
+    check("feed 失败响应绝不写入边缘缓存", fc.feed.log.put === before, `put 从 ${before} 变成了 ${fc.feed.log.put}`);
   }
   {
-    const r = await robots.onRequestGet({ env: {} });
+    globalThis.caches = fc.robots;
+    const r = await robots.onRequestGet({ env: {}, request: REQ("/robots.txt") });
     const txt = await r.text();
     check("robots 成功响应可缓存 public 且带 s-maxage", r.status === 200 && isPublic(r) && hasSmaxage(r), `${r.status} ${ccOf(r)}`);
     check("robots 的 Content-Type 是 text/plain", /text\/plain/.test(String(r.headers.get("content-type"))), String(r.headers.get("content-type")));
     check("robots 正文仍指向 sitemap（加固没改内容）", /Sitemap: https:\/\/\S+\/sitemap\.xml/.test(txt), txt);
+    check("robots 也写进了边缘缓存", fc.robots.log.put === 1, `put=${fc.robots.log.put}`);
+    // robots 不读 D1，边缘 TTL 应更保守（改抓取策略的代价高）
+    const warm = await robots.onRequestGet({ env: {}, request: REQ("/robots.txt") });
+    check("robots 命中缓存时不再重算", (await warm.text()).includes("Sitemap:") && fc.robots.log.match >= 2, `match=${fc.robots.log.match}`);
+  }
+  // 三个端点都必须真的用上 Cache API —— 光有 Cache-Control 标头是**不够**的（实测已证）
+  {
+    for (const [name, f] of Object.entries(fc)) {
+      check(`${name} 端点确实调用了 caches.default（标头不够，必须显式写边缘）`,
+        isFreshCache(f), `match=${f.log.match} put=${f.log.put}`);
+    }
+    const srcs = ["sitemap.xml.js", "feed.xml.js", "robots.txt.js"].map((f) => fs.readFileSync(path.join(ROOT, "functions", f), "utf8"));
+    check("三个端点的源码里都出现 caches.default（防止有人「优化」掉它）",
+      srcs.every((s) => /caches\.default/.test(s)), srcs.map((s) => /caches\.default/.test(s)).join(" / "));
   }
   // 自相矛盾的头：既 no-store 又 s-maxage
   {
+    globalThis.caches = fakeCaches();
     const { value: all } = await spyErr(() => Promise.all([
-      sitemap.onRequestGet({ env: { BLOG_DB: okDb } }),
-      sitemap.onRequestGet({ env: {} }),
-      feed.onRequestGet({ env: { BLOG_DB: okDb } }),
-      feed.onRequestGet({ env: { BLOG_DB: throwDb } }),
-      robots.onRequestGet({ env: {} }),
+      sitemap.onRequestGet({ env: { BLOG_DB: makeOkDb() }, request: REQ("/s.xml?a=1") }),
+      sitemap.onRequestGet({ env: {}, request: REQ("/s.xml?a=2") }),
+      feed.onRequestGet({ env: { BLOG_DB: makeOkDb() }, request: REQ("/f.xml?a=1") }),
+      feed.onRequestGet({ env: { BLOG_DB: throwDb }, request: REQ("/f.xml?a=2") }),
+      robots.onRequestGet({ env: {}, request: REQ("/r.txt") }),
     ]));
     check("没有「既 no-store 又 s-maxage」自相矛盾的响应",
       !all.some((r) => /no-store/.test(ccOf(r)) && /s-maxage/.test(ccOf(r))),
       all.map(ccOf).join(" | "));
   }
+  delete globalThis.caches;
 } finally {
   try { if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true }); } catch (_) {}
 }
 
-// ══ [5] 负向自证：造三种故障，各自必须让判据变红 ══
+// ══ [5] 负向自证：造四种故障，各自必须让判据变红 ══
 // 只做正向检查的守护等于摆设。这里把同一套判据（同一个脚本 + --root=<被改坏的副本>）跑一遍，
 // 要求「必须非零退出」且**报红的正是预期那几条**。
 if (!argRoot) {
-  console.log("\n[5] 负向自证：三种故障必须各自让判据变红");
+  console.log("\n[5] 负向自证：四种故障必须各自让判据变红");
   const MUTATIONS = [
     {
       name: "删掉 security.js 里的 X-Frame-Options",
@@ -343,6 +418,21 @@ if (!argRoot) {
         const out = src.replace(
           'const ERR_HEADERS = { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "no-store" };',
           'const ERR_HEADERS = { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=300" };'
+        );
+        if (out === src) return false;
+        fs.writeFileSync(f, out);
+        return true;
+      },
+    },
+    {
+      name: "把 sitemap 的 Cache API 换成空壳（只剩标头）",
+      expect: /sitemap 命中边缘缓存时\*\*完全不碰 D1\*\*|sitemap 冷启动把成功响应写进了边缘缓存/,
+      apply: (dir) => {
+        const f = path.join(dir, "functions", "sitemap.xml.js");
+        const src = fs.readFileSync(f, "utf8");
+        const out = src.replace(
+          "  const cache = caches.default;",
+          "  const cache = { match: async () => undefined, put: async () => {} };"
         );
         if (out === src) return false;
         fs.writeFileSync(f, out);

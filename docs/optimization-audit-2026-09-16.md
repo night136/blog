@@ -329,7 +329,7 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 | 8 | 登录无失败次数限制 | ✅ 仍在（`grep rate/attempt/lockout` 全后端只命中 guestbook） | **升 P1**，见 §五 |
 | 9 | PBKDF2 10 万次 | ✅ 仍在（`auth.js:28`） | **升 P1**，见 §五 |
 | 10 | 阅读量自增非原子 | ✅ 仍在 | 并发下计数偏差；改 `UPDATE … RETURNING views` 即可 |
-| 11 | sitemap / feed / robots 无 `Cache-Control` | ✅ **实测确认**：三者响应头 `cache-control: —` | **每次请求都打 D1**；加上 `max-age` 即可 |
+| 11 | sitemap / feed / robots 无 `Cache-Control` | ✅ **实测确认**：三者响应头 `cache-control: —` | 每次请求都打 D1 | ✅ `d90db27`。⚠️ 当初那句「加上 `max-age` 即可」**是错的**，见本节末「把这条修错了一次」 |
 | 12 | 便签墙 2 次全表聚合 | ✅ 仍在（`DISTINCT substr(created_at,1,10)`） | 函数运算使索引失效，全表扫 |
 | 13 | 注册先查重后插入 | ✅ 仍在 | 并发冲突时依赖 UNIQUE 兜底，但抛 500 而非 409 |
 | 14 | 错误响应格式不统一 | ✅ 仍在 | `{error}` 与 `{ok:false,error}` 混用 |
@@ -342,27 +342,95 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 
 > 另外 8 项（原 #1~#7 与爬虫正文）已在 09-14/09-15 修掉，本次复测确认有效。
 
+### ⚠️ 把 #11 修错了一次（2026-09-17，值得单独记）
+
+第一版按上面那句「加上 `max-age` 即可」做的：给三个端点加了
+`Cache-Control: public, max-age=300, s-maxage=1800, swr=86400`，上线后头都在、
+判据全绿。**但边缘根本没缓存** —— 也就是说 D1 压力一点没减，只是「看起来修好了」。
+
+一次性探针（`/api/_probe-a`，与 `/api/posts/meta` 同 Content-Type、同 `s-maxage`，
+唯一差别是没用 Cache API）实测：
+
+| 端点 | Cache API | `s-maxage` | 实测 |
+|---|---|---|---|
+| `/api/posts/meta` | ✅ | ✅ | `cf-cache-status: HIT`（age 15→25→33 递增） |
+| `/api/_probe-a/b/c/d` | ❌ | ✅ | **连 `cf-cache-status` 都不出现** |
+
+⇒ 根因**不是** Content-Type、也**不是** SWR（这两组变量都单独隔离过），而是
+**Pages Functions 的响应不会因 `s-maxage` 自动进 CDN 缓存，必须用 Cache API 显式写**。
+仓库里其实早写着这句 —— `functions/api/posts.js:58`：
+
+> `// 边缘缓存：Pages Functions 不会因 s-maxage 标头自动走 CDN 缓存，必须用 Cache API 显式存边缘。`
+
+**教训**：判据必须是**目标本身**，不能是它的代理指标。
+「响应里有 `Cache-Control`」是代理指标，「命中缓存时不打 D1」才是目标 ——
+后者能一眼看穿这个错。现在守护里的判据就是后者：
+把 D1 换成**必炸**的实现，只要缓存还能正常返回，就证明它压根没走到 D1。
+（这与 `verify-first-paint` 当初写死「注入点在 /api/config 之后」是同一类错误：
+**盯不变量，别盯代理指标**。）
+
 ---
 
-## 八、🟡 P2 — 安全响应头有缺口，且 `functions/` 完全裸奔
+## 八、🟡 P2 — 安全响应头有缺口，且 `functions/` 完全裸奔 —— ✅ 已修（`d90db27`）
+
+> 收口见 `docs/security-headers.md`。守护 `scripts/verify-security-headers.mjs`（74 项，含 4 项负向自证）。
 
 ### 实测（`audit-live.mjs`）
 
 | 响应头 | 静态资源 | `functions/` 生成的响应（`/api/*`、`/sitemap.xml`、`/feed.xml`、`/robots.txt`） |
 |---|---|---|
-| `referrer-policy` | ✅ | ❌ |
-| `x-content-type-options` | ✅ | ❌ |
-| `content-security-policy` | ❌ | ❌ |
-| `strict-transport-security` | ❌ | ❌ |
-| `x-frame-options` / `frame-ancestors` | ❌ | ❌ |
-| `permissions-policy` | ❌ | ❌ |
+| `referrer-policy` | ✅ | ❌ → **已补** |
+| `x-content-type-options` | ✅ | ❌ → **已补** |
+| `content-security-policy` | ❌ → **已补** | ❌ → **已补**（只上了不需要 nonce 的那半） |
+| `strict-transport-security` | ❌ → **已补** | ❌ → **已补** |
+| `x-frame-options` / `frame-ancestors` | ❌ → **已补** | ❌ → **已补** |
+| `permissions-policy` | ❌ → **已补** | ❌ → **已补** |
 
 **根因**：`_headers` 只对**静态文件**生效，Functions 返回的响应不经过它。所以 `/api/*` 与三个 XML/TXT 端点连基础的 `nosniff` 都没有。
 
-### 修法
+### 修法（实际落地）
 
-在 `functions/` 侧统一加一层：新增 `functions/_lib/security.js` 的 `withSecurityHeaders(res)`，或直接用 Pages 的 `_middleware.js` 给所有响应兜一层。
-⚠️ **CSP 要单独评估**：站点内联了 `<style>` 与 `<script>`（防闪、启动标记），上 `script-src 'self'` 会直接把它们全挡掉 —— 需要 nonce 或 hash，改动量不小，建议**先上其余四项**，CSP 另立一项。
+- `functions/_lib/security.js` —— 6 个头的**唯一来源**。
+- `functions/_middleware.js` —— 放在 `functions/` 根，给**所有**函数响应兜一层。
+  ⚠️ 用 `onRequest` 而非 `onRequestGet`（写接口全是 POST/DELETE，否则漏掉一半）。
+  ⚠️ 这一层**只加不删**：只 `set()` 那 6 个头，绝不碰 `cache-control` / `content-type` / `set-cookie`。
+  （静态资源的缓存策略来自 `_headers`，被这一层改写就是全站缓存策略崩掉；`set-cookie` 一丢，登录就静默失效。）
+- `_headers` 全局块同步补上 HSTS / XFO / Permissions-Policy / CSP。
+
+**CSP 只上了不需要 nonce 的那一半**：`object-src 'none'; base-uri 'self'; frame-ancestors 'none'`
+（依据：全仓 0 个 `<object>` / `<base>` / `<iframe>`，真 grep 过）。
+`script-src` / `style-src` **仍然没上** —— 页面有 3 段内联 `<script>`，
+`build.mjs` 还会把整张 `style.css` 内联进 `<head>`，直接上会当场白屏；要上得先给它们算 hash/nonce，
+**另立一项**。
+
+### 两个值得单独记的取舍
+
+1. **HSTS 不带 `includeSubDomains`**：`pages.dev` 是所有 Cloudflare Pages 项目共用的域，
+   加了等于替别人的项目做主。更不带 `preload`（要提交进浏览器预加载列表，撤不回来）。
+2. **`Permissions-Policy` 刻意不列 `clipboard-write` / `web-share`**：
+   站内「复制链接」用 `navigator.clipboard`（`app.js:682`）、「分享」用 `navigator.share`（:824），
+   写进 `()` 等于亲手把这两个按钮弄坏。守护里有一条**反查**：
+   从 `app.js` 数出站点真在用的能力，再断言头里没禁它们。
+
+### 线上验收（`audit-live.mjs`，12 条判据，退出码 0）
+
+改动前基线 `.diag/audit-before.txt`：7 条「不许回归」全绿、5 条「应该修好」全红、exit 1。
+改完 `.diag/audit-after.txt`：全绿、exit 0。
+
+其中三条最值得留意：
+
+- **函数响应全都有 6 个安全头** —— 离线的假 context 证明不了运行时接线，只有线上能证明根中间件真挂上了。
+- **静态资源的 `Cache-Control` 逐字未变** —— 本次最大回归风险就在这里。
+- **`/api/logout` 的 `Set-Cookie` 还在** —— 不需要登录态就能端到端验证中间件没把 cookie 吃掉。
+
+⚠️ 另加一条**负向对照**：拿不存在的 slug 探爬虫注入必须**不**注入。因为外壳
+`index.html:378` 本来就写着空的 `<!--SSR-BODY-START--><!--SSR-BODY-END-->` 占位 ——
+没有这条对照，「正文块存在」可能只是匹配到占位（**本次验收就踩过这个假结论**，
+旧脚本用 `([\s\S]*?)` 允许空匹配 + 拿 `hello-world` 这种不存在的 slug 去探）。
+
+⚠️ **部署传播不是瞬时的**：改完 `_headers` 刚部署的几十秒内可能撞上还没换新的边缘副本
+（签名：刚好缺新加的 4 个、却带着原本的 2 个）。第一次跑线上验收就踩了，
+隔一分钟同一批 URL 再探就齐了。脚本已会识别这个签名并提示，免得误判成配置写错。
 
 ---
 
@@ -438,7 +506,8 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 | 8 | §九 仓库卫生 + §十 文档债 | 长期可维护性 | 极低 | ✅ `c191a3a` |
 | 2 | §五 登录加固（Turnstile + 失败计数） | 堵住唯一裸奔入口 | 低 | 待做。⚠️ 三件里 PBKDF2 那件**不能直接改迭代数**（会锁死所有现存密码） |
 | 3 | §三 style.css 不再阻塞 | 首绘 **−418ms**（桌面）/ **−439ms**（移动）；线上 A/B **−794ms** | 中 | ✅ `d07cd38`。判据（增量 + CLS + 几何指纹）已沉淀成 `.diag/first-paint-probe.mjs`，负向自证已跑 |
-| 5 | §八 安全头统一 + §七 #11 缓存头 | 安全基线 | 低 | 待做 |
+| 5 | §八 安全头统一 + §七 #11 缓存头 | 安全基线 + 三个端点不再每次打 D1 | 低 | ✅ `d90db27`。⚠️ #11 第一版按「加 max-age 即可」做，**是错的**（边缘不缓存 Functions），已改用 Cache API 重做（见 §七 末）。线上 12 条判据全绿 |
+| 5b | §八 剩下的那一半 CSP（`script-src` / `style-src`） | 真正的 XSS 收窄 | 中 | 待做。需要给 3 段内联 `<script>` + 构建期内联的 `style.css` 算 hash/nonce，见 `docs/security-headers.md` |
 | 6 | §七 #10 #12 #13 | 数据层正确性 | 低 | 待做 |
 | 7 | §七 #15 #16 #19 #20 | a11y / 体验 | 低 | 待做 |
 | ★ | **§六 顺带查出的「注册框真实挑战拿不到 token」** | 可能是线上注册流程的问题 | — | **待定性**（需一次真机手动注册），见 §六 末尾 |
