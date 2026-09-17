@@ -1309,6 +1309,8 @@
   let turnstileWidgetId = null;  // 留言墙 Turnstile widget 实例 id
   let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
   let turnstileScriptPromise = null; // api.js 的注入 promise（全局只注入一次；失败会清空以便重试）
+  let turnstileNeeded = false;   // 是否已有人「真的需要」人机验证（切到留言墙 / 点注册 tab）—— 见 requireTurnstile()
+
   let guestNextCursor = null;    // 下一页游标 { before, before_id }
   let guestHasMore = false;      // 是否还有更早的便签
   let guestbookMineIds = new Set(); // 本机（localStorage）记录自己写过的便签 id（优化 #7）
@@ -1549,7 +1551,8 @@
   // 而 index.html 又必须让 app.js 排在它前面先启动（否则跨境慢加载会连累整站 JS），两边天然冲突。
   // 所以 api.js 改由这里「按需注入 + 只听 <script> 的 load 事件」：
   //   ① 不碰 ready()，也就没有它那条限制；② 不存在「谁先加载完」的竞态；
-  //   ③ 首绘之后才注入，跨境网络里不和 app.js / style.css 抢首屏带宽。
+  //   ③ **首屏压根不注入**：只有用户切到「留言墙 / 注册表单」时才由 requireTurnstile() 拉起，
+  //      首页/文章页一次都用不到它，跨境网络里也就不和 app.js / style.css 抢首屏带宽。
   const TURNSTILE_API_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
   function ensureTurnstileScript() {
     if (window.turnstile && typeof window.turnstile.render === "function") return Promise.resolve(true);
@@ -1617,6 +1620,8 @@
     const container = $("turnstileWidget");
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
+    // key 可能晚到（requireTurnstile 竞态下先按「没配 key」隐藏过）→ 拿到 key 就把容器恢复出来
+    container.hidden = false;
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
       // 脚本未就绪（包含「还没注入」）→ 就绪后自动重画。原实现是直接 return，注释写着「等脚本就绪事件自动触发」，
       // 但那个「就绪事件」正是会抛异常的 turnstile.ready()，等于压根没有兜底。
@@ -1660,6 +1665,8 @@
     const container = $("registerTurnstile");
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
+    // 同留言墙：key 晚到时把上一轮隐藏掉的容器恢复出来
+    container.hidden = false;
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
       if (!ready) {
         ensureTurnstileScript().then((ok) => {
@@ -1689,9 +1696,28 @@
     }
   }
 
-  // 拉取公开配置（仅 Turnstile Site Key，非密钥），成功后渲染各处 widget
-  // 这里就是「首绘之后」：fetch 至少要一个来回（实测 200ms+，排在 FCP 之后），
-  // 所以 api.js 的注入点自然落在首屏之后，不会挤首屏带宽。
+  // 「有人真的需要人机验证了」的唯一出口 —— 只有两个调用点：留言墙、注册表单。
+  // 它只负责**注入脚本**（和本视图的数据请求并行跑），不负责渲染：
+  //   · 留言墙：showView 里视图还没切到 active，容器此刻是 display:none，
+  //     这时候 render 会被 Turnstile 画成 0 宽。渲染交给 loadGuestbook() 拉完数据后那次。
+  //   · 注册表单：容器在已打开的弹窗里、可见，直接画。
+  // turnstileNeeded 是为了兜住竞态：用户可能在 /api/config 回来之前就点了（那时 key 还是 null，
+  // render 会静默 return 什么都不画），loadTurnstileConfig 末尾据此补渲染一次。
+  function requireTurnstile(which) {
+    turnstileNeeded = true;
+    if (which === "register") { renderRegisterTurnstile(); return; }
+    if (turnstileSiteKey) ensureTurnstileScript();
+  }
+
+  // 拉取公开配置（仅 Turnstile Site Key，非密钥）。
+  // ⚠️ 这里**只取 key，绝不渲染** —— 渲染会连锁触发 ensureTurnstileScript()，
+  //    把跨境的 challenges.cloudflare.com 拖进首屏。而人机验证只有「留言墙」和「注册表单」用得到，
+  //    首页列表 / 文章详情 / 归档 / 关于页**一次都用不到**。
+  //    实测（冷缓存首页，docs/optimization-audit-2026-09-16.md §六）：
+  //      api.js 起于 +1604ms、耗时 866ms；两个挑战 iframe 合计 1662ms —— 全是白付的。
+  //    改动前这里无条件 renderTurnstile() + renderRegisterTurnstile()，
+  //    等于「首绘之后」立刻把它拉起来；但「首绘之后」≠「用不到」，账还是付了。
+  //    现在真正的渲染由 requireTurnstile() 在用户切到需要的视图时触发。
   async function loadTurnstileConfig() {
     try {
       // 用 default 走浏览器缓存：响应只有公开的 Turnstile Site Key，服务端配的是
@@ -1701,12 +1727,15 @@
       const d = await res.json();
       if (d && d.turnstileSiteKey) turnstileSiteKey = d.turnstileSiteKey;
     } catch (_) { /* 配置拉取失败不阻塞页面 */ }
-    renderTurnstile();
-    renderRegisterTurnstile();
+    // 只在「用户已经要过人机验证、但当时 key 还没到」时补画。正常路径下这里是空转。
+    if (turnstileNeeded) { renderTurnstile(); renderRegisterTurnstile(); }
   }
 
   async function loadGuestbook() {
     if (guestbookLoaded) return;
+    // 只把 api.js 的注入和下面的数据请求并行起来（原先是「数据先回、再串行等脚本 866ms」）。
+    // 不在这里渲染：此刻视图还没切到 active、容器 display:none，会被 Turnstile 画成 0 宽。
+    requireTurnstile("guestbook");
     loadMineIds();
     const sk = $("guestbookSkeleton");
     if (sk) sk.innerHTML = '<div class="sk-card g-sk"></div>'.repeat(6);
@@ -1725,6 +1754,11 @@
     } catch (e) {
       const board = $("guestbookBoard");
       if (board) board.innerHTML = `<p style="color:var(--text-faint)">留言墙加载失败：${escapeHtml(e.message || "网络错误")}</p>`;
+      // 板子挂了也要把验证框画出来。否则会落进一个很别扭的分支：
+      // requireTurnstile() 已经把脚本拉好了（window.turnstile 可用），提交路径里那句
+      // 「脚本没好就先等它」因此被跳过，于是第一次提交必然弹「人机验证未显示出来」，
+      // 用户得再点一次「重试」才能写。多这一句就没有这个二次点击了。
+      renderTurnstile();
     }
   }
 
@@ -2357,6 +2391,8 @@
   navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
   bindGuestbookForm();
+  // 只取 Site Key，**不会**注入 api.js —— 人机验证的脚本要等用户真的切到
+  // 「留言墙 / 注册表单」才由 requireTurnstile() 拉起来（首页一次都用不到它）。
   loadTurnstileConfig();
   // 这里**不要**再写 turnstile.ready(...)：api.js 是异步注入的，ready() 会抛
   // 「Remove async/defer from the Turnstile api.js script tag」异常（见 ensureTurnstileScript 的说明）。
@@ -2467,7 +2503,7 @@
     if (authReturnFocus && typeof authReturnFocus.focus === "function") { try { authReturnFocus.focus(); } catch (_) {} }
     authReturnFocus = null;
   }
-  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register" && typeof renderRegisterTurnstile === "function") renderRegisterTurnstile(); }
+  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register") requireTurnstile("register"); }
 
   // ===== 卡通角色互动 =====
   let charStateTimer = null;

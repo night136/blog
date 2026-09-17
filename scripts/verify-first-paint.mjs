@@ -30,6 +30,16 @@ function check(name, cond, detail = "") {
 // 全文匹配会把注释误判成代码。这个坑在 verify-lunar-core 里踩过一次。
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const appCode = strip(appSrc);
+
+// 切一个顶层函数体：从签名到第一个「两空格缩进的 }」行（本文件所有顶层函数都是这个缩进，
+// 函数内部的闭合花括号都比它深）。切片失败返回空串 —— 调用方**必须**自己判空，
+// 否则空串会让断言「看似通过」（本脚本第 38 行记过这个假绿坑）。
+function sliceFn(src, sig) {
+  const i = src.indexOf(sig);
+  if (i < 0) return "";
+  const j = src.indexOf("\n  }", i);
+  return j < 0 ? src.slice(i, i + 1200) : src.slice(i, j + 4);
+}
 const buildCode = strip(buildSrc);
 const manageCode = strip(manageSrc);
 
@@ -258,7 +268,7 @@ console.log("\n[8] 负向自检：把上面的判定逻辑作用在「改坏的�
     isBuildArtifactBody("正文提到 /generated/body-images/ 目录") === false);
 }
 
-console.log("\n[9] Turnstile 在首绘之后才注入，且不用会抛异常的 ready()");
+console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请求），且不用会抛异常的 ready()");
 {
   // 事故背景（2026-09-15 线上控制台，用户截图）：
   //   Uncaught TurnstileError: [Cloudflare Turnstile] Remove async/defer from the Turnstile api.js
@@ -303,12 +313,49 @@ console.log("\n[9] Turnstile 在首绘之后才注入，且不用会抛异常的
     /if \(!ready\)\s*\{?\s*ensureTurnstileScript\(\)\.then/.test(appCode),
     "未找到「就绪后重画」的分支");
 
-  // 静态证明「首绘之后才注入」：注入点是配置拉取（至少一个 RTT，实测排在 FCP 之后）的下一行，
-  // 启动段本身不碰 ensureTurnstileScript。
-  check("注入点是 /api/config 到齐之后（不在启动段直连）",
-    /async function loadTurnstileConfig\(\)[\s\S]{0,700}?renderTurnstile\(\);[\s\S]{0,80}?renderRegisterTurnstile\(\);/.test(appCode) &&
-    !/^\s*ensureTurnstileScript\(\);\s*$/m.test(appCode),
-    "启动段直接注入了脚本");
+  // ── 「用户没要就不注入」这条不变量（2026-09-17 收紧）──
+  // 旧断言只说「注入点在 /api/config 之后」，那只是个**代理指标**：/api/config 一个 RTT 就回来，
+  // api.js 于是仍落在首屏附近。冷缓存实测：首页白付了 api.js 866ms + 两个挑战 iframe 1662ms，
+  // 而首页/文章页根本用不到人机验证（docs/optimization-audit-2026-09-16.md §六）。
+  // 现在按「出口唯一 + 启动段不碰」写，不锁死某个函数里某一行的写法。
+  const cfgStaysLazy = (src) => {
+    const body = sliceFn(src, "async function loadTurnstileConfig()");
+    if (!body) return false;
+    // ① 必须存在「只在 turnstileNeeded 为真时才渲染」的兜底分支
+    if (!/if \(turnstileNeeded\)\s*\{[\s\S]{0,140}?renderTurnstile\(\)/.test(body)) return false;
+    // ② 把那个兜底分支摘掉之后，函数里不许再剩任何裸渲染
+    return !/render(Register)?Turnstile\(\)/.test(body.replace(/if \(turnstileNeeded\)\s*\{[\s\S]{0,140}?\}/, ""));
+  };
+
+  check("loadTurnstileConfig 只取 key、不无条件渲染（渲染只在 turnstileNeeded 兜底分支里）",
+    cfgStaysLazy(appCode),
+    "又在无条件 render —— api.js 会被拉回首屏，首页白付 ~866ms");
+  check("变异⑤（把无条件 render 写回 loadTurnstileConfig）会被判红",
+    cfgStaysLazy(appCode.replace(
+      "if (turnstileNeeded) { renderTurnstile(); renderRegisterTurnstile(); }",
+      "renderTurnstile(); renderRegisterTurnstile();")) === false,
+    "变异未生效或未被识破 —— 这条断言等于没测");
+
+  const hasLazyEntry = (src) =>
+    /function requireTurnstile\(which\)/.test(src) &&
+    /requireTurnstile\("guestbook"\)/.test(src) &&
+    /requireTurnstile\("register"\)/.test(src);
+  check("注入的唯一出口是 requireTurnstile()，留言墙与注册 tab 两个调用点都在",
+    hasLazyEntry(appCode),
+    "按需入口缺失，或某个需要人机验证的视图没走它");
+  check("变异⑥（留言墙不再调 requireTurnstile）会被判红",
+    hasLazyEntry(appCode.replace('requireTurnstile("guestbook");', "")) === false,
+    "删掉留言墙的调用点却仍判绿 —— 说明这条断言没盯住调用点");
+
+  // 启动段窗口：从 bindGuestbookForm() 那次调用到下一个顶层 function 之间。
+  // ⚠️ 只取这一小段，不能从这儿切到文件尾 —— 后面 renderTurnstile 的定义就在里面，会自造假红。
+  const startupFrom = appCode.indexOf("bindGuestbookForm();");
+  const startupTo = appCode.indexOf("function ", startupFrom);
+  const startupTail = startupFrom < 0 ? "" : appCode.slice(startupFrom, startupTo > startupFrom ? startupTo : startupFrom + 600);
+  check("能定位到启动段窗口（避免切片失败导致空串假绿）", startupTail.length > 40, "窗口长度=" + startupTail.length);
+  check("启动段不注入 api.js、也不渲染 widget",
+    !/ensureTurnstileScript|render(Register)?Turnstile\(\)/.test(startupTail),
+    "启动段里出现了注入/渲染： " + startupTail.replace(/\s+/g, " ").slice(0, 200));
   check("保留 preconnect（注入虽晚，握手提前）",
     /<link rel="preconnect" href="https:\/\/challenges\.cloudflare\.com"/.test(htmlSrc),
     "preconnect 缺失");
@@ -433,7 +480,9 @@ console.log("\n[11] 台账（记录本轮线上实测，供以后对比）");
   console.log("  冷缓存：FCP 1296ms（字体阻塞 ~400ms）· 首页列表 1425ms");
   console.log("  详情快照：16 篇里 7 篇含内嵌图，含图平均 530KB，最大 1,148,543 字节；不含图仅 0.8KB");
   console.log("  字体：CSS 未压缩 339KB / gzip 91KB / 303 条 @font-face / 101 个子集");
-  console.log("  Turnstile：api.js 原先 +515ms 就开始下载（和 app.js 抢首屏）→ 已改为首绘后注入");
+  console.log("  Turnstile：api.js 原先 +515ms 就开始下载（和 app.js 抢首屏）→ 改成首绘后注入 →");
+  console.log("    实测「首绘后」仍白付 866ms + 2 个挑战 iframe 1662ms（首页根本用不到人机验证）");
+  console.log("    → 2026-09-17 再收紧为「切到留言墙 / 注册表单才注入」（首页 0 个 cloudflare 请求）");
   console.log("    控制台里 'normal?lang=zh-cn' 那条 OTS 字体报错 + 两条 'No available adapters.'");
   console.log("    来自挑战 iframe 内部（challenges.cloudflare.com/cdn-cgi/challenge-platform/…/normal?lang=zh-cn），");
   console.log("    跨域、非本站代码，本站无法也不该去修 —— 本地实测证据见 .diag/local-turnstile-check.mjs");

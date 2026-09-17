@@ -47,16 +47,22 @@
        只请求 400/700/900 三档 —— 600 在正文里只用于次要小标签，缺字重时浏览器会按 CSS 规范就近回退到 700，
        视觉几乎无差，却能少下一整套 CJK 子集文件。900 是 Bento 标题的核心字重，必须保留。
 
-       ⚠️ 这里刻意**不放** <link rel="stylesheet">：那条样式表未压缩 339KB、gzip 91KB，
-       实测冷缓存要 460~590ms 才到，而它是**跨站渲染阻塞资源** —— 首屏所有内容（文章、侧栏、挂件）
-       会一起等它，实测把首绘从 ~900ms 拖到 1296ms。改由 app.js 在首绘之后动态注入
+       ⚠️ 这里**没有**字体表的 <link rel="stylesheet">，而且是刻意的 ——
+       「这里」指的是**上面这套字体的样式表**（未压缩 339KB / gzip 91KB，实测冷缓存要 460~590ms 才到）。
+       🚫 它**不是**在说 assets/style.css：那条在 </head> 前是**故意阻塞**的，理由写在它自己旁边。
+       （这两句曾被读混过一次，差点去「修」一个本来正确的东西 —— 见
+        docs/optimization-audit-2026-09-16.md §十。）
+       字体表曾经是**跨站渲染阻塞资源**，首屏所有内容（文章、侧栏、挂件）会一起等它，
+       实测把首绘从 ~900ms 拖到 1296ms；现改由 app.js 在首绘之后动态注入
        （动态插入的样式表不参与渲染阻塞，字体到了由 font-display:swap 自然替换）。
-       ⚠️ 也刻意**不用** media="print" onload 切换：见下方 style.css 那条注释 ——
+       ⚠️ 注入式方案刻意**不用** media="print" onload 切换（字体表、主样式表都不用）：
        小米/360 兼容模式对 onload 切换支持不良，会导致样式表永远不生效，项目已因此回滚过一次。
        preconnect 保留：注入时机虽晚，握手仍可提前完成。 -->
   <link rel="preconnect" href="https://fonts.font.im" crossorigin />
-  <!-- Turnstile 的 api.js 同理：首绘后才由 app.js 注入，这里只提前握手。不写 crossorigin ——
-       脚本标签本身不带 crossorigin，预连接必须与实际请求同类型才能复用这条连接。 -->
+  <!-- Turnstile 的 api.js：**首屏压根不注入**。只有用户切到「留言墙 / 注册表单」时，
+       app.js 的 requireTurnstile() 才去拉它 —— 首页/文章页一次都用不到，别把它写回 <script>。
+       这里只提前握手。不写 crossorigin —— 脚本标签本身不带 crossorigin，
+       预连接必须与实际请求同类型才能复用这条连接。 -->
   <link rel="preconnect" href="https://challenges.cloudflare.com" />
   <!-- 首屏关键 CSS 内联：变量 + 防闪 + 布局骨架 + 卡片入场动画 + 移动端布局兜底。即使 style.css 加载失败/延迟，页面也不会错乱、卡片也不会消失。 -->
   <style>
@@ -180,7 +186,12 @@
       }, 10000);
     });
   </script>
-  <!-- 完整样式表：恢复阻塞加载。部分浏览器（小米/360 兼容模式等）对 media="print" 的 onload 切换支持不良，会导致样式表永远无法生效，页面只剩关键 CSS 而布局错乱。阻塞加载可确保这些浏览器正常渲染。 -->
+  <!-- 完整样式表：**故意阻塞加载** —— 这不是漏改、也不是过时代码，🚫 别顺手改成 media="print" onload。
+       原因：小米/360 兼容模式等对 media="print" 的 onload 切换支持不良，会导致样式表永远无法生效，
+       页面只剩上面的关键 CSS、布局错乱（本项目已因此回滚过一次，详见 docs/first-paint.md）。
+       ⚠️ 别和上面字体表那条「刻意不放 <link rel=stylesheet>」读混：那条说的是 fonts.font.im 的字体表。
+       代价是真实的：实测首页 TTFB→首绘 增量 658ms，而同样内容的 /404.html（纯内联 CSS）只要 55ms
+       ⇒ 约 600ms 是在等这张表（docs/optimization-audit-2026-09-16.md §三）。要动它先建 FCP/CLS 判据。 -->
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
@@ -617,8 +628,11 @@
   </div>
 
   <!-- app.js 用 defer：解析完就执行，不阻塞 HTML 解析。
-       Turnstile 的 api.js **不在这里**，由 app.js 首绘之后按需注入（软依赖），原因有二：
+       Turnstile 的 api.js **不在这里**，由 app.js 在用户真的需要时注入（软依赖），原因有二：
          ① 它是跨境第三方脚本，写在这儿会和 app.js / style.css 抢首屏带宽（实测它 515ms 就开始抢）；
+            —— 而且首屏根本用不到人机验证（只有留言墙 / 注册表单要）。改动前是「首绘之后立刻注入」，
+            实测冷缓存首页仍白付了 api.js 866ms + 两个挑战 iframe 1662ms
+            （docs/optimization-audit-2026-09-16.md §六）；现在只在切视图时注入。
          ② 它带 async/defer 时，Cloudflare 的 turnstile.ready() 会**直接抛未捕获异常**
             （[Cloudflare Turnstile] Remove async/defer from the Turnstile api.js script tag...），
             而 app.js 又必须排在它前面先启动 —— 自己注入 + 只听 <script> 的 load 事件可以同时满足两边。
