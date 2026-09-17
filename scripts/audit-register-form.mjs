@@ -116,7 +116,10 @@ try {
   };
   const shot = async (name) => {
     const r = await cdp.send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(join(OUT, name), Buffer.from(r.data, "base64"));
+    // ⚠️ 文件名必须带视口与模式：否则同一个名字会被不同视口的运行**互相覆盖**，
+    //    留下一张"叫 mobile 其实是 1024 宽"的图（第一次跑就踩了）。
+    const f = name.replace(/\.png$/, "") + `-${W}x${H}${TOUCH ? "-touch" : "-mouse"}.png`;
+    writeFileSync(join(OUT, f), Buffer.from(r.data, "base64"));
   };
 
   console.log(`\n视口 ${W}×${H}  目标 ${BASE}`);
