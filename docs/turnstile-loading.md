@@ -93,9 +93,43 @@ function renderTurnstile(ready) {           // 未就绪 → 就绪后重画；r
 
 - **`index.html` 删掉 Turnstile 脚本标签**，只留 `<link rel="preconnect" href="https://challenges.cloudflare.com">`。
   收益是顺带的：api.js 从首屏关键路径上移走（实测原实现 **+515ms** 就开始和 app.js / style.css 抢带宽）。
+  ⚠️ 2026-09-17 又收紧了一步：这一版仍是「首绘之后「就」注入」，首页照样白付 —— 见下面 ★ 那节。
 - **提交路径先 `await ensureTurnstileScript()`**：否则「刚打开页面就点提交」会被误报成「请先完成人机验证」。
 - **`getResponse` 前先确认 widget id 非空**：脚本已到但 widget 还没渲染时，不要拿 `null` 去问。
 - 启动段那三行 `turnstile.ready(...)` 删除，注释写清为什么不能放回来。
+
+## ★ 2026-09-17 再收紧：「首绘之后注入」还不够，要改成「**用户没要就不注入**」
+
+上面那版把 api.js 从首屏关键路径挪走了，但注入点仍然是「`loadTurnstileConfig()` 拿到 Site Key 之后」。
+而 `/api/config` 一个 RTT 就回来了 —— 所以 api.js 依旧落在首屏附近。
+冷缓存首页实测：**3 条** `challenges.cloudflare.com` 请求（api.js 28157 B + 2 个挑战 iframe），
+而首页 / 文章详情 / 归档 / 关于页**一次都用不到**人机验证。
+
+改动（`assets/app.js`）：
+
+- `loadTurnstileConfig()` **只取 key，不渲染**（渲染会连锁触发 `ensureTurnstileScript()`）；
+- 新增唯一出口 `requireTurnstile(which)` —— 只有「留言墙」「注册 tab」两个调用点；
+- 留言墙那次**只注入脚本、不渲染**（此刻视图还没 `active`，容器 `display:none`，会被画成 0 宽），
+  渲染仍由 `loadGuestbook()` 拉完数据后触发；顺带把「先等数据、再串行等脚本」改成**并行**；
+- 竞态兜底：用户在 `/api/config` 回来之前就点了 → `turnstileNeeded` 记一笔，key 到了补渲染；
+  两个 `render*` 相应把容器 `hidden` 复位；
+- 留言墙接口失败时也画验证框（否则脚本已就绪 ⇒ 提交路径跳过「等脚本」分支，第一次提交必然误报）。
+
+判据与实测见 `docs/optimization-audit-2026-09-16.md` §六（探针 `.diag/turnstile-lazy.mjs`，
+带 `--neg` 造故障、`--oldapp` 做同域名 A/B）。
+
+### ⚠️ 待定性：注册框的真实挑战在自动化环境下 token 恒为 0（与本次改动无关）
+
+同一次探针里留言墙拿到 **794 字符真 token**，注册框是 **0**。A/B（`--oldapp`，同域名换代码）：
+
+| 条件 | 留言墙 | 注册框 |
+|---|---|---|
+| 旧行为（启动时无条件 render） | 794 ✅ | 0 ❌ |
+| 当前行为（切 tab 时才 render） | 794 ✅ | 0 ❌ |
+
+⇒ **不是本次改动引入的。** 本地用官方测试 key 时两处都正常出 token，说明前端渲染链路是通的；
+注册容器实测 `326×72`、`children=1`、CSS 也没藏。**未定性**，需要一次真机手动注册才能判断
+它只是自动化环境的差异、还是线上注册流程真的写不出去。
 
 ## 怎么验（不部署也能端到端）
 
@@ -164,6 +198,9 @@ https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile/f/av0
   线上「一直转圈」若属 110200（域名未授权），见 `docs/turnstile-110200.md`。
 - 🚫 **绝不用 `turnstile.ready()`**，api.js 必须由 `ensureTurnstileScript()` 注入、只认 `load`/`error`。
 - 🚫 **别把 api.js 的 `<script>` 写回 `index.html`** —— 一是会重新抢首屏带宽，二是又变回「与 app.js 抢执行顺序」。
+- 🚫 **别在 `loadTurnstileConfig()` 里无条件 `render*`** —— 那等于「首绘之后立刻注入」，
+  首页会白付 3 个跨境请求 / 28KB。渲染只能经 `requireTurnstile()` 从「留言墙 / 注册 tab」进来。
+  这条有守护：`verify-first-paint` [9]（含变异⑤⑥自证）。
 - 🚫 **别把降级提示退回成空灰框 + 「请先完成人机验证」** —— 那是让用户去点一个不存在的验证框。
   同理：**重试时不许漏掉置空 widget id**（会复现 `Could not find widget for provided container` 冻结态）。
 - ⚠️ 改这块后必须跑 `node scripts/verify-first-paint.mjs`，并把「把 `ready()` 写回启动段 → 断言必须判红」做一遍。
