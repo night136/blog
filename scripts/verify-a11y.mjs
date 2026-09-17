@@ -186,6 +186,41 @@ function audit({ html, js, css }) {
       navLine.length > 0 && !/window\.scrollTo/.test(navLine),
       navLine.replace(/\s+/g, " ").slice(0, 160));
   }
+
+  // ── #21 注册表单：确认密码（2026-09-17 加） ──
+  {
+    // 只在注册表单范围内找字段，别把登录表单的一起算进来
+    const regStart = html.indexOf('id="registerForm"');
+    const regEnd = regStart >= 0 ? html.indexOf("</form>", regStart) : -1;
+    const regHtml = regEnd > regStart ? html.slice(regStart, regEnd) : "";
+    const p1 = (regHtml.match(/<input[^>]*name="password"[^>]*>/g) || [])[0] || "";
+    const p2 = (regHtml.match(/<input[^>]*name="password2"[^>]*>/g) || [])[0] || "";
+    add("#21 注册表单有确认密码框", !!p2, regStart < 0 ? "找不到 #registerForm" : "没有 name=password2 的 input");
+    add("#21 确认密码框与密码框同为密码类型且必填",
+      /type="password"/.test(p2) && /required/.test(p2),
+      p2 ? p2.slice(0, 150) : "（缺字段）");
+
+    const hb = bodyOf(js, "async function handleRegister(") || "";
+    const cmpAt = hb.indexOf("password2");
+    const tsAt = hb.indexOf("takeFormTurnstileToken");
+    // 🔴 这条是整组里最容易被后续重构改坏的不变量：Turnstile token 是**一次性**的，
+    //    若先取 token 再校验一致性，用户每输错一次都得重新过一遍人机挑战才能再提交。
+    add("#21 两次密码的一致性校验发生在取 Turnstile token **之前**",
+      cmpAt >= 0 && tsAt >= 0 && cmpAt < tsAt,
+      `password2@${cmpAt} takeFormTurnstileToken@${tsAt}（前者必须更小）`);
+
+    const fetchAt = hb.indexOf('fetch("/api/register"');
+    const fetchSeg = fetchAt >= 0 ? hb.slice(fetchAt, fetchAt + 700) : "";
+    add("#21 确认密码不随请求发往服务端（服务端只看 password）",
+      fetchSeg.length > 0 && !/password2/.test(fetchSeg),
+      fetchAt < 0 ? "找不到对 /api/register 的 fetch" : "fetch 的 body 里出现了 password2 —— 它对安全性零贡献，不该发出去");
+
+    add("#21 注册请求有防重复提交锁（否则双击白耗一个一次性 token）",
+      /if \(registerBusy\) return;/.test(hb) && /registerBusy = true;/.test(hb) && /finally/.test(hb),
+      "handleRegister 没有 busy 锁或没有 finally 收尾");
+    add("#21 密码长度在前端先拦一次（省一次请求与一个 token）",
+      /minlength="6"/.test(p1), p1 ? p1.slice(0, 150) : "（缺字段）");
+  }
   return r;
 }
 
@@ -277,6 +312,39 @@ console.log("\n[2] 负向自证（造故障必须让对应判据变红）");
         'navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); }));',
         'navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0 }); }));'),
       expect: /#20 导航点击不再自行 scrollTo\(0\)/,
+    },
+    {
+      // 模拟真实回归：把一致性校验整段**搬到取 token 之后**（顺序一颠倒，用户每次输错
+      // 都要重新过一遍人机挑战）。造这种故障必须真的搬动，不能只是删掉 —— 删掉虽然也能
+      // 让判据变红，但验不到"位置"这一层。
+      label: "#21 把一致性校验搬到取 token 之后",
+      file: "js",
+      apply: (s) => {
+        const m = s.match(/    if \(fd\.get\("password"\) !== fd\.get\("password2"\)\) \{[\s\S]*?\n    \}\n/);
+        if (!m) return s; // 没命中 ⇒ 交给下面「造故障这一步本身必须成功」那条断言报红
+        return s
+          .replace(m[0], "")
+          .replace(
+            /(const tsReg = await takeFormTurnstileToken\(tsTarget\("register"\), ""\);\n)/,
+            "$1" + m[0]
+          );
+      },
+      expect: /#21 两次密码的一致性校验发生在取 Turnstile token/,
+    },
+    {
+      label: "#21 去掉确认密码框的 required",
+      file: "html",
+      apply: (s) => s.replace(/(<input[^>]*name="password2"[^>]*?) required/, "$1"),
+      expect: /#21 确认密码框与密码框同为密码类型且必填/,
+    },
+    {
+      label: "#21 把确认密码一起发给服务端",
+      file: "js",
+      apply: (s) => s.replace(
+        'password: fd.get("password"), turnstileToken: tsReg.token',
+        'password: fd.get("password"), password2: fd.get("password2"), turnstileToken: tsReg.token'
+      ),
+      expect: /#21 确认密码不随请求发往服务端/,
     },
   ];
 
