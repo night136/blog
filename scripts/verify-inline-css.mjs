@@ -21,7 +21,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { SECURITY_HEADERS } from "../functions/_lib/security.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -95,6 +97,30 @@ function audit(html, cssText) {
     add("内联块排在关键 CSS 之后（级联顺序未变）", criticalEnd > 0 && at > criticalEnd,
       `关键CSS结束@${criticalEnd} 内联块@${at}`);
     add("关键 CSS 块仍在（内联不是替换掉它）", /\.js \.card\{opacity:0\}/.test(html), "关键 CSS 特征规则不见了");
+  }
+
+  // ── CSP 白名单里的 sha256 必须命中**构建产物**里那段内联启动脚本 ──
+  // 这一环只有这里能验：verify-security-headers 验的是"源码 ↔ CSP"，但真正发给浏览器的是
+  // **构建产物**（build.mjs 会就地改写 index.html）。万一以后构建顺手动了那段脚本
+  // （归一化换行、改个字符串……），源码与 CSP 都还是对的，线上却是白屏。
+  // 所以把"产物 ↔ CSP"也钉住，整条链路才算闭合。
+  //
+  // ⚠️ 必须按 **LF** 归一化后再算：本仓库 core.autocrlf=true，
+  //    工作区是 CRLF，而提交上去、被 CF 构建、最终发给浏览器的都是 **LF**。
+  //    这里在临时目录里跑构建，产物继承工作区的 CRLF ⇒ 直接算会得到另一个哈希
+  //    （第一版就是这样误红：产物 4913 字符 vs 线上 4834，差的就是那 79 个 \r）。
+  {
+    const lf = html.replace(/\r\n/g, "\n");
+    const stripped = lf.replace(/<!--[\s\S]*?-->/g, "");
+    const block = (stripped.match(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/) || [])[1];
+    const hash = block ? "sha256-" + createHash("sha256").update(block, "utf8").digest("base64") : null;
+    const rawHash = block ? "sha256-" + createHash("sha256").update(html.replace(/<!--[\s\S]*?-->/g, "").match(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/)?.[1] || "", "utf8").digest("base64") : null;
+    const csp = SECURITY_HEADERS["Content-Security-Policy"] || "";
+    add("构建产物内联脚本的哈希 == CSP 白名单里的哈希（构建不许改动那段脚本）",
+      !!hash && csp.includes(hash),
+      hash
+        ? `产物(LF) ${hash}${rawHash && rawHash !== hash ? `；产物(原样 CRLF) ${rawHash}（差值只是行尾，说明构建确实没改内容）` : ""} 不在 CSP 里`
+        : "产物里没抽到内联 <script>");
   }
   return r;
 }

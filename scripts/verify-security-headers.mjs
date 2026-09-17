@@ -31,6 +31,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -175,12 +176,73 @@ try {
   check("HSTS 有效期 ≥ 180 天", Number((hsts.match(/max-age=(\d+)/) || [])[1] || 0) >= 15552000, hsts);
   check("X-Frame-Options 是 DENY 或 SAMEORIGIN", /^(DENY|SAMEORIGIN)$/i.test(SEC["X-Frame-Options"] || ""), SEC["X-Frame-Options"]);
 
-  // CSP 只许上「不需要 nonce」的那几条 —— 一旦有人补上 script-src/style-src，页面会当场白屏
+  // ══ CSP ══
+  // ⚠️ 这条断言原来是「CSP 里**不许**出现 script-src / style-src / default-src，加了就白屏」。
+  //    那是 §八「上半」当时的正确自保（还没有哈希机制），但 §八「下半」落地之后就变成**反向错误**：
+  //    它会拦住正确的加固。所以这里换成两条真正的不变量：
+  //      ① 哈希必须与 index.html 里那段内联脚本**逐字对应**（错一个字符 = 整段启动脚本被拒）；
+  //      ② style-src 必须保留 'unsafe-inline'（19 处 style 属性 + 构建期内联的整张 style.css，
+  //         去掉就是白屏，见 functions/_lib/security.js 里的完整论证）。
+  //    两条都配负向自证，否则"判绿"可能只是因为判据写得太松。
   const csp = SEC["Content-Security-Policy"] || "";
-  check("CSP 里没有 script-src / style-src / default-src（页面有 3 段内联 <script> + 构建期内联的整张 style.css，加了就白屏）",
-    !/(script-src|style-src|default-src)/i.test(csp), csp);
+  const inlineScriptHash = () => {
+    // ⚠️ 必须剥 HTML 注释再抽：index.html 的注释里**提到**过 <script>（讲"别把它写回 <script>"），
+    //    直接 match 会抓到注释里那一段（实测抽出 6961 字符 vs 真实 4834 字符，哈希完全不对）。
+    // ⚠️ 必须按 **LF** 计算：仓库 core.autocrlf=true，提交后线上收到的是 LF；
+    //    用工作区的 CRLF 原文算出来是另一个哈希（实测线上版差 115 个字符）⇒ 线上直接白屏。
+    const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8").replace(/\r\n/g, "\n");
+    const stripped = html.replace(/<!--[\s\S]*?-->/g, "");
+    const blocks = [...stripped.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    return { blocks, hashes: blocks.map((b) => "sha256-" + createHash("sha256").update(b, "utf8").digest("base64")) };
+  };
+  const { blocks: inlineBlocks, hashes: realHashes } = inlineScriptHash();
+  const cspHashes = csp.match(/sha256-[A-Za-z0-9+/=]+/g) || [];
+  const missing = realHashes.filter((h) => !cspHashes.includes(h));
+  const extra = cspHashes.filter((h) => !realHashes.includes(h));
+
   check("CSP 覆盖 object-src / base-uri / frame-ancestors 三条",
     /object-src\s+'none'/.test(csp) && /base-uri\s+'self'/.test(csp) && /frame-ancestors\s+'none'/.test(csp), csp);
+  check(`CSP 的 script-src 哈希与 index.html 的内联脚本逐字对应（${inlineBlocks.length} 段）`,
+    inlineBlocks.length > 0 && missing.length === 0 && extra.length === 0,
+    [
+      inlineBlocks.length === 0 ? "没抽到内联 <script> 块（抽取方式失效？）" : "",
+      missing.length ? `缺这些哈希（把下面这些填进 _headers 与 security.js 的 script-src）：${missing.join(" ")}` : "",
+      extra.length ? `CSP 里有对不上任何内联块的哈希（多半是脚本改过但哈希没更新）：${extra.join(" ")}` : "",
+    ].filter(Boolean).join(" ｜ "));
+  check("script-src 里有 'self' 与 Turnstile 的域名（app.js / vendor 脚本 / api.js 才有来源）",
+    /script-src[^;]*'self'/.test(csp) && /script-src[^;]*https:\/\/challenges\.cloudflare\.com/.test(csp), csp);
+  check("script-src **没有** 'unsafe-inline'（否则内联注入脚本这层防线等于没上）",
+    !/script-src[^;]*'unsafe-inline'/.test(csp), csp);
+  check("script-src **没有** 'unsafe-eval'", !/script-src[^;]*'unsafe-eval'/.test(csp), csp);
+  check("index.html 里没有内联事件处理器（onclick=… 不在哈希范围内，会被 script-src 拦掉）",
+    (() => {
+      // ⚠️ 两道剥离缺一不可，否则会数出**假故障**：
+      //   ① 剥 HTML 注释 —— 注释里会**提到** onclick（解释为什么不能用它）；
+      //   ② 剥 <script> 块 —— 内联脚本里的 JS 注释同样会提到 onclick，而内联事件处理器
+      //      只可能出现在**标记**里。第一版只剥了 ①，于是被自己那句解释注释判了红。
+      const markup = fs.readFileSync(path.join(ROOT, "index.html"), "utf8")
+        .replace(/<script[\s\S]*?<\/script>/g, "")
+        .replace(/<!--[\s\S]*?-->/g, "");
+      return !/\son(click|load|error|change|submit|input|keydown|mouseover|focus|blur)=/.test(markup);
+    })(),
+    "内联事件处理器必须改成 addEventListener（绑到那段有哈希白名单的内联脚本里）");
+  check("style-src 保留了 'unsafe-inline'（19 处 style 属性 + 构建期内联样式表，去掉即白屏）",
+    /style-src[^;]*'unsafe-inline'/.test(csp), csp);
+  check("style-src 只放行站内与字体镜像（不再允许任意外域样式表）",
+    /style-src\s+'self'/.test(csp) && /style-src[^;]*https:\/\/fonts\.font\.im/.test(csp), csp);
+
+  // 负向自证：把哈希改掉一个字符，上面那条必须判红（否则它只是恒真的摆设）
+  {
+    const broken = realHashes.length ? csp.replace(realHashes[0], realHashes[0].slice(0, -3) + "AAA=") : csp;
+    const brokeIt = broken !== csp;
+    const cspHashesBroken = broken.match(/sha256-[A-Za-z0-9+/=]+/g) || [];
+    check("负向自证：把哈希改掉 ⇒ 「哈希逐字对应」必须判红",
+      brokeIt && realHashes.some((h) => !cspHashesBroken.includes(h)),
+      brokeIt ? "改完仍然对得上？" : "造故障没命中（CSP 里原本就没有哈希？）");
+  }
+  check("负向自证：去掉 'unsafe-inline' ⇒ 「style-src 保留 unsafe-inline」必须判红",
+    !/style-src[^;]*'unsafe-inline'/.test(csp.replace(/'unsafe-inline'/g, "")) && csp.includes("'unsafe-inline'"),
+    "replace 没命中");
 
   // Permissions-Policy 反查站点真实用法：禁掉了真在用的能力，按钮就死了
   {

@@ -7,13 +7,22 @@
 #     scripts/verify-security-headers.mjs 会逐个头比对，漏改就判红。
 
 # 全局安全头：对所有静态资源生效（含 /404.html、/admin/ 之类）
+# ⚠️ CSP 里的 sha256 是 index.html **内联启动脚本**的哈希，一段都不能差 —— 差一个字符，
+#    浏览器就拒绝执行那段脚本：__APP_BOOTED__ 永不置位 ⇒ 10s 后弹兜底横幅、卡片动画不点亮。
+#    必须按 **LF** 计算（仓库 core.autocrlf=true，线上收到的是 LF；拿工作区的 CRLF 原文算会得到另一个值）。
+#    改过那段脚本后跑 node scripts/verify-security-headers.mjs，它会重算并把该填的值直接打出来。
+#    同时别忘改 functions/_lib/security.js 里那份（两份拷贝，守护会逐字比对）。
+# script-src 之所以没有 'unsafe-inline'：内联事件处理器（onclick=…）不在哈希范围内，
+#   所以兜底横幅那两个按钮已改成 addEventListener（绑在同一段内联脚本里）。
+# style-src 之所以留 'unsafe-inline'：19 处 style="…" 属性 + 构建期才生成的 <style> 内联块，
+#   哈希在样式这一侧做不到（详见 functions/_lib/security.js 里的完整论证）。
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000
   X-Frame-Options: DENY
   Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), midi=(), serial=(), hid=()
-  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'sha256-CJjlP287d9o8os05q1pTscyxju+Buc5X14AenQ46bUY=' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.font.im
 
 # 静态资源：长缓存 + 后台再验证（stale-while-revalidate）。
 # 跨境网络抖动时浏览器直接命中本地缓存秒开，后台静默校验更新，
