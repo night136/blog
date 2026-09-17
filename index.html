@@ -185,6 +185,25 @@
         }
       }, 10000);
     });
+    /* 兜底横幅里两个按钮的行为。
+       以前它们是内联 onclick="…"，CSP 上了 script-src（不含 'unsafe-inline'）之后会被浏览器拦掉 ——
+       而那正好是"站点已经启动失败、只剩这个横幅能自救"的时刻。改到这里绑：
+       本段脚本在 CSP 的 sha256 白名单里（见 _headers / functions/_lib/security.js）。
+       ⚠️ 必须等 DOMContentLoaded：横幅 DOM 在本段脚本**之后**才被解析出来，此刻 getElementById 还是 null。
+       ⚠️ location.reload(true) 的 true 是早已废弃的参数（现代浏览器直接忽略），改成无参调用，行为一致。 */
+    document.addEventListener('DOMContentLoaded', function () {
+      var hard = document.getElementById('bootHardReload');
+      if (hard) hard.addEventListener('click', function () { location.reload(); });
+      var clear = document.getElementById('bootClearCache');
+      if (clear) clear.addEventListener('click', function () {
+        var reload = function () { location.reload(); };
+        if ('caches' in window) {
+          caches.keys().then(function (ks) {
+            return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+          }).then(reload, reload);       // 清缓存失败也要刷新，别把用户卡在原地
+        } else { reload(); }
+      });
+    });
   </script>
   <!-- 完整样式表。**源码里保留外链**，但线上**不会**真的外链 —— 构建期 build.mjs 会把它
        内联进 <head>（scripts/lib/inline-css.mjs），所以首绘不再等这一个跨境往返：
@@ -200,11 +219,17 @@
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
+  <!-- #16 跳过导航链接（skip link）：键盘用户按下的**第一个** Tab 就该落在它上面。
+       在此之前，要到达正文必须依次 Tab 过「站点名 → 5 个导航 → 主题 → 汉堡」
+       （侧边栏同一批 .nav-link 还会再来一轮），每次翻页都要重复一遍。
+       ⚠️ 视觉隐藏只能用 clip / 1px 尺寸这套写法，**不能**用 display:none 或 visibility:hidden
+       —— 那两种会让元素不可聚焦，"跳过"这个功能本身就不存在了。 -->
+  <a class="skip-link" href="#main-content">跳到正文</a>
   <div class="layout">
     <!-- 顶部玻璃态导航栏 -->
     <header class="topbar" id="topbar">
       <div class="topbar-inner">
-        <a href="#" class="topbar-brand nav-link active" data-view="home">昉昕<span>的博客</span></a>
+        <a href="#" class="topbar-brand nav-link active" data-view="home" aria-current="page">昉昕<span>的博客</span></a>
         <nav class="topbar-nav">
           <a href="#" class="nav-link" data-view="home">首页</a>
           <a href="#" class="nav-link" data-view="archive">归档</a>
@@ -233,7 +258,7 @@
         </div>
       </div>
       <nav class="nav" id="mainNav">
-        <a href="#" class="nav-link active" data-view="home">首页</a>
+        <a href="#" class="nav-link active" data-view="home" aria-current="page">首页</a>
         <a href="#" class="nav-link" data-view="archive">归档</a>
         <a href="#" class="nav-link" data-view="guestbook">留言墙</a>
         <a href="#" class="nav-link" data-view="member">👥 会员专区</a>
@@ -258,7 +283,11 @@
     <div class="sidebar-overlay" id="sidebarOverlay" hidden></div>
 
     <!-- 主内容区 -->
-    <main class="content">
+    <!-- ⚠️ tabindex="-1" 是 skip link 能真正生效的前提：锚点跳转默认**只滚动、不移动焦点**
+         （Chrome 对 focusable 目标才会移焦点）。少了它，按回车后视觉滚到了正文，
+         但下一个 Tab 仍然从顶栏继续 —— 键盘用户等于白跳一次。
+         焦点外框由 .content:focus 关掉（整列描边很难看），下一个 Tab 落到搜索框，那里有正常焦点环。 -->
+    <main class="content" id="main-content" tabindex="-1">
       <!-- 首页视图 -->
       <section class="view view-home active">
         <header class="hero">
@@ -464,9 +493,13 @@
 
   <button class="back-top" id="backTop" aria-label="返回顶部">↑</button>
 
-  <!-- 图片灯箱（点击文章正文图片放大） -->
-  <div class="lightbox" id="lightbox" hidden>
-    <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭">×</button>
+  <!-- 图片灯箱（点击文章正文图片放大）
+       #15 焦点管理：role="dialog" + aria-modal 让读屏软件把它当成**独立对话层**，
+       打开时不再继续朗读被遮住的正文；aria-label 提供可读的名字（否则只念出一个"×"）。
+       ⚠️ aria-modal 只是「声明」，浏览器不会因此把 Tab 关在里面 ——
+       真正的 Tab 回卷在 app.js 的 trapLightboxFocus()，与分享面板/登录弹窗同款。 -->
+  <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="图片预览">
+    <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭图片预览">×</button>
     <img id="lightboxImg" src="" alt="" />
   </div>
 
@@ -602,6 +635,7 @@
                  并避免 Tab 停在点不动的链接上（读屏原名是「G」「●」「✕」，等于没名字）。 -->
             <a href="#" class="forgot" aria-disabled="true" tabindex="-1" aria-label="忘记密码（暂未开放）">忘记密码？</a>
           </div>
+          <div class="auth-turnstile" id="loginTurnstile"></div>
           <button type="submit" class="btn-submit">登录</button>
           <p class="form-msg" id="loginMsg" role="status" aria-live="polite"></p>
           <p class="social-row">或使用第三方登录：<a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="Google 登录（暂未开放）">G</a><a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="微博登录（暂未开放）">●</a><a href="#" class="social-link" aria-disabled="true" tabindex="-1" aria-label="X 登录（暂未开放）">✕</a></p>
@@ -626,8 +660,13 @@
     当前域名：<code id="bootHost" style="color:#F0B06E"></code><br>
     <span id="bootMsg" style="color:#d9b48a"></span>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button onclick="location.reload(true)" style="cursor:pointer;background:#F0B06E;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">硬刷新</button>
-      <button onclick="if('caches' in window){caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).then(function(){location.reload(true);});}else{location.reload(true);}" style="cursor:pointer;background:#d9b48a;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">清缓存刷新</button>
+      <!-- ⚠️ 这两个按钮原来写的是内联 onclick="…"。CSP 加上 script-src（且**不含** 'unsafe-inline'）之后，
+           内联事件处理器会被浏览器直接拦掉 —— 而且恰好是在"站点已经启动失败、只剩这个横幅可自救"的时刻，
+           属于最不能失效的地方。改成 id + 在顶部那段内联启动脚本里 addEventListener
+           （那段脚本本身在 CSP 的 sha256 白名单里，见 _headers / functions/_lib/security.js）。
+           🚫 别图省事把 'unsafe-inline' 加回 script-src —— 那等于把"拦注入脚本"这条防线整个放弃掉。 -->
+      <button id="bootHardReload" type="button" style="cursor:pointer;background:#F0B06E;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">硬刷新</button>
+      <button id="bootClearCache" type="button" style="cursor:pointer;background:#d9b48a;color:#2a1f1a;border:0;border-radius:8px;padding:8px 14px;font-weight:600;">清缓存刷新</button>
       <a href="https://blog-6p3.pages.dev/" style="display:inline-block;background:transparent;color:#F0B06E;border:1px solid #F0B06E;border-radius:8px;padding:8px 14px;text-decoration:none;font-weight:600;">改用正确域名 →</a>
     </div>
   </div>

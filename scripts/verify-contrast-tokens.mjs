@@ -24,6 +24,22 @@ function check(name, cond, detail = "") {
   else { fail++; console.log("  ❌ " + name + (detail ? "\n     " + detail : "")); }
 }
 
+// 取一段花括号配对的函数体：用于「这一个函数里有没有做某件事」的体检。
+// 不用 `/function x\(\)[\s\S]{0,N}?}/` 那种带长度上限的写法 —— N 是个会过期的代理指标
+// （verify-mobile-guards 里就因为这个把 showView 误判成"未找到"）。
+function fnBody(src, needle) {
+  const at = src.indexOf(needle);
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let d = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") d++;
+    else if (src[i] === "}") { d--; if (d === 0) return src.slice(open + 1, i); }
+  }
+  return null;
+}
+
 // ── 色彩换算 ──
 function parseColor(v) {
   const s = String(v).trim();
@@ -311,15 +327,31 @@ console.log("\n[7] 登录弹窗（含注册）与分享面板同源：底色、�
   // 它们排在 .btn-submit 之后 ⇒ last 指错人 ⇒ 回卷条件 active === last 永不成立
   // ⇒ 连按 Tab 第 7 次逃出面板（.diag/out/auth/after-390.txt）。
   // 光有 getClientRects() 那道可见性过滤挡不住它：那些链接是可见的，只是不可 Tab 达。
-  const focusFilter = /\.filter\(\s*\(el\)\s*=>\s*!el\.disabled\s*&&\s*el\.tabIndex\s*>=\s*0\s*&&\s*el\.getClientRects\(\)\.length\s*>\s*0\s*\)/g;
-  check("两个焦点候选集都按 tabIndex >= 0 过滤（否则 last 会指向 tabindex=-1 的元素）",
-    (appJs.match(focusFilter) || []).length === 2,
-    "命中 " + (appJs.match(focusFilter) || []).length + " 处，期望 2 处（shareFocusables + authFocusables）");
+  //
+  // ⚠️ 这条断言原来是「命中处数 === 2（shareFocusables + authFocusables）」。
+  //    2026-09-17 加第三个候选集（lightboxFocusables，§七#15）时它立刻误红 ——
+  //    而那个新候选集**确实**带了这道过滤。把"当时有几个"写死就是又一次拿代理指标当判据。
+  //    真正的不变量是：**每一个** xxxFocusables() 都同时带「可见」和「tabIndex>=0」两道过滤；
+  //    枚举出来逐个体检，将来的第四个自动被覆盖。
+  const focusablesFns = [...appJs.matchAll(/function\s+(\w*Focusables)\s*\(\s*\)\s*\{/g)].map((m) => m[1]);
+  const badCandidates = focusablesFns.filter((name) => {
+    const body = fnBody(appJs, `function ${name}(`);
+    return !body || !/el\.tabIndex\s*>=\s*0/.test(body) || !/el\.getClientRects\(\)\.length\s*>\s*0/.test(body);
+  });
+  check(`每个焦点候选集都按「可见 + tabIndex>=0」过滤（共 ${focusablesFns.length} 个：${focusablesFns.join(", ")}）`,
+    focusablesFns.length >= 2 && badCandidates.length === 0,
+    focusablesFns.length < 2
+      ? `只找到 ${focusablesFns.length} 个候选集，解析方式可能已失效：${focusablesFns.join(", ")}`
+      : `这些候选集缺过滤：${badCandidates.join(", ")}`);
   check("负向自检：删掉 tabIndex 过滤必须判红",
-    (appJs.replace(/el\.tabIndex\s*>=\s*0\s*&&\s*/g, "").match(focusFilter) || []).length === 0,
+    focusablesFns.length > 0 && (() => {
+      const broken = appJs.replace(/el\.tabIndex\s*>=\s*0\s*&&\s*/g, "");
+      return broken !== appJs && focusablesFns.some((name) => {
+        const body = fnBody(broken, `function ${name}(`);
+        return !body || !/el\.tabIndex\s*>=\s*0/.test(body);
+      });
+    })(),
     "replace 没命中");
-  check("负向自检：断言器真的能区分「有 last 无回卷」的写法",
-    (appJs.replace(/el\.tabIndex\s*>=\s*0\s*&&\s*/g, "").match(focusFilter) || []).length !== 2);
   check("打开弹窗时把焦点移进去", /openAuth[\s\S]{0,600}?\.focus\(\)/.test(appJs));
   check("关闭弹窗时把焦点还给触发按钮", /authReturnFocus[\s\S]{0,200}?\.focus\(\)/.test(appJs));
   check("authReturnFocus 声明在 IIFE 顶部（免得落进 TDZ，见 verify-no-tdz）",

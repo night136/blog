@@ -16,6 +16,24 @@ function check(name, cond, detail = "") {
   else { fail++; console.log("  ❌ " + name + (detail ? "\n     实际: " + detail : "")); }
 }
 
+// ── 取一段花括号配对的函数体 ──
+// ⚠️ 这里**刻意不设长度上限**。原先下面那条 showView 断言写的是
+//    `/function showView[\s\S]{0,1200}?\n  \}/` —— 1200 是一个会过期的代理指标：
+//    showView 后来加了 §七#20 的滚动位置还原（自然变长），断言立刻报「未找到 showView」，
+//    而代码完全正确。按花括号配对取，不管它多长，取到的总是它自己。
+function fnBody(src, needle) {
+  const at = src.indexOf(needle);
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let d = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") d++;
+    else if (src[i] === "}") { d--; if (d === 0) return src.slice(open + 1, i); }
+  }
+  return null;
+}
+
 console.log("\n[1] 农历：数据内联，窄屏不再需要「按需加载」");
 {
   // 这一节的前身是「窄屏不得无条件下载 426KB 的 lunar.js」。数据内联后，
@@ -229,10 +247,10 @@ console.log("\n[8] 抽屉：手势 / aria-expanded / ESC 三者齐备");
   check("ESC 逐层关闭里包含抽屉",
     /e\.key\s*!==\s*"Escape"[\s\S]{0,400}?classList\.contains\(\s*"open"\s*\)[\s\S]{0,160}?setSidebar\(false\)/.test(appSrc),
     "ESC 未覆盖抽屉");
-  const showView = appSrc.match(/function showView[\s\S]{0,1200}?\n  \}/);
+  const showView = fnBody(appSrc, "function showView(");
   check("showView 收起抽屉时统一走 setSidebar（不再手写三件套，避免漏掉 aria/滚动锁）",
-    !!showView && /setSidebar\(false\)/.test(showView[0]) && !/sidebar\.classList\.remove/.test(showView[0]),
-    showView ? showView[0].replace(/\s+/g, " ").slice(0, 200) : "未找到 showView");
+    !!showView && /setSidebar\(false\)/.test(showView) && !/sidebar\.classList\.remove/.test(showView),
+    showView ? showView.replace(/\s+/g, " ").slice(0, 200) : "未找到 showView");
   check("index.html 两个汉堡按钮都带 aria-expanded / aria-controls",
     (htmlSrc.match(/aria-expanded="false"/g) || []).length >= 2 &&
     (htmlSrc.match(/aria-controls="sidebar"/g) || []).length >= 2,

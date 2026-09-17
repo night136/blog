@@ -43,7 +43,10 @@ export function renderMarkdown(md) {
     return esc(text)
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, src) => {
         const url = safeUrl(src, true);
-        return url ? `<img src="${url}" alt="${alt}" loading="lazy" decoding="async">` : alt;
+        // #15 与 app.js mdToHtml() **逐字一致**（守护 verify-seo-render [12] 逐条比对两边输出）。
+        // 爬虫拿到的正文里带 tabindex 无害；两边不一致才是真故障。
+        const zoomable = alt ? ' tabindex="0" aria-haspopup="dialog"' : "";
+        return url ? `<img src="${url}" alt="${alt}"${zoomable} loading="lazy" decoding="async">` : alt;
       })
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) => {
         const url = safeUrl(href, false);

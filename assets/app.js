@@ -115,6 +115,10 @@
   let progressHandler = null;     // 阅读进度 scroll 监听：每次打开文章前先移除旧的，避免叠加
   let deferHomeCovers = false;    // 深链打开文章时，首页封面先不下载（首页此时是 display:none，下了也看不到）
   let authReturnFocus = null;     // 打开登录弹窗前焦点在哪：关闭时要还回去（键盘用户的关键回路）
+  let lightboxReturnFocus = null; // #15 打开灯箱前焦点在哪：关闭时要还回去（否则焦点掉到 body，回到页首）
+  let scrollRaf = 0;              // #19 顶栏 scroll 监听的 rAF 句柄（0 = 本帧还没排队）
+  let currentView = "home";       // #20 当前激活的视图名：切视图时用它记下"从哪个视图、滚到哪"离开
+  const viewScroll = Object.create(null);  // #20 视图名 → 上次离开时的 scrollY（无原型，防 __proto__ 之类的键）
   const postCache = new Map();    // 文章详情客户端缓存：slug -> post，避免重复打开重复拉取大体积正文
 
   // ===== Markdown → HTML =====
@@ -155,7 +159,14 @@
       return esc(text)
         .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, src) => {
           const url = safeUrl(src, true);
-          return url ? `<img src="${url}" alt="${alt}" loading="lazy" decoding="async">` : alt;
+          // #15 正文图要能被键盘"够到"，否则灯箱做得再规范也没人打得开（灯箱由点击图片触发）。
+          // 只在**有 alt** 时才给 tabindex —— alt 为空在 Markdown 里表示"装饰性图片"，
+          // 给装饰图加 Tab 停靠点只会平白拖长键盘路径。
+          // aria-haspopup="dialog" 让读屏软件提前告知"按下去会弹出对话层"。
+          // ⚠️ 这段模板必须与 scripts/lib/seo-render.mjs 的 renderMarkdown() **逐字一致**
+          //    （守护 scripts/verify-seo-render.mjs [12] 会逐条比对两边输出）。
+          const zoomable = alt ? ' tabindex="0" aria-haspopup="dialog"' : "";
+          return url ? `<img src="${url}" alt="${alt}"${zoomable} loading="lazy" decoding="async">` : alt;
         })
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) => {
           const url = safeUrl(href, false);
@@ -522,7 +533,7 @@
     const stale = () => seq !== openSeq;
     const p = posts.find((x) => x.slug === slug);
     if (p) postDetail.innerHTML = `<div class="post-meta"><span class="tag">${p.tag}</span><span>${formatDate(p.date)}</span><span class="author">✍ ${p.author}</span></div><h1>${p.title}</h1><p style="color:var(--text-faint)">加载中…</p>`;
-    showView("post"); window.scrollTo({ top: 0, behavior: "smooth" });
+    showView("post");   // 滚动落点由 showView 统一决定（#20：文章永远回顶部，其余视图还原上次位置）
     try {
       // slug 放 body，避免部分国产浏览器（小米等）fetch 对中文 slug 的 % 编码损坏
       let post = postCache.get(slug);
@@ -1254,15 +1265,44 @@
   }
 
   function showView(name) {
+    // #20 视图切换 = 一次"页面导航"。离开前把当前视图的滚动位置存下来，
+    // 返回时还原 —— 否则从文章点"← 返回"会直接跳回列表顶部，
+    // 读者刚看到第 8 张卡片、点进去看一眼，回来又得从头滚。
+    // ⚠️ 只在**真的换视图**时记录：同名重复调用（再点一次当前导航）不能覆盖已存的位置。
+    // ⚠️ 不记录 post 视图：文章永远从顶部开始读，留着位置只会害下一篇也被还原到半截。
+    const leaving = currentView;
+    if (leaving !== name && leaving !== "post" && views[leaving]) viewScroll[leaving] = window.scrollY;
+    currentView = name;
     if (name === "home") resetMeta();
     if (name === "guestbook") loadGuestbook();
     Object.values(views).forEach((v) => v.classList.remove("active"));
     if (views[name]) views[name].classList.add("active");
     // 首页真的显示出来了 → 补上此前为省带宽而没设的封面（见 homeCoversReady）
     if (name === "home") activateHomeCovers();
-    navLinks.forEach((l) => l.classList.toggle("active", l.dataset.view === name));
+    // #16 aria-current="page"：光给 .active 类只有视觉，读屏软件念不出"这是当前页"。
+    // 视觉类与语义属性必须同步设置，只设一个就会出现"看起来对、读出来不对"。
+    // （同一个 view 可能出现多个入口：顶栏站点名 / 顶栏"首页" / 侧边栏"首页" —— 都算当前页，可同时带。）
+    navLinks.forEach((l) => {
+      const on = l.dataset.view === name;
+      l.classList.toggle("active", on);
+      if (on) l.setAttribute("aria-current", "page");
+      else l.removeAttribute("aria-current");
+    });
     // 切视图时收起移动端抽屉（统一走 setSidebar，保证遮罩/滚动锁/aria 同步）
     setSidebar(false);
+    // #20 滚动落点。三种情况刻意区分：
+    //   · 文章视图 → 永远从顶部读起（哪怕上一篇滚到了底）
+    //   · 再点一次当前视图 → 视作"回到本页开头"，平滑滚到顶（与改动前的行为一致）
+    //   · 回到访问过的视图 → 瞬时还原到上次离开的位置
+    // ⚠️ 还原必须用 behavior:"instant"，**不能**用 "auto"：
+    //    "auto" 的语义是"听 CSS 的 scroll-behavior"，而 style.css 里 html 是 smooth（第 82 行），
+    //    于是"回到原处"会变成一段横跨整个列表的滚动动画 —— 用户看到的是列表从顶部飞过去，
+    //    实测（.diag/a11y-audit.mjs local）：同一帧读回 scrollY 只有 2，而不是 1400。
+    // ⚠️ 必须放在 .active 加完之后 —— .view 是 display:none，藏着的元素量不出高度，
+    //    提前 scrollTo 会被钳到 0。
+    const back = (name === leaving || name === "post") ? 0 : (viewScroll[name] || 0);
+    if (back > 0) window.scrollTo({ top: back, behavior: "instant" });
+    else window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   // 用新列表静默重渲染首页（静态快照过期后补上最新文章，不打断用户浏览、不显示加载态）
@@ -1308,6 +1348,8 @@
   let turnstileSiteKey = null;   // 后端下发，未配置时不启用
   let turnstileWidgetId = null;  // 留言墙 Turnstile widget 实例 id
   let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
+  let loginWidgetId = null;      // 登录表单 Turnstile widget 实例 id
+  let loginBusy = false;         // 登录请求进行中（防双击重复提交）
   let turnstileScriptPromise = null; // api.js 的注入 promise（全局只注入一次；失败会清空以便重试）
   let turnstileNeeded = false;   // 是否已有人「真的需要」人机验证（切到留言墙 / 点注册 tab）—— 见 requireTurnstile()
 
@@ -1599,19 +1641,21 @@
 
   // 「重试」：清掉旧容器与旧 widget id，重新注入 api.js 并重画。
   function retryTurnstile() {
-    // ⚠️ 容器一清空，旧 widget 就没了，必须同步把 id 置空：
-    //    否则 renderTurnstile() 会走 reset(旧 id) 分支，Cloudflare 抛
+    // ⚠️ 容器一清空，旧 widget 就没了，必须同步把**所有** widget id 置空：
+    //    否则 renderFormTurnstile() 会走 reset(旧 id) 分支，Cloudflare 抛
     //    "Could not find widget for provided container"（.diag 的 Pass B 正是这个）。
+    //    三处（留言墙 / 注册 / 登录）漏任何一个，都会在那个表单上复现同一个错。
     turnstileWidgetId = null;
     registerWidgetId = null;
+    loginWidgetId = null;
     turnstileScriptPromise = null; // 失败分支已置空，这里再保险一次（成功过的不会被覆盖）
-    const c1 = $("turnstileWidget");
-    const c2 = $("registerTurnstile");
-    if (c1) c1.innerHTML = "";
-    if (c2) c2.innerHTML = "";
+    const containers = ["turnstileWidget", "registerTurnstile", "loginTurnstile"]
+      .map((id) => $(id))
+      .filter(Boolean);
+    containers.forEach((c) => { c.innerHTML = ""; });
     ensureTurnstileScript().then((ok) => {
-      if (ok) { renderTurnstile(true); renderRegisterTurnstile(true); }
-      else { renderTurnstileFallback(c1); renderTurnstileFallback(c2); }
+      if (ok) { renderTurnstile(true); renderRegisterTurnstile(true); renderLoginTurnstile(true); }
+      else { containers.forEach((c) => renderTurnstileFallback(c)); }
     });
   }
 
@@ -1660,9 +1704,32 @@
     }
   }
 
-  // 注册表单的 Turnstile widget（与留言墙共用同一个 Site Key）
-  function renderRegisterTurnstile(ready) {
-    const container = $("registerTurnstile");
+  // 注册 / 登录两个表单的 Turnstile widget —— 共用同一个 Site Key、逻辑逐字相同，
+  // 所以只留**一份**实现，调用方交出「容器 id / widget id 的读写 / 报错提示元素 / 日志名」。
+  // ⚠️ 别为了「省事」复制成第二份：复制出来的那份必然漏掉后续某次修复。
+  //    本文件已有前车之鉴 —— retryTurnstile() 必须同时把**所有** widget id 置空，
+  //    漏掉任何一个都会让 render 走 reset(旧 id) 分支并抛 "Could not find widget for provided container"。
+  const TS_FORM_TARGETS = [
+    {
+      name: "register",
+      containerId: "registerTurnstile",
+      msg: () => registerMsg,
+      getId: () => registerWidgetId,
+      setId: (v) => { registerWidgetId = v; },
+    },
+    {
+      name: "login",
+      containerId: "loginTurnstile",
+      msg: () => loginMsg,
+      getId: () => loginWidgetId,
+      setId: (v) => { loginWidgetId = v; },
+    },
+  ];
+  function tsTarget(name) { return TS_FORM_TARGETS.find((t) => t.name === name); }
+
+  // ready=true 表示「本次就是脚本就绪后的重画」，用来防住「promise 已 resolve 但 window.turnstile 仍缺失」的无限自递归。
+  function renderFormTurnstile(t, ready) {
+    const container = $(t.containerId);
     if (!container) return;
     if (!turnstileSiteKey) { container.hidden = true; return; }
     // 同留言墙：key 晚到时把上一轮隐藏掉的容器恢复出来
@@ -1670,7 +1737,7 @@
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
       if (!ready) {
         ensureTurnstileScript().then((ok) => {
-          if (ok) renderRegisterTurnstile(true);
+          if (ok) renderFormTurnstile(t, true);
           else renderTurnstileFallback(container);
         });
       } else {
@@ -1678,34 +1745,72 @@
       }
       return;
     }
-    if (registerWidgetId) {
-      try { window.turnstile.reset(registerWidgetId); } catch (_) {}
+    if (t.getId()) {
+      try { window.turnstile.reset(t.getId()); } catch (_) {}
       return;
     }
     if (container.querySelector(".ts-fallback")) container.innerHTML = "";
     try {
-      registerWidgetId = window.turnstile.render(container, {
+      t.setId(window.turnstile.render(container, {
         sitekey: turnstileSiteKey,
         theme: "auto",
         language: "zh-cn",
-        // 同留言墙：只清 err 类提示，别把「✅ 注册成功」也抹掉（reset 后回调会紧跟执行）
-        callback: () => { if (registerMsg && registerMsg.classList.contains("err")) { registerMsg.textContent = ""; registerMsg.className = "form-msg"; } },
-      });
+        // 只清 err 类提示，别把「✅ 注册成功 / ✅ 登录成功」也抹掉（reset 后回调会紧跟执行）
+        callback: () => {
+          const msg = t.msg();
+          if (msg && msg.classList.contains("err")) { msg.textContent = ""; msg.className = "form-msg"; }
+        },
+      }));
     } catch (e) {
-      console.error("Turnstile render failed (register)", e);
+      console.error("Turnstile render failed (" + t.name + ")", e);
+    }
+  }
+  function renderRegisterTurnstile(ready) { return renderFormTurnstile(tsTarget("register"), ready); }
+  function renderLoginTurnstile(ready) { return renderFormTurnstile(tsTarget("login"), ready); }
+
+  // 表单提交前统一取 token。返回 { token } 或 { error }（error 已是可以直接显示给用户的中文）。
+  // 抽出来是为了让 login / register 的"等脚本 → 取 token → 分类报错"三步保持一字不差 ——
+  // 这段逻辑曾经因为两处各写一遍而出现偏差（脚本没加载被误报成"没做人机验证"）。
+  async function takeFormTurnstileToken(t, label) {
+    if (!turnstileSiteKey) return { token: null }; // 未配置人机验证：直接放行
+    if (!(window.turnstile && typeof window.turnstile.render === "function")) {
+      // 脚本还没到就先等它，避免「脚本没加载」被误报成「没做人机验证」
+      const ok = await ensureTurnstileScript();
+      if (!ok) {
+        renderTurnstileFallback($(t.containerId));
+        return { error: "人机验证加载失败，请点验证框里的「重试」或刷新页面" };
+      }
+      renderFormTurnstile(t, true);
+    }
+    const ready = !!(window.turnstile && typeof window.turnstile.render === "function");
+    const token = (ready && t.getId()) ? window.turnstile.getResponse(t.getId()) : null;
+    if (!token) {
+      if (!ready || !t.getId()) renderTurnstileFallback($(t.containerId));
+      return { error: (ready && t.getId())
+        ? label + "请先完成人机验证"
+        : "人机验证未显示出来，请点「重试」或刷新页面" };
+    }
+    return { token };
+  }
+
+  // 提交完成后重置 widget（token 是一次性的，不重置下一次提交必然拿到过期 token）
+  function resetFormTurnstile(t) {
+    if (turnstileSiteKey && typeof window.turnstile !== "undefined" && t.getId()) {
+      try { window.turnstile.reset(t.getId()); } catch (_) {}
     }
   }
 
-  // 「有人真的需要人机验证了」的唯一出口 —— 只有两个调用点：留言墙、注册表单。
+  // 「有人真的需要人机验证了」的唯一出口 —— 只有三个调用点：留言墙、注册表单、登录表单。
   // 它只负责**注入脚本**（和本视图的数据请求并行跑），不负责渲染：
   //   · 留言墙：showView 里视图还没切到 active，容器此刻是 display:none，
   //     这时候 render 会被 Turnstile 画成 0 宽。渲染交给 loadGuestbook() 拉完数据后那次。
-  //   · 注册表单：容器在已打开的弹窗里、可见，直接画。
+  //   · 注册 / 登录表单：容器在已打开的弹窗里、可见，直接画。
   // turnstileNeeded 是为了兜住竞态：用户可能在 /api/config 回来之前就点了（那时 key 还是 null，
   // render 会静默 return 什么都不画），loadTurnstileConfig 末尾据此补渲染一次。
   function requireTurnstile(which) {
     turnstileNeeded = true;
     if (which === "register") { renderRegisterTurnstile(); return; }
+    if (which === "login") { renderLoginTurnstile(); return; }
     if (turnstileSiteKey) ensureTurnstileScript();
   }
 
@@ -1728,7 +1833,7 @@
       if (d && d.turnstileSiteKey) turnstileSiteKey = d.turnstileSiteKey;
     } catch (_) { /* 配置拉取失败不阻塞页面 */ }
     // 只在「用户已经要过人机验证、但当时 key 还没到」时补画。正常路径下这里是空转。
-    if (turnstileNeeded) { renderTurnstile(); renderRegisterTurnstile(); }
+    if (turnstileNeeded) { renderTurnstile(); renderRegisterTurnstile(); renderLoginTurnstile(); }
   }
 
   async function loadGuestbook() {
@@ -2276,30 +2381,85 @@
 
   // ===== 全局交互 =====
   const topbarEl = $("topbar");
+  // #19 顶栏滚动监听：原实现每次 scroll 事件都读一次 window.scrollY（= 强制同步布局）
+  // 再做两次 classList.toggle。滚动时 scroll 事件的触发频率**高于**帧率
+  // （触控板/鼠标滚轮一次手势可在一帧里派发 4~8 次），于是同一帧把这套算 4~8 遍。
+  // 改成 rAF 节流：本帧已排队就直接返回，一帧最多算一次。
+  // 为什么用 rAF 而不是时间戳节流：这里算的是**视觉状态**，必须与下一帧对齐；
+  // 用 setTimeout/时间戳会出现"滚动已经停下、类名还差一拍"的闪烁。
+  function applyScrollState() {
+    scrollRaf = 0;
+    const y = window.scrollY;
+    if (backTop) backTop.classList.toggle("show", y > 400);
+    if (topbarEl) topbarEl.classList.toggle("scrolled", y > 20);
+  }
   window.addEventListener("scroll", () => {
-    if (backTop) backTop.classList.toggle("show", window.scrollY > 400);
-    if (topbarEl) topbarEl.classList.toggle("scrolled", window.scrollY > 20);
-  });
+    if (scrollRaf) return;                              // 本帧已排队 → 合并掉这次
+    scrollRaf = requestAnimationFrame(applyScrollState);
+  }, { passive: true });                                // passive：明确声明不会 preventDefault，滚动不被阻塞
+  applyScrollState();                                   // 首帧同步跑一次：刷新时页面已在中部，状态必须立刻正确
   if (backTop) backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
   // ===== 图片灯箱 =====
   const lightbox = $("lightbox");
   const lightboxImg = $("lightboxImg");
   const lightboxClose = $("lightboxClose");
-  function openLightbox(src, alt) {
+  // #15 灯箱焦点管理。此前只有"点图片打开 / Escape 或点遮罩关闭"：
+  //   · 打开后焦点仍留在正文里 → 读屏软件继续念被遮住的文章，键盘 Tab 会走到背后的顶栏，
+  //     而灯箱盖在整个页面上（body.lightbox-open 还锁了滚动）—— 就是"被困住"的体感；
+  //   · 关闭后焦点掉到 body → 键盘用户要从页首重新 Tab 回来。
+  // 与分享面板 / 登录弹窗同款三道：焦点移入 → Tab 回卷 → 关闭时还给触发者。
+  function lightboxFocusables() {
+    if (!lightbox) return [];
+    // 同样两道过滤（理由见 shareFocusables 的注释）：
+    //   ① getClientRects().length —— 排除隐藏元素；
+    //   ② tabIndex >= 0 —— 排除 tabindex="-1" 的元素，否则 last 指错人、回卷永不触发。
+    return [...lightbox.querySelectorAll("button, [href], input, select, textarea, [tabindex]")]
+      .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0);
+  }
+  function trapLightboxFocus(e) {
+    if (e.key !== "Tab") return;
+    const list = lightboxFocusables();
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1], active = document.activeElement;
+    const inside = list.indexOf(active) >= 0;
+    if (e.shiftKey ? (active === first || !inside) : (active === last || !inside)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  }
+  function openLightbox(src, alt, trigger) {
     if (!lightbox || !lightboxImg) return;
     lightboxImg.src = src; lightboxImg.alt = alt || "";
+    // 返回点只在"从关到开"时记录：连点两张图不该把返回点覆盖成灯箱内部的元素
+    if (lightbox.hidden) lightboxReturnFocus = trigger || document.activeElement;
     lightbox.hidden = false; document.body.classList.add("lightbox-open");
+    // 焦点移入关闭按钮（有可见焦点环，且是这层对话唯一的主操作）
+    if (lightboxClose) lightboxClose.focus();
   }
   function closeLightbox() {
-    if (!lightbox) return;
+    if (!lightbox || lightbox.hidden) return;
     lightbox.hidden = true; lightboxImg.removeAttribute("src"); document.body.classList.remove("lightbox-open");
+    // 焦点还给刚才那张图。正文图因为有 alt 而带 tabindex="0"（见 mdToHtml），所以这一步真的能落地；
+    // 若那张图已经不在文档里（换过文章/搜索重渲染过列表），退回 body 而不是抛异常。
+    const back = lightboxReturnFocus;
+    lightboxReturnFocus = null;
+    if (back && back.isConnected && typeof back.focus === "function") back.focus();
   }
   if (postDetail) postDetail.addEventListener("click", (e) => {
     const img = e.target.closest(".post-body img");
-    if (img) { e.preventDefault(); openLightbox(img.currentSrc || img.src, img.alt); }
+    if (img) { e.preventDefault(); openLightbox(img.currentSrc || img.src, img.alt, img); }
+  });
+  // 键盘等价操作：正文图带 tabindex="0"，回车/空格应与点击等效
+  if (postDetail) postDetail.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    const img = e.target && e.target.closest ? e.target.closest(".post-body img") : null;
+    if (!img) return;
+    e.preventDefault();                 // 空格默认会向下滚一屏，必须挡掉
+    openLightbox(img.currentSrc || img.src, img.alt, img);
   });
   if (lightbox) lightbox.addEventListener("click", (e) => { if (e.target === lightbox || e.target === lightboxClose) closeLightbox(); });
+  if (lightbox) lightbox.addEventListener("keydown", trapLightboxFocus);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && lightbox && !lightbox.hidden) closeLightbox(); });
   if (sliderEl) {
     sliderEl.addEventListener("mouseenter", () => { hoverPaused = true; stopAuto(); });
@@ -2387,8 +2547,10 @@
     });
   }
 
-  // 导航
-  navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); window.scrollTo({ top: 0, behavior: "smooth" }); }));
+  // 导航。
+  // ⚠️ 这里**不再**自己 window.scrollTo(top:0)：滚动落点已收进 showView（#20）——
+  //    原来的写法会把「返回列表还原位置」立刻覆盖成"回到顶部"，两处互相打架。
+  navLinks.forEach((link) => link.addEventListener("click", (e) => { e.preventDefault(); showView(link.dataset.view); }));
   if (backBtn) backBtn.addEventListener("click", () => showView("home"));
   bindGuestbookForm();
   // 只取 Site Key，**不会**注入 api.js —— 人机验证的脚本要等用户真的切到
@@ -2503,7 +2665,7 @@
     if (authReturnFocus && typeof authReturnFocus.focus === "function") { try { authReturnFocus.focus(); } catch (_) {} }
     authReturnFocus = null;
   }
-  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register") requireTurnstile("register"); }
+  function switchTab(tab) { document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab)); loginForm.classList.toggle("active", tab === "login"); registerForm.classList.toggle("active", tab === "register"); if (typeof switchQuote === "function") switchQuote(tab); if (tab === "register") requireTurnstile("register"); else requireTurnstile("login"); }
 
   // ===== 卡通角色互动 =====
   let charStateTimer = null;
@@ -2570,15 +2732,29 @@
   }
   async function handleLogin(e) {
     e.preventDefault();
+    if (loginBusy) return; // 双击 / 回车连按不该发出两次登录请求（也会白白消耗失败计数）
     const fd = new FormData(loginForm);
     loginMsg.textContent = "登录中…"; loginMsg.className = "form-msg";
     setAuthState("loading");
+    // 人机验证（此入口于 2026-09-17 加固时加上；未配置 Site Key 时 takeFormTurnstileToken 直接放行）
+    const tsLogin = await takeFormTurnstileToken(tsTarget("login"), "登录前");
+    if (tsLogin.error) {
+      loginMsg.textContent = tsLogin.error; loginMsg.className = "form-msg err";
+      triggerState("error", 2500);
+      return;
+    }
+    loginBusy = true;
     try {
-      const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }) });
+      const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), password: fd.get("password"), turnstileToken: tsLogin.token }) });
       const d = await r.json();
       if (!r.ok || !d.ok) {
-        loginMsg.textContent = d.error || "登录失败"; loginMsg.className = "form-msg err";
+        // 服务端在"失败次数超过阈值"时会先等一段递增延迟再回 401，并在 retryAfterMs 里告知等多久。
+        // 把它显示出来，否则用户只觉得"卡了很久然后说密码错"，会反复重试、越试越慢。
+        const wait = d && d.retryAfterMs ? Math.round(d.retryAfterMs / 1000) : 0;
+        loginMsg.textContent = (d.error || "登录失败") + (wait > 0 ? `（失败次数较多，本次已等待 ${wait} 秒）` : "");
+        loginMsg.className = "form-msg err";
         triggerState("error", 2500);
+        resetFormTurnstile(tsTarget("login")); // token 一次性，失败后必须换新的
         return;
       }
       loginMsg.textContent = "✅ 登录成功";
@@ -2588,6 +2764,8 @@
     } catch (_) {
       loginMsg.textContent = "网络错误"; loginMsg.className = "form-msg err";
       triggerState("error", 2500);
+    } finally {
+      loginBusy = false;
     }
   }
   async function handleRegister(e) {
@@ -2595,42 +2773,23 @@
     const fd = new FormData(registerForm);
     registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";
     setAuthState("loading");
-    // 同留言墙：脚本还没到就先等它，避免「脚本没加载」被误报成「没做人机验证」
-    if (turnstileSiteKey && !(window.turnstile && typeof window.turnstile.render === "function")) {
-      registerMsg.textContent = "人机验证加载中…"; registerMsg.className = "form-msg";
-      const ok = await ensureTurnstileScript();
-      if (!ok) {
-        registerMsg.textContent = "人机验证加载失败，请点验证框里的「重试」或刷新页面"; registerMsg.className = "form-msg err";
-        renderTurnstileFallback($("registerTurnstile"));
-        triggerState("error", 2500);
-        return;
-      }
-      renderRegisterTurnstile(true);
-    }
-    const tsReady = !!(window.turnstile && typeof window.turnstile.render === "function");
-    const tsToken = (turnstileSiteKey && registerWidgetId && tsReady)
-      ? window.turnstile.getResponse(registerWidgetId) : null;
-    if (turnstileSiteKey && !tsToken) {
-      registerMsg.textContent = (tsReady && registerWidgetId) ? "请先完成人机验证" : "人机验证未显示出来，请点「重试」或刷新页面";
-      registerMsg.className = "form-msg err";
-      if (!tsReady || !registerWidgetId) renderTurnstileFallback($("registerTurnstile"));
+    // 与登录共用同一段逻辑（等脚本 → 取 token → 分类报错），避免两处各写一遍产生偏差
+    const tsReg = await takeFormTurnstileToken(tsTarget("register"), "");
+    if (tsReg.error) {
+      registerMsg.textContent = tsReg.error; registerMsg.className = "form-msg err";
       triggerState("error", 2500);
       return;
     }
     try {
-      const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password"), turnstileToken: tsToken }) });
+      const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password"), turnstileToken: tsReg.token }) });
       const d = await r.json();
       if (!r.ok || !d.ok) {
         registerMsg.textContent = d.error || "注册失败"; registerMsg.className = "form-msg err";
         triggerState("error", 2500);
-        if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
-          try { window.turnstile.reset(registerWidgetId); } catch (_) {}
-        }
+        resetFormTurnstile(tsTarget("register"));
         return;
       }
-      if (turnstileSiteKey && typeof window.turnstile !== "undefined") {
-        try { window.turnstile.reset(registerWidgetId); } catch (_) {}
-      }
+      resetFormTurnstile(tsTarget("register"));
       registerMsg.textContent = "✅ 注册成功，已登录";
       registerMsg.className = "form-msg ok";
       triggerState("success", 1400);

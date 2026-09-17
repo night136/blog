@@ -1724,6 +1724,43 @@ body.lightbox-open { overflow: hidden; }
   }
 }
 
+/* ===== #16 跳过导航链接（skip link）===== */
+/* 默认「视觉隐藏但**保持可聚焦**」：position:fixed 让它脱离布局（不会撑出空白、也不影响滚动），
+   再用 transform 移出视口；聚焦时滑回左上角变成正常可见的按钮。
+   ⚠️ 绝对不要"顺手优化"成 display:none / visibility:hidden —— 那样它不可聚焦，
+   "第一个 Tab 就能跳过导航"这件事直接不存在了（而且不会有任何报错，属于静默失效）。 */
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 200;               /* 必须高于 .topbar 的 z-index:50，否则聚焦时被吸顶栏盖住 */
+  transform: translateY(-220%);
+  background: var(--accent);
+  color: var(--accent-text);  /* --accent-text 是专为「实心 --accent 上的文字」算过 AA 的 token */
+  padding: 10px 16px;
+  border-radius: var(--radius-xs);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: var(--shadow-hover);
+  transition: transform .18s ease;
+}
+/* border-radius 在本规则里再写一遍：下面的 `a:focus-visible`（特异性 0,1,1）会盖掉
+   只写在 .skip-link（0,1,0）上的圆角，聚焦那一刻按钮角会突然变方。 */
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  border-radius: var(--radius-xs);
+}
+
+/* skip link 的落点 <main id="main-content" tabindex="-1">。
+   焦点给到整列内容时，一圈描边会围着整栏（很吵），而"跳到了正文"这件事
+   靠页面滚动 + 下一个 Tab 落到搜索框（有自己的焦点环）已经足够明确 —— 所以这里关掉轮廓。
+   注意：只关 .content，不动全局 [tabindex]:focus-visible，正文图片（可聚焦）仍要有焦点环。 */
+.content:focus,
+.content:focus-visible {
+  outline: none;
+}
+
 /* ===== 键盘可达性：全局可见焦点 ===== */
 /* 站内大量可点元素（.card / .nav-link / .chip / .share-item / .comment-like …）此前
    没有可见的聚焦样式，纯键盘用户在页面上"看不见自己在哪"。输入框类的 :focus 已用

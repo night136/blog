@@ -39,7 +39,7 @@ fi
 #   否则就是「写了守护但主入口永远不跑它」—— 套件全绿却什么都没检查。
 #   （2026-09-16 真实踩到：verify-avatar-asset 写好后漏在这儿，靠人工发现。）
 #   现在有 verify-suite-coverage 兜着：漏项 / 幽灵项 / 重复项 / 顺序异常都会判红。
-for s in verify-no-tdz verify-seo-render verify-heading-outline verify-og-cover verify-cover-delivery verify-xss verify-jwt-secret verify-manage-update verify-cover-persist verify-asset-versioning verify-security-headers verify-inline-css verify-avatar-asset verify-frontend-guards verify-first-paint verify-mobile-guards verify-contrast-tokens verify-share verify-lunar-core verify-suite-coverage smoke-app; do
+for s in verify-no-tdz verify-seo-render verify-heading-outline verify-og-cover verify-cover-delivery verify-xss verify-jwt-secret verify-login-hardening verify-data-layer verify-manage-update verify-cover-persist verify-asset-versioning verify-security-headers verify-inline-css verify-avatar-asset verify-frontend-guards verify-a11y verify-first-paint verify-mobile-guards verify-contrast-tokens verify-share verify-lunar-core verify-suite-coverage smoke-app; do
   echo
   echo "===== $s ====="
   out=$(timeout "$PER_SCRIPT_TIMEOUT" "$NODE" "scripts/$s.mjs" 2>&1)
