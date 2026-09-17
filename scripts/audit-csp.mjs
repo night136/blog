@@ -11,8 +11,14 @@
 // 三个阶段：
 //   [A]  本地服务：由**我们的服务端**直接吐仓库里的 CSP（取 functions/_lib/security.js 的常量）
 //        ⇒ 验哈希对不对、样式有没有被拦、兜底按钮还能不能用。
-//   [B0] 负向对照：拿**线上此刻的旧 HTML** 配新 CSP ⇒ 浏览器必须报 script-src 违规。
+//   [B0] 负向对照：**一份哈希与新 CSP 不同步的 HTML** 配新 CSP ⇒ 浏览器必须报 script-src 违规。
 //        这一步证明"违规收集器"不是恒空的摆设，而且顺带说明哈希不同步的后果长什么样。
+//        ⚠️ 对照件有两种来源，脚本自己选（2026-09-17 修）：
+//          · 部署**前**跑 —— 线上还是旧版，直接拿线上 HTML 就是天然的不同步对照；
+//          · 部署**后**跑 —— 线上与新版已经一致，"旧 HTML"这个前提**被部署本身消灭了**，
+//            于是本项会恒失败（第一版就这样，事后误报成"CSP 有问题"）。
+//            现在遇到这种情况就**人为篡改一个字节**制造不同步，并明确标注是对照件、不是线上快照。
+//            （教训：判据不能依赖"线上此刻是旧版"这种会被自己动作消灭的前提。）
 //   [B]  线上域名 + 新 CSP + 新版内联脚本 ⇒ 验 Turnstile 仍能出 token、零违规。
 //        ⚠️ 必须在**真域名**上做：真 site key 与 hostname 绑定，本机跑必撞 110200。
 //        部署前跑 = 模拟"部署之后"；部署后加 --raw-live 跑 = 对线上产物的最终验收。
@@ -236,7 +242,7 @@ async function probeTurnstile() {
 // 拿新 CSP 去套它，浏览器必须报 script-src-elem 违规并把**正确的哈希**念出来。
 // 顺带说明这不是理论风险 —— 哈希与 HTML 一旦不同步，就是这个后果（整段启动脚本被拒）。
 let liveHtmlRaw = null;
-console.log("\n[B0] 负向对照（线上旧版 HTML + 新 CSP ⇒ 必须报违规）");
+console.log("\n[B0] 负向对照（哈希与新 CSP 不同步的 HTML ⇒ 必须报违规）");
 {
   liveHtmlRaw = await fetch(`${LIVE}/?cb=${Math.random()}`, { headers: { "Cache-Control": "no-cache" } }).then((r) => r.text());
   const INLINE_RE = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/;
@@ -245,18 +251,46 @@ console.log("\n[B0] 负向对照（线上旧版 HTML + 新 CSP ⇒ 必须报违�
   const localInline = (readFileSync(join(ROOT, "index.html"), "utf8").replace(/\r\n/g, "\n").replace(/<!--[\s\S]*?-->/g, "").match(INLINE_RE) || [])[1];
   const sha = (s) => "sha256-" + createHash("sha256").update(s, "utf8").digest("base64");
   const cspHash = (CSP.match(/sha256-[A-Za-z0-9+/=]+/) || [])[0];
-  console.log(`     线上旧版内联脚本哈希：${liveInline ? sha(liveInline) : "(未找到)"}`);
-  console.log(`     本地新版内联脚本哈希：${localInline ? sha(localInline) : "(未找到)"}`);
-  console.log(`     CSP 里写的哈希      ：${cspHash}`);
+  console.log(`     线上产物的内联脚本哈希：${liveInline ? sha(liveInline) : "(未找到)"}`);
+  console.log(`     本地新版内联脚本哈希　：${localInline ? sha(localInline) : "(未找到)"}`);
+  console.log(`     CSP 里写的哈希　　　　：${cspHash}`);
   check("本地新版内联脚本的哈希 == CSP 里写的哈希（不用跑浏览器就能验的同步性）",
     !!localInline && sha(localInline) === cspHash, `${localInline ? sha(localInline) : "?"} vs ${cspHash}`);
+  // 只在 --raw-live（部署已完成）时断言线上同步：部署前线上理应是旧版，断言它同步是错的判据。
+  if (process.argv.includes("--raw-live")) {
+    check("线上产物的内联脚本哈希 == CSP 里写的哈希（部署已生效，浏览器不会拦它）",
+      !!liveInline && sha(liveInline) === cspHash, `${liveInline ? sha(liveInline) : "?"} vs ${cspHash}`);
+  }
 
-  await serveDocument(liveHtmlRaw, CSP);           // 旧 HTML + 新 CSP
+  // ── 选对照件 ──
+  // 部署前：线上还是旧版，直接拿线上 HTML 就是天然的"不同步"对照。
+  // 部署后：线上与新版已一致 ⇒ "线上是旧版"这个前提**被部署本身消灭**（第一版就死在这里，
+  //         事后被误读成"CSP 有问题"）。此时人为改 1 字节制造不同步，并标注它是对照件。
+  let control = liveHtmlRaw, mode = "";
+  if (liveInline && sha(liveInline) !== cspHash) {
+    mode = "线上快照（线上此刻与新版不同步，天然对照）";
+  } else {
+    if (!liveInline) {
+      console.error("❌ 找不到线上内联脚本，无法构造对照件 —— 这不等于通过，退出码 2。");
+      process.exit(2);
+    }
+    // ⚠️ 锚点必须是**整段脚本正文**，不能是 "<script"：后者会先命中 HTML 注释里那个字面串
+    //    （注释解释过为什么不能用），于是只改了注释、脚本没动 ⇒ 哈希照样对得上，对照永不触发。
+    control = liveHtmlRaw.replace(liveInline, liveInline + "\n/*stale*/");
+    if (control === liveHtmlRaw) {
+      console.error("❌ 造故障失败：没能改动线上 HTML 的内联脚本 —— 这不等于通过，退出码 2。");
+      process.exit(2);
+    }
+    mode = "人为篡改副本（线上已与新版同步 ⇒ 改 1 字节制造不同步，仅作对照）";
+  }
+  console.log(`     对照件来源：${mode}`);
+
+  await serveDocument(control, CSP);
   await waitBoot(15000);
   await sleep(800);
   const v = await violations();
   const blocked = v.filter((x) => /script-src/.test(x.directive));
-  check("旧 HTML 配新哈希 ⇒ 浏览器确实拦下了那段内联脚本（收集器不是恒空）",
+  check("哈希不同步 ⇒ 浏览器确实拦下了那段内联脚本（收集器不是恒空）",
     blocked.length > 0, JSON.stringify(v));
   const href = (consoleLogs.join(" ").match(/sha256-[A-Za-z0-9+/=]{40,}/g) || []);
   if (href.length) console.log(`     ↳ 浏览器在控制台给出的正确哈希：${[...new Set(href)].join(" / ")}`);
@@ -307,7 +341,9 @@ console.log("\n[B1] 对照组（同 HTML + 线上现有 CSP，用来隔离「tok
 // ⚠️ 刻意在**真域名**上验：Turnstile 的真 site key 与 hostname 绑定，本机跑必撞 110200。
 // 为了在部署前就能验，这里把线上 HTML 的**内联脚本换成仓库里的新版**再喂给浏览器 ——
 // 其余（资源、/api/*、Turnstile、字体）全走线上。等价于"部署完成后的那一份文档"。
-// 部署完成后请把 `--raw-live` 去掉再跑一次，那时它验的就是真正的线上产物。
+// ⚠️ `--raw-live` 的语义是「**直接用线上原样的 HTML**」，所以它只在**部署完成之后**才有意义。
+//    不带它时（部署前）本阶段会把线上 HTML 的内联脚本换成仓库里的新版，等价于"部署后的那一份文档"。
+//    （此处原来写的是反的 ——「部署完成后请把 --raw-live 去掉」，与文件头第 3 行自相矛盾。）
 console.log("\n[B] 线上域名 + 新 CSP + 新版 HTML（模拟部署后）");
 {
   const cfg = await fetch(`${LIVE}/api/config`, { headers: { "Cache-Control": "no-cache" } }).then((r) => r.json()).catch(() => ({}));
