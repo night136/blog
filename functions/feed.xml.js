@@ -1,10 +1,24 @@
 // /feed.xml —— RSS 2.0 订阅源（取最近 20 篇）
 import { siteUrl, xesc, postUrl } from "./_lib/seo.js";
 
+// ⚠️ audit §七 #11：以前没有 Cache-Control ⇒ 每次拉订阅源都打一遍 D1。
+// 与 /sitemap.xml 同策略（两者是同一批数据的两种呈现）。
+const OK_HEADERS = {
+  "Content-Type": "application/rss+xml; charset=utf-8",
+  "Cache-Control": "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400",
+};
+
+// ⚠️ 读库失败时仍然回 200（订阅器对非 200 常常直接报「源坏了」），
+//    但**必须 no-store** —— 否则一个空 feed 会被边缘缓存 30 分钟，所有订阅者一起空窗。
+const ERR_HEADERS = {
+  "Content-Type": "application/rss+xml; charset=utf-8",
+  "Cache-Control": "no-store",
+};
+
 export async function onRequestGet({ env }) {
-  const headers = { "Content-Type": "application/rss+xml; charset=utf-8" };
   const base = siteUrl(env);
   let items = "";
+  let dbError = false;
   if (env.BLOG_DB) {
     try {
       const { results } = await env.BLOG_DB.prepare(
@@ -27,8 +41,14 @@ export async function onRequestGet({ env }) {
         })
         .join("\n");
     } catch (e) {
+      // ⚠️ catch 里必须 console.error：原来只把错误写成 XML 注释，
+      //    「订阅源一直是空的」在日志里完全看不见（三类静默失败之一）。
+      console.error("[feed] 读取文章失败：" + (e && e.message ? e.message : e));
+      dbError = true;
       items = `    <!-- error: ${xesc(e && e.message ? e.message : e)} -->`;
     }
+  } else {
+    dbError = true;
   }
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -40,5 +60,5 @@ export async function onRequestGet({ env }) {
 ${items}
   </channel>
 </rss>`;
-  return new Response(xml, { headers });
+  return new Response(xml, { headers: dbError ? ERR_HEADERS : OK_HEADERS });
 }

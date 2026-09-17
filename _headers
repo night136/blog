@@ -1,6 +1,19 @@
+# ⚠️⚠️ 本文件**只管静态资源**。Cloudflare Pages 的 `_headers` 对 Functions 自己
+#     `new Response(...)` 出来的响应**完全不生效** —— 2026-09-17 线上实测：
+#       /assets/style.css → nosniff ✓        /sitemap.xml → 一个安全头都没有
+#     所以 /api/*（登录、注册、留言…）与三个 XML/TXT 端点的安全头**不在这个文件里**，
+#     在 functions/_lib/security.js + functions/_middleware.js。
+#     两边是**两份拷贝**（这里是纯文本，没法 import），改一边必须改另一边 ——
+#     scripts/verify-security-headers.mjs 会逐个头比对，漏改就判红。
+
+# 全局安全头：对所有静态资源生效（含 /404.html、/admin/ 之类）
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), midi=(), serial=(), hid=()
+  Content-Security-Policy: object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 # 静态资源：长缓存 + 后台再验证（stale-while-revalidate）。
 # 跨境网络抖动时浏览器直接命中本地缓存秒开，后台静默校验更新，
