@@ -21,12 +21,24 @@ export async function onRequestGet({ request, env }) {
     if (!(n >= DIAG_MIN && n <= DIAG_MAX)) {
       return json({ error: `n 需在 ${DIAG_MIN}–${DIAG_MAX} 之间` }, 400, { "Cache-Control": "no-store" });
     }
-    // ⚠️ performance.now() 在 Workers 里是**墙钟**，而限额算 **CPU 时间**。
-    //    但 PBKDF2 是纯计算、中途不 await 任何 I/O ⇒ 这段墙钟 ≈ CPU 时间，是可用近似。
+    // ⚠️ performance.now() 在 Workers 里不可用于计时（实测恒 0 —— 见 perfRaw，平台的
+    //    计时器精度被故意做粗以防旁路）。所以这里**不用它下结论**，只回传原始值自证「它确实不可用」。
     const t0 = performance.now();
-    await makePasswordHash("diag-probe-pw", crypto.randomUUID(), n);
-    const ms = +(performance.now() - t0).toFixed(2);
-    return json({ ok: true, n, ms }, 200, { "Cache-Control": "no-store" });
+    // ⚠️ 捕获异常并回传 e.name —— 这是区分「平台终止请求」与「JS 抛错」的唯一办法：
+    //    平台终止 ⇒ 我们拿不到任何响应体（只有 Cloudflare 错误页）；
+    //    JS 抛错   ⇒ 能捕获到 e.name（如 NotSupportedError）。
+    let errName = null, errMsg = null;
+    try {
+      await makePasswordHash("diag-probe-pw", crypto.randomUUID(), n);
+    } catch (e) {
+      errName = (e && e.name) || "(无 name)";
+      errMsg = String((e && e.message) || e);
+    }
+    return json(
+      { ok: !errName, n, perfMs: +(performance.now() - t0).toFixed(2), perfRaw: [t0, performance.now()], errName, errMsg },
+      200,
+      { "Cache-Control": "no-store" }
+    );
   }
 
   return json(
