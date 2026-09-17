@@ -140,7 +140,16 @@ input::placeholder, textarea::placeholder { color: var(--text-faint); opacity: 1
 }
 
 /* ── 布局 ── */
-.layout { display: grid; grid-template-columns: 270px 1fr 270px; min-height: 100vh; max-width: var(--maxw); margin: 0 auto; gap: 26px; padding: 0 24px; }
+/* ⚠️ align-content: start 不是装饰，是**修 CLS** 的：
+   .layout 有 min-height:100vh，而 grid 的 align-content 默认是 stretch —— 于是「内容还没渲染出来、
+   页面总高不足一屏」的那段时间里，每一行都会被按比例拉高去填满视口，topbar 那一行从 60px 被撑到 ~93px；
+   等内容一到、总高超过一屏，行又缩回自然高度 ⇒ 顶栏塌 33px、下面所有东西跟着上跳 33px。
+   实测（.diag/first-paint-probe.mjs，移动 390×844、限速 150ms/200KBps）：
+   不加这句时内联样式的版本 CLS 0.0812（比外链版的 0.0464 差，正是因为外链版首绘晚、这一跳被藏着）；
+   加了之后回到 0.0464，且**内容加载完之后的整页布局指纹逐项不变**
+   （桌面 629 元素 3549702810、移动 528 元素 118277715，改前改后一致）。
+   🚫 别改回 stretch / 别删：删了顶栏会重新跳一下。 */
+.layout { display: grid; grid-template-columns: 270px 1fr 270px; min-height: 100vh; max-width: var(--maxw); margin: 0 auto; gap: 26px; padding: 0 24px; align-content: start; }
 
 /* ── 侧边栏：奶油卡片 ── */
 .sidebar {

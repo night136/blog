@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderMarkdown, materializeBodyImages, buildArticleHtml, articleFileName } from "./scripts/lib/seo-render.mjs";
+import { inlineStyleSheet } from "./scripts/lib/inline-css.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "generated");
@@ -224,6 +225,17 @@ function hashAssets() {
     /assets\/logo-(?:avatar|hero)\.png(?:\?v=[a-z0-9]+)?/g,
     `assets/logo-avatar.png?v=${logoVersion}`,
   );
+  // 样式表**内联**（渲染阻塞资源的最后一环，见 scripts/lib/inline-css.mjs 的完整论证）。
+  // 位置刻意放在这里：紧贴 writeFileSync，且在版本化之后 —— 这样它拿到的是同一次构建的 CSS 原文，
+  // 内外两处绝不可能出现「HTML 里是旧样式、文件是新的」这种不一致。
+  // 失败/未命中一律**不内联**，产物退回外链形态（今天的线上行为），不会变成没样式。
+  const cssText = readFileSync(join(assetsDir, "style.css"), "utf8");
+  const inlined = inlineStyleSheet(html, cssText);
+  html = inlined.html;
+  if (inlined.replaced === "none" || inlined.replaced === "unsafe") {
+    console.warn("[build] ⚠️ 样式表未内联（页面仍会外链加载，首绘多等一个往返）：" + (inlined.reason || ""));
+  }
+
   writeFileSync(htmlAbs, html);
 
   // 自检：HTML 里引用的站内资源（去掉查询串后）必须真实存在，防止再产出「引用了不存在文件」的壳
@@ -238,6 +250,10 @@ function hashAssets() {
   console.log(`[build] 资源版本化完成 → app.js?v=${appVersion}, style.css?v=${styleVersion}`
     + `, logo-avatar.png?v=${logoVersion}（稳定文件名，不再生成哈希副本）`
     + `；两处头像共用一个 URL ⇒ 首屏只下一次`);
+  console.log(inlined.replaced === "link" || inlined.replaced === "inline"
+    ? `[build] 样式表已内联（${(cssText.length / 1024).toFixed(1)}KB，${inlined.replaced === "inline" ? "刷新既有内联块" : "替换外链 link"}）`
+      + ` ⇒ 首绘不再等这一个往返；assets/style.css 仍是源码事实来源`
+    : `[build] ⚠️ 样式表保持外链形态（未内联）`);
 }
 
 async function main() {

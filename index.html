@@ -186,12 +186,17 @@
       }, 10000);
     });
   </script>
-  <!-- 完整样式表：**故意阻塞加载** —— 这不是漏改、也不是过时代码，🚫 别顺手改成 media="print" onload。
-       原因：小米/360 兼容模式等对 media="print" 的 onload 切换支持不良，会导致样式表永远无法生效，
-       页面只剩上面的关键 CSS、布局错乱（本项目已因此回滚过一次，详见 docs/first-paint.md）。
+  <!-- 完整样式表。**源码里保留外链**，但线上**不会**真的外链 —— 构建期 build.mjs 会把它
+       内联进 <head>（scripts/lib/inline-css.mjs），所以首绘不再等这一个跨境往返：
+       本地真浏览器 + 限速实测「TTFB→首绘」增量 843ms → 425ms（docs/first-paint.md）。
+       之所以源码保持外链形态：assets/style.css 是唯一样式来源（所有 verify-*.mjs 都读它做
+       对比度/断点/选择器检查），本地直接开 index.html 与探针走 --local 的行为也完全不变；
+       万一构建没跑或内联逻辑出问题，页面会**优雅降级**回今天的外链行为，而不是没样式。
+       🚫 别把它改成 media="print" onload：小米/360 兼容模式对该切换支持不良，样式表会永远
+       不生效、页面只剩上面的关键 CSS（本项目已因此回滚过一次，详见 docs/first-paint.md）。
        ⚠️ 别和上面字体表那条「刻意不放 <link rel=stylesheet>」读混：那条说的是 fonts.font.im 的字体表。
-       代价是真实的：实测首页 TTFB→首绘 增量 658ms，而同样内容的 /404.html（纯内联 CSS）只要 55ms
-       ⇒ 约 600ms 是在等这张表（docs/optimization-audit-2026-09-16.md §三）。要动它先建 FCP/CLS 判据。 -->
+       也别删掉这一行：构建期找不到它就退化为外链，本地开发与探针会变成没样式。
+       背景与实测：docs/optimization-audit-2026-09-16.md §三。 -->
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>

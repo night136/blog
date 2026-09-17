@@ -68,9 +68,12 @@ try {
   const out1 = build();
   let h1 = html();
   const appRef = (h1.match(/assets\/app\.js\?v=([a-z0-9]+)/) || [])[1];
-  const cssRef = (h1.match(/assets\/style\.css\?v=([a-z0-9]+)/) || [])[1];
   check("index.html 引用 assets/app.js?v=<hash>", !!appRef, "未找到 app.js?v=");
-  check("index.html 引用 assets/style.css?v=<hash>", !!cssRef, "未找到 style.css?v=");
+  // style.css 已改为**构建期内联**（首绘不再等这一个往返），所以产物里不再有它的外链。
+  // 详细判据在 scripts/verify-inline-css.mjs（内容逐字一致 / 级联位置 / 幂等 / 优雅降级）。
+  check("构建产物里 style.css 已内联（不再外链）",
+    !/<link[^>]+href="assets\/style\.css/.test(h1) && /<style data-inlined="style\.css">/.test(h1),
+    (h1.match(/<link[^>]+href="assets\/style\.css[^"]*"/) || [])[0] || "未找到内联块");
   check("不再出现哈希文件名（assets/app.<hash>.js）",
     !/assets\/(app|style)\.[a-f0-9]{6,64}\.(js|css)/.test(h1),
     (h1.match(/assets\/(app|style)\.[a-f0-9]{6,64}\.(js|css)/) || [])[0]);
@@ -100,9 +103,15 @@ try {
   build();
   const h4 = html();
   check("哈希文件名被归一化为 assets/app.js?v=",
-    /assets\/app\.js\?v=[a-z0-9]+/.test(h4) && !/app\.deadbeef00\.js/.test(h4), h4);
-  check("style 哈希名同样被归一化",
-    /assets\/style\.css\?v=[a-z0-9]+/.test(h4) && !/style\.0123456789\.css/.test(h4), h4);
+    /assets\/app\.js\?v=[a-z0-9]+/.test(h4) && !/app\.deadbeef00\.js/.test(h4), h4.slice(0, 160));
+  // ⚠️ 判据盯 **link 标签**，不要用 /assets\/style\.css\?v=/ 这种松散子串：
+  // index.html 的注释里本来就写着 assets/style.css（讲它为什么故意阻塞），版本化正则
+  // 会连注释那处一起改写 ⇒ 松散子串会得出「哈希名没被归一化/又外链了」的假结论。
+  check("style 哈希名同样被归一化（随即被内联，产物里不再有外链）",
+    !/<link[^>]+href="assets\/style\.[a-f0-9]+\.css/.test(h4) &&
+    !/<link[^>]+href="assets\/style\.css/.test(h4) &&
+    /<style data-inlined="style\.css">/.test(h4),
+    (h4.match(/<link[^>]+href="assets\/style[^"]*"/) || [])[0] || "未找到内联块");
 
   console.log("\n[5] 源码守护");
   {
