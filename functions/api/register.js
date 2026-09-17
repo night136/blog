@@ -66,7 +66,21 @@ export async function onRequestPost({ request, env }) {
     );
   } catch (e) {
     // 不回显 e.message：可能泄露表结构 / SQL 细节（与 login 口径一致）。仅记录到服务端日志。
-    console.error("register failed:", e && e.stack ? e.stack : e);
-    return json({ error: "注册失败，请稍后重试" }, 500);
+    //
+    // ⚠️ 临时诊断码（2026-09-17，定位线上「注册失败，请稍后重试」用，定位后**必须删除**）：
+    //    只回传一个**白名单枚举**，不泄漏任何原始 message / SQL / 表名。
+    //    起因：2026-09-17 起用户真机注册稳定失败，而本轮唯一的行为差异是 PBKDF2 迭代数
+    //    100000 → 210000（auth.js 顶部注释就警告过"超 CPU 预算会被平台掐断成 5xx"）。
+    //    原 catch 把原因吞成一句通用文案，导致只能靠猜。
+    const msg = String((e && e.message) || e);
+    const code = /CPU|exceeded|limit/i.test(msg) ? "E1-cpu"
+      : /JWT_SECRET/i.test(msg) ? "E2-jwt"
+      : /no such (table|column)/i.test(msg) ? "E3-schema"
+      : /UNIQUE|CONSTRAINT/i.test(msg) ? "E4-unique"
+      : /PBKDF2|deriveBits|iterations|NotSupported|crypto/i.test(msg) ? "E5-crypto"
+      : /SQL|D1|database|storage|readonly/i.test(msg) ? "E6-db"
+      : "E0-other";
+    console.error(`register failed [${code}]:`, e && e.stack ? e.stack : e);
+    return json({ error: `注册失败，请稍后重试 [${code}]`, diag: code }, 500);
   }
 }
