@@ -202,8 +202,32 @@ check("登录不泄露「用户不存在/密码错误」的差异（只看代码
   "代码中仍存在可区分的错误文案");
 check("登录统一返回「用户名或密码错误」", /"用户名或密码错误"/.test(loginCode));
 check("登录错误响应不回显内部异常信息", !/登录失败：" \+\s*\(e/.test(loginCode) && /登录失败，请稍后重试/.test(loginCode));
-check("登录对不存在的用户也做假哈希校验（防时序侧信道）", /DUMMY_HASH/.test(loginSrc) && /user \? user\.password_hash : DUMMY_HASH/.test(loginSrc));
-check("假哈希符合 salt:hash 格式（否则会被短路）", /const DUMMY_HASH = "[^"]*:[^"]*"/.test(loginSrc));
+
+// ⚠️ 下面两条曾经写死成「假哈希是 `salt:hash` 格式」（`/const DUMMY_HASH = "…:…"/`）。
+//    §五 把哈希格式换成自描述 `pbkdf2$<iter>$<salt>$<hash>` 之后它们立刻变红 —— **但代码是对的**：
+//    假哈希本来就应该跟着换格式。这就是「拿代理指标当判据」的典型：真正的不变量不是
+//    "某个字符串长什么样"，而是**假哈希与真密码走同一条迭代数来源**（否则两边耗时又拉开，侧信道重新打开）。
+//    现在改成解析调用实参、回溯到它的声明表达式，并加一条负向自证证明判据不是恒真。
+const dummyIterExpr = (src) => {
+  const call = src.match(/dummyHash\(\s*([A-Za-z_$][\w$]*)\s*\)/);
+  if (!call) return null;
+  // 变量名要转义后再塞进正则（`$` 是合法标识符字符，直接拼会变成锚点）
+  const name = call[1].replace(/[$]/g, "\\$");
+  const decl = src.match(new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*([^;]+);`));
+  return decl ? decl[1].trim() : null;
+};
+const iterIsSharedSource = (expr) => !!expr && /targetIterations\(\s*env\s*\)/.test(expr) && !/^\d+$/.test(expr);
+
+check("登录对不存在的用户也做假哈希校验（防时序侧信道）",
+  /user\s*\?\s*user\.password_hash\s*:\s*dummyHash\(/.test(loginCode),
+  "未找到「用户不存在时也走一次假哈希」的三元分支");
+const dummyExpr = dummyIterExpr(loginCode);
+check(`假哈希与真密码同源（迭代数取自 ${dummyExpr || "?"}）`,
+  iterIsSharedSource(dummyExpr),
+  "假哈希的迭代数不是从 targetIterations(env) 取的 —— 写死数字会让两边耗时重新拉开");
+check("负向自证：把迭代数写死成字面量，上一条必须判红",
+  !iterIsSharedSource(dummyIterExpr(loginCode.replace(/const iterations = targetIterations\(env\);/, "const iterations = 100000;"))),
+  "改坏了判据依然全绿 ⇒ 这条断言是摆设");
 
 const gbSrc = fs.readFileSync(path.join(root, "functions", "api", "guestbook.js"), "utf8");
 check("便签墙缓存键包含登录态维度", /cacheUrl\.searchParams\.set\("_u"/.test(gbSrc));

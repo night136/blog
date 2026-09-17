@@ -322,9 +322,11 @@ console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请
     const body = sliceFn(src, "async function loadTurnstileConfig()");
     if (!body) return false;
     // ① 必须存在「只在 turnstileNeeded 为真时才渲染」的兜底分支
-    if (!/if \(turnstileNeeded\)\s*\{[\s\S]{0,140}?renderTurnstile\(\)/.test(body)) return false;
-    // ② 把那个兜底分支摘掉之后，函数里不许再剩任何裸渲染
-    return !/render(Register)?Turnstile\(\)/.test(body.replace(/if \(turnstileNeeded\)\s*\{[\s\S]{0,140}?\}/, ""));
+    if (!/if \(turnstileNeeded\)\s*\{[\s\S]{0,200}?renderTurnstile\(\)/.test(body)) return false;
+    // ② 把那个兜底分支摘掉之后，函数里不许再剩任何裸渲染。
+    //    ⚠️ 这里的匹配必须覆盖**全部** render*Turnstile()，不能只写 render(Register|Login)?Turnstile ——
+    //       2026-09-17 加登录表单时就踩过：旧正则只认 Register，把 renderLoginTurnstile() 放过去也不报。
+    return !/render[A-Za-z]*Turnstile\(\)/.test(body.replace(/if \(turnstileNeeded\)\s*\{[\s\S]{0,200}?\}/, ""));
   };
 
   check("loadTurnstileConfig 只取 key、不无条件渲染（渲染只在 turnstileNeeded 兜底分支里）",
@@ -332,15 +334,55 @@ console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请
     "又在无条件 render —— api.js 会被拉回首屏，首页白付 ~866ms");
   check("变异⑤（把无条件 render 写回 loadTurnstileConfig）会被判红",
     cfgStaysLazy(appCode.replace(
-      "if (turnstileNeeded) { renderTurnstile(); renderRegisterTurnstile(); }",
-      "renderTurnstile(); renderRegisterTurnstile();")) === false,
+      /if \(turnstileNeeded\) \{ renderTurnstile\(\); renderRegisterTurnstile\(\); renderLoginTurnstile\(\); \}/,
+      "renderTurnstile(); renderRegisterTurnstile(); renderLoginTurnstile();")) === false,
     "变异未生效或未被识破 —— 这条断言等于没测");
+
+  // ── 表单化的 Turnstile 接入点：断言按 TS_FORM_TARGETS **声明**驱动 ──
+  // 为什么不再逐个写死 "register" / "login"：这类「复制一份实现、然后漏掉其中一处收尾」的错误
+  // 在本文件里反复出现（retryTurnstile 漏置空 widget id、提交路径漏判 id 非空…）。
+  // 改成读声明之后，**再加第四个表单却漏掉某处**时，下面整组断言会自己变红。
+  // 注意：留言墙的 widget 不在这个表里 —— 它是**视图级**的（渲染时机受 display:none 约束，
+  // 由 loadGuestbook() 拉完数据后才画），与「弹窗内可见即可画」的表单不是同一类。
+  const formTargets = [...appCode.matchAll(/\{\s*name:\s*"([a-zA-Z]+)",\s*containerId:\s*"([A-Za-z]+)"/g)]
+    .map((m) => ({ name: m[1], containerId: m[2] }));
+  check("能识别出表单化的 Turnstile 接入点（避免正则失效导致下面整组断言空转）",
+    formTargets.length >= 2,
+    "只识别到 " + formTargets.length + " 个：" + formTargets.map((t) => t.name).join(", "));
+
+  const retryBody = () => sliceFn(appCode, "function retryTurnstile()");
+  const retryClearsAll = (body) =>
+    !!body && formTargets.length > 0 && formTargets.every((t) => new RegExp(`${t.name}WidgetId = null;`).test(body));
+  check("重试会清空**每个**表单的 widget id（容器已清空，旧 id 会让 reset 抛 Could not find widget）",
+    retryClearsAll(retryBody()),
+    "未置空：" + formTargets.filter((t) => !new RegExp(`${t.name}WidgetId = null;`).test(retryBody())).map((t) => t.name + "WidgetId").join(", "));
+  // ⚠️ 造故障必须**只动 retryTurnstile 的函数体**：直接对全文做 replace 会先命中
+  //    `let loginWidgetId = null;` 那个**声明**，retry 里的那行没动 ⇒ 守护仍判绿，
+  //    于是「变异没生效」被误读成「守护有漏洞」。（本文件 §十三 记过同类事故。）
+  const retryMutated = appCode.replace(
+    /function retryTurnstile\(\)[\s\S]*?\n  \}/,
+    (b) => b.replace(`${formTargets[formTargets.length - 1].name}WidgetId = null;`, ""),
+  );
+  check("变异③（重试漏掉某个表单的 widget id）会被判红",
+    formTargets.length >= 2 && retryMutated !== appCode &&
+    retryClearsAll(sliceFn(retryMutated, "function retryTurnstile()")) === false,
+    "删掉一个 id 归零却仍判绿 —— 这条断言没盯住");
+
+  const missingContainers = formTargets.filter((t) => !new RegExp(`id="${t.containerId}"`).test(htmlNoComment));
+  check("每个表单的 Turnstile 容器都真的在 HTML 里（不会渲染到一个不存在的 id 上）",
+    missingContainers.length === 0,
+    "HTML 里找不到：" + missingContainers.map((t) => t.containerId).join(", "));
+
+  const unwired = formTargets.filter((t) => !new RegExp(`takeFormTurnstileToken\\(tsTarget\\("${t.name}"\\)`).test(appCode));
+  check("每个表单的提交路径都先取 token 再发请求（token 一次性，漏掉就永远验证失败）",
+    unwired.length === 0,
+    "没接上的表单：" + unwired.map((t) => t.name).join(", "));
 
   const hasLazyEntry = (src) =>
     /function requireTurnstile\(which\)/.test(src) &&
     /requireTurnstile\("guestbook"\)/.test(src) &&
-    /requireTurnstile\("register"\)/.test(src);
-  check("注入的唯一出口是 requireTurnstile()，留言墙与注册 tab 两个调用点都在",
+    formTargets.every((t) => new RegExp(`requireTurnstile\\("${t.name}"\\)`).test(src));
+  check("注入的唯一出口是 requireTurnstile()，留言墙与每个表单的调用点都在",
     hasLazyEntry(appCode),
     "按需入口缺失，或某个需要人机验证的视图没走它");
   check("变异⑥（留言墙不再调 requireTurnstile）会被判红",
@@ -354,7 +396,7 @@ console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请
   const startupTail = startupFrom < 0 ? "" : appCode.slice(startupFrom, startupTo > startupFrom ? startupTo : startupFrom + 600);
   check("能定位到启动段窗口（避免切片失败导致空串假绿）", startupTail.length > 40, "窗口长度=" + startupTail.length);
   check("启动段不注入 api.js、也不渲染 widget",
-    !/ensureTurnstileScript|render(Register)?Turnstile\(\)/.test(startupTail),
+    !/ensureTurnstileScript|render[A-Za-z]*Turnstile\(\)/.test(startupTail),
     "启动段里出现了注入/渲染： " + startupTail.replace(/\s+/g, " ").slice(0, 200));
   check("保留 preconnect（注入虽晚，握手提前）",
     /<link rel="preconnect" href="https:\/\/challenges\.cloudflare\.com"/.test(htmlSrc),
@@ -363,44 +405,47 @@ console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请
   check("提交路径会先等脚本（不把「没加载完」误报成「没做人机验证」）",
     (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length >= 2,
     "只有 " + (appCode.match(/await ensureTurnstileScript\(\);/g) || []).length + " 处等待");
-  // 断言按语义写，不锁死 a && b && c 的书写顺序（历史上这种「写死变量名/顺序」的断言自己误报过）：
-  // 只要求 getResponse 调用点前 260 字符内同时盯住了「id 非空」与「window.turnstile 可用」。
-  const guardedGetResponse = (src, idVar) => {
-    const i = src.indexOf(`getResponse(${idVar})`);
-    if (i < 0) return false;
+  // 断言按语义写，不锁死 a && b && c 的书写顺序（历史上这种「写死变量名/顺序」的断言自己误报过）。
+  // 判据拆成两条独立事实，因此**不认识**具体的变量名写法：
+  //   ① 附近能看到 window.turnstile（API 可用）
+  //   ② 那个 id 出现在**条件位**（`&&` 或三元的 `?` 之前），不是被裸着直接用
+  // 本站有两处取 token（留言墙 / 表单共用的 takeFormTurnstileToken），两处写法不同，
+  // 旧断言只认其中一种写法，于是把另一处打成失败 —— 那是断言写窄了，不是代码有问题。
+  const guardedTokenRead = (src, i) => {
     const head = src.slice(Math.max(0, i - 260), i);
-    return head.includes(idVar) && /window\.turnstile\b/.test(head);
+    // ⚠️ 结尾不能用 \b：`t.getId()` 后面紧跟的是 `)`，两个非单词字符之间**没有**词边界，
+    //    用 \b 会让本该命中的写法被判失败（这条断言自己踩过一次）。
+    //    改用「后面不是标识符字符」的负向断言，既能挡住 turnstileWidgetIdXyz 这类误命中，
+    //    又不会把 `t.getId())` 误杀。
+    return /window\.turnstile\b/.test(head) &&
+      /(?:&&|\?)\s*(?:t\.getId\(\)|turnstileWidgetId)(?![A-Za-z0-9_])/.test(head);
+  };
+  const allTokenReadsGuarded = (src) => {
+    const idxs = [...src.matchAll(/getResponse\(/g)].map((m) => m.index);
+    if (idxs.length === 0) return false; // 一处都没有 ⇒ 断言应判红，而不是空转通过
+    return idxs.every((i) => guardedTokenRead(src, i));
   };
   check("读 token 前先确认 widget 已渲染（id 非空）+ API 可用，不会把 null 交给 getResponse",
-    guardedGetResponse(appCode, "turnstileWidgetId") && guardedGetResponse(appCode, "registerWidgetId"),
-    "getResponse 的参数仍可能为 null");
-  check("变异②（删掉 getResponse 前的 id 判空）会被判红",
-    guardedGetResponse(
-      appCode.replace("turnstileSiteKey && turnstileWidgetId && tsReady", "turnstileSiteKey && tsReady"),
-      "turnstileWidgetId") === false);
+    allTokenReadsGuarded(appCode),
+    "getResponse 的参数仍可能为 null（或已一处都不剩）");
+  check("变异②（删掉 getResponse 前的 ready 判空）会被判红",
+    allTokenReadsGuarded(appCode.replace("ready && t.getId()", "t.getId()")) === false,
+    "去掉 ready 判断却仍判绿");
 
   // ── 脚本彻底拉不到时的降级（2026-09-15 补，真浏览器实测见 .diag/ts-undefined-cases.mjs）──
   // 原实现只留一个 65px 空灰框，提交时才提示「请先完成人机验证」——页面上根本没有验证框可点。
-  // 这两条正则提出来，供「正向断言」与「变异自检」共用同一份判定逻辑，避免两处写法漂移。
-  const RETRY_IDS_RE = /function retryTurnstile\(\)[\s\S]{0,300}?turnstileWidgetId = null;[\s\S]{0,140}?registerWidgetId = null;/;
+  // （「重试要清空 widget id」那条断言已上移到 retryClearsAll，按表单声明逐个检查，不在这里重复。）
   const ONLOAD_GUARD_RE = /s\.onload = \(\) => \{[\s\S]{0,400}?window\.turnstile\.render === "function"[\s\S]{0,260}?resolve\(ok\)/;
   check("脚本拉不到时不留空灰框，而是就地渲染降级提示",
     /function renderTurnstileFallback\(container\)/.test(appCode) &&
     (appCode.match(/renderTurnstileFallback\(/g) || []).length >= 4,
-    "renderTurnstileFallback 调用点只有 " + (appCode.match(/renderTurnstileFallback\(/g) || []).length + " 处（渲染+两条提交路径都要有）");
+    "renderTurnstileFallback 调用点只有 " + (appCode.match(/renderTurnstileFallback\(/g) || []).length + " 处（渲染+提交路径+重试都要有）");
   check("降级提示带「重试」按钮（不是让用户去刷新猜）",
     /btn\.textContent = "重试"/.test(appCode) && /btn\.addEventListener\("click", retryTurnstile\)/.test(appCode),
     "缺少可点的重试按钮");
   check("重试会重建脚本 promise（失败过一次也能再来）",
-    /function retryTurnstile\(\)[\s\S]{0,400}?turnstileScriptPromise = null/.test(appCode),
+    /function retryTurnstile\(\)[\s\S]{0,600}?turnstileScriptPromise = null/.test(appCode),
     "重试没有清空 turnstileScriptPromise");
-  check("重试会清空 widget id（容器已清空，旧 id 会让 reset 抛 Could not find widget）",
-    RETRY_IDS_RE.test(appCode),
-    "重试未置空 widget id —— 会复现 Could not find widget for provided container");
-  check("变异③（重试不清 widget id）会被判红",
-    RETRY_IDS_RE.test(appCode.replace(
-      /turnstileWidgetId = null;\s*registerWidgetId = null;\s*turnstileScriptPromise = null;/,
-      "turnstileScriptPromise = null;")) === false);
   check("渲染前清掉降级态（Turnstile 要求容器是干净的）",
     (appCode.match(/querySelector\("\.ts-fallback"\)\) container\.innerHTML = ""/g) || []).length >= 2,
     "render 前没有清空 .ts-fallback");
@@ -414,14 +459,22 @@ console.log("\n[9] Turnstile 只在用户真的需要时才注入（首屏零请
     "失败文案缺失，用户仍会被指去点一个不存在的验证框");
   // 提交成功后会 reset(widgetId) → 触发新一轮验证 → callback 紧跟执行。
   // 无条件清空提示会把刚写上去的「✅ 已钉上」抹掉（真浏览器实测见 .diag/degrade-check.mjs）。
+  // 只取 renderFormTurnstile 的函数体来测：全文里留言墙那份也有同样的 callback 片段，
+  // 对全文做 replace 只会命中**第一处**（留言墙），表单那处没动 ⇒ 变异无效、断言假绿。
+  const formRenderBody = (() => {
+    const i = appCode.indexOf("function renderFormTurnstile");
+    if (i < 0) return "";
+    const j = appCode.indexOf("function renderRegisterTurnstile", i);
+    return appCode.slice(i, j > i ? j : i + 2000);
+  })();
   const cbGuard = (src) =>
-    /callback: \(\) => \{[\s\S]{0,360}?msg\.classList\.contains\("err"\)/.test(src) &&
-    /registerMsg && registerMsg\.classList\.contains\("err"\)/.test(src);
+    /callback: \(\) => \{[\s\S]{0,240}?msg\.classList\.contains\("err"\)/.test(src) &&
+    /const msg = t\.msg\(\);/.test(src);
   check("验证通过的回调只清 err 提示，不抹掉成功提示",
-    cbGuard(appCode),
+    formRenderBody.length > 200 && cbGuard(formRenderBody),
     "回调无条件清空，提交成功的提示会被紧随其后的 reset 抹掉");
   check("变异⑦（回调改回无条件清空）会被判红",
-    cbGuard(appCode.replace('msg && msg.classList.contains("err")', "msg")) === false);
+    cbGuard(formRenderBody.replace('msg && msg.classList.contains("err")', "msg")) === false);
 }
 
 console.log("\n[10] 启动完整性：横幅必须能抓到「启动了但中途断掉」");

@@ -18,27 +18,95 @@ function b64urlDecodeStr(s) {
   return new TextDecoder().decode(u8);
 }
 
-// PBKDF2 密码哈希，返回 { salt, hash }
-export async function hashPassword(password, salt) {
+// ── 密码哈希：迭代数**写进存储串**，才能在不锁死现存密码的前提下升级 ──
+//
+// 为什么要带迭代数（曾经的坑）：老实现把 100000 硬编码在算法里，存储串是 "salt:hash"。
+// 想提高强度就只能改那个常量 —— 而一改，所有现存密码立刻全部校验失败（登录不上、
+// 且没有任何办法分辨「密码错」与「格式变了」）。于是这个值事实上被**冻死**了。
+//
+// 现在存储串有两种形态，校验时**按存储串里写的迭代数**去算：
+//   · 新：`pbkdf2$<iterations>$<salt>$<hash>`
+//   · 旧：`salt:hash`  ← 隐含 100000 次，永远不会被改写，只是读得出来
+// 校验成功后由调用方（login）用 needsRehash() 判断要不要顺手升级成新形态。
+// 这样迭代数就变成一个**可安全上调的旋钮**：调大只影响新写入与已登录用户，
+// 存量密码在用户下次登录时逐个自动迁移，全程无需任何人重置密码。
+const PBKDF2_HASH = "SHA-256";
+const PBKDF2_LEGACY_ITERATIONS = 100000; // 老格式 "salt:hash" 的隐含迭代数（历史事实，别改）
+
+// 当前目标迭代数。可由环境变量 PBKDF2_ITERATIONS 覆盖（便于不改代码就上调/回滚）。
+// ⚠️ 取值是有实测依据的，不是抄来的数字：本机实测 100k=30ms / 210k=60ms / 600k=171ms，
+//    而线上 POST /api/login 在 100k 下的耗时已比同链路空端点（/api/config）高出约 0.2~0.4s。
+//    Pages Functions 的 CPU 预算是有限的（免费档 10ms 量级，付费档高得多），
+//    迭代数一旦超过预算，表现是**整条登录请求被平台掐断（5xx）**，而不是慢 —— 那就是锁死全站登录。
+//    所以这里默认取 210000（OWASP 对 PBKDF2-HMAC-SHA256 的建议值之一），
+//    并把「上调到 600000」写成了明确的操作步骤（docs/login-hardening.md）。
+export const PBKDF2_DEFAULT_ITERATIONS = 210000;
+const PBKDF2_MIN_ITERATIONS = 10000;   // 低于此值的存储串视为异常，拒绝校验
+const PBKDF2_MAX_ITERATIONS = 2000000; // 防御性上限：存储串被篡改成天文数字时不要试图去算
+
+// 从环境变量解析目标迭代数；非法值一律回落到默认值（并留痕，不静默）
+export function targetIterations(env) {
+  const raw = env && env.PBKDF2_ITERATIONS;
+  if (raw === undefined || raw === null || raw === "") return PBKDF2_DEFAULT_ITERATIONS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < PBKDF2_MIN_ITERATIONS || n > PBKDF2_MAX_ITERATIONS) {
+    console.error(`[auth] PBKDF2_ITERATIONS 取值非法（${String(raw)}），已回落到 ${PBKDF2_DEFAULT_ITERATIONS}`);
+    return PBKDF2_DEFAULT_ITERATIONS;
+  }
+  return n;
+}
+
+// PBKDF2 密码哈希（默认用当前目标迭代数），返回 base64url 的派生结果
+export async function hashPassword(password, salt, iterations = PBKDF2_DEFAULT_ITERATIONS) {
   const enc = new TextEncoder();
   const keyMat = await crypto.subtle.importKey(
     "raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: enc.encode(salt), iterations: 100000, hash: "SHA-256" },
+    { name: "PBKDF2", salt: enc.encode(salt), iterations, hash: PBKDF2_HASH },
     keyMat, 256
   );
   return b64urlEncodeBytes(new Uint8Array(bits));
 }
 
+// 生成可入库的完整存储串（新格式）
+export async function makePasswordHash(password, salt, iterations) {
+  const h = await hashPassword(password, salt, iterations);
+  return `pbkdf2$${iterations}$${salt}$${h}`;
+}
+
+// 解析存储串 → { iterations, salt, hash }；无法识别时返回 null（**不要**当成 100000 硬猜）
+export function parsePasswordHash(stored) {
+  const s = String(stored == null ? "" : stored);
+  if (s.startsWith("pbkdf2$")) {
+    const parts = s.split("$");
+    if (parts.length !== 4) return null;
+    const iter = Number(parts[1]);
+    if (!Number.isInteger(iter) || iter < PBKDF2_MIN_ITERATIONS || iter > PBKDF2_MAX_ITERATIONS) return null;
+    if (!parts[2] || !parts[3]) return null;
+    return { iterations: iter, salt: parts[2], hash: parts[3] };
+  }
+  // 旧格式 "salt:hash"（老实现写出来的）；只在**确实有冒号且两段都非空**时认账
+  const idx = s.indexOf(":");
+  if (idx <= 0 || idx === s.length - 1) return null;
+  return { iterations: PBKDF2_LEGACY_ITERATIONS, salt: s.slice(0, idx), hash: s.slice(idx + 1) };
+}
+
+// 校验：**按存储串里记录的迭代数**计算，所以老密码在迭代数上调后依然能通过。
+// ⚠️ 解析失败（格式不认识的垃圾）返回 false，但必须与「密码错」走**同样长**的耗时路径 ——
+//    调用方（login）因此不在这里做短路优化，见下方 DUMMY 说明。
 export async function verifyPassword(password, stored) {
-  // stored 形如 "salt:hash"
-  const idx = stored.indexOf(":");
-  if (idx < 0) return false;
-  const salt = stored.slice(0, idx);
-  const hash = stored.slice(idx + 1);
-  const computed = await hashPassword(password, salt);
-  return constantTimeEqual(computed, hash);
+  const parsed = parsePasswordHash(stored);
+  if (!parsed) return false;
+  const computed = await hashPassword(password, parsed.salt, parsed.iterations);
+  return constantTimeEqual(computed, parsed.hash);
+}
+
+// 需要升级吗？（旧格式，或迭代数低于当前目标）
+export function needsRehash(stored, iterations) {
+  const parsed = parsePasswordHash(stored);
+  if (!parsed) return false;                 // 解析不了的不去覆写（可能是别的算法，别毁数据）
+  return parsed.iterations < iterations;
 }
 
 function constantTimeEqual(a, b) {
@@ -100,6 +168,19 @@ export function jwtSecret(env) {
     "Settings → Environment variables 配置一个随机密钥（建议 ≥32 字符）。" +
     "本地 wrangler 调试可临时设置 ALLOW_INSECURE_DEV_JWT=1。"
   );
+}
+
+// 登录/留言限频用：把 IP 变成不可逆哈希，**不存原 IP**（隐私）。
+// 输出是 hex 的 SHA-256(ip + "|" + secret)。secret 缺失时也照常哈希（只是不再有"加盐"作用），
+// 因为调用方可能在 JWT_SECRET 未配置的环境里跑，不该因此让整个功能 500。
+// ⚠️ 这个实现是从 guestbook.js 原样搬过来的（此前两处各有一份）—— 输出必须逐字节不变，
+//    否则线上已存的 ip_hash 会与新增的对不上，限频窗口会突然"归零"。
+export async function hashIp(ip, secret) {
+  const data = new TextEncoder().encode((ip || "") + "|" + (secret || ""));
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export function getCookie(req, name) {
