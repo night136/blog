@@ -176,13 +176,21 @@ console.log("\n[4] 目标迭代数：默认值与环境变量覆盖");
 {
   // ⚠️ 这里**不要**写「默认值必须 == 某个具体数字」。
   //    上一版正是这么写的（== 210000），于是守护把一个**错误的值**锁死了：
-  //    210000 超出 Pages Free 的 10ms CPU 预算，线上注册每一个请求都被平台终止（2026-09-17 事故）。
-  //    现在改盯**不变量**：落在合法区间，且不超过经实测确认可用的上限。
-  //    要上调这个上限，必须先真机跑通「注册 + 登录」，不能只改数字。
-  const PBKDF2_SAFE_MAX = 100000; // 实测依据：210k 被边缘终止、100k 可用（见 auth.js 顶部事故记录）
-  check("默认迭代数不超过实测可用上限（受边缘 CPU 预算硬约束）",
-    auth.PBKDF2_DEFAULT_ITERATIONS <= PBKDF2_SAFE_MAX,
-    `实际 ${auth.PBKDF2_DEFAULT_ITERATIONS}，上限 ${PBKDF2_SAFE_MAX}`);
+  //    210000 会让线上注册**每一个请求**都失败（2026-09-17 事故）。
+  //    现在改盯**不变量**：落在合法区间，且不超过平台硬上限。
+  // 🔴 这个上限是**平台硬编码**的，不是我们能推出来的：
+  //    workerd 对 PBKDF2 的迭代数硬上限为 100000，超过**直接抛 NotSupportedError**
+  //    （不是超时、不是变慢、更不是"CPU 预算不够"—— 那是首次归因的错误说法）。
+  //    真边缘实测依据（2026-09-17，临时只读探针，见 docs §十七）：
+  //      100000 ⇒ 3/3 成功（另连打 25/25 全成功 ⇒ 不是踩线值）
+  //      100001 ⇒ 3/3 抛错 `Pbkdf2 failed: iteration counts above 100000 are not supported (requested 100001).`
+  //    边界精确到 100001，平台自己在 message 里报出了上限。
+  //    ⇒ 任何上调都必须**真机跑通注册 + 登录**，不能只改数字（本地 Node 测不出来，
+  //      它没有这个上限；本机"能算"完全不代表边缘"肯算"）。
+  const PBKDF2_HARD_CAP = 100000;
+  check("默认迭代数不超过平台硬上限（workerd 对 PBKDF2 的 100000 限制）",
+    auth.PBKDF2_DEFAULT_ITERATIONS <= PBKDF2_HARD_CAP,
+    `实际 ${auth.PBKDF2_DEFAULT_ITERATIONS}，硬上限 ${PBKDF2_HARD_CAP}`);
   check("默认迭代数不至于低到形同虚设",
     auth.PBKDF2_DEFAULT_ITERATIONS >= 10000, String(auth.PBKDF2_DEFAULT_ITERATIONS));
   check("未配置时用默认值", auth.targetIterations({}) === auth.PBKDF2_DEFAULT_ITERATIONS);

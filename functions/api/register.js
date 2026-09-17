@@ -77,8 +77,13 @@ export async function onRequestPost({ request, env }) {
     // ⚠️ 但**服务端日志里必须留一个可检索的分类码**，不能只写一句通用文案。
     //    2026-09-17 的事故就是反面教材：用户报「注册失败，请稍后重试」，而 catch 把原因
     //    吞得干干净净（原始 message 不出响应体是**对的**，连日志里都没有分类就很难查），
-    //    最后只能临时给响应体加诊断码才定位到"PBKDF2 迭代数超边缘 CPU 预算"。
-    //    现在分类码只进 console.error ⇒ 既不泄漏，又能在 Cloudflare 日志里按 `[E1-cpu]` 搜。
+    //    最后只能临时给响应体加诊断码才定位。
+    //    现在分类码只进 console.error ⇒ 既不泄漏，又能在 Cloudflare 日志里按分类搜。
+    //    📌 事后核对（docs §十七）：那次事故的真因是「PBKDF2 迭代数超过 workerd 硬上限 100000」，
+    //       它的 message 是 `Pbkdf2 failed: iteration counts above 100000 are not supported`，
+    //       ⇒ 会落进下面的 **E5-crypto**，而不是首次归因以为的 E1-cpu。
+    //       也就是说：**这个分类码本可以当场纠正那个错误归因**，只是当时它还没被观测到
+    //       （用户是在回退版本后才注册成功的）。分类码的价值就在这里，别在排查时忘了看日志。
     const msg = String((e && e.message) || e);
     const code = /CPU|exceeded|limit/i.test(msg) ? "E1-cpu"
       : /JWT_SECRET/i.test(msg) ? "E2-jwt"
