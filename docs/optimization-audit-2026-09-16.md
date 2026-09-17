@@ -20,9 +20,21 @@
 | **对照实验** | 同上，打 `/404.html` | 隔离出「阻塞样式表」的**净代价** |
 | 静态代码审查 | — | `functions/` 全部 + `assets/app.js` 关键路径 |
 
-> `audit-live.mjs` 与 `audit-spider.mjs` 本次已**入库**（原先只在 `.diag/` 下、不入版本库，报告引用会悬空）。
-> 两者都支持参数：`node scripts/audit-live.mjs [baseUrl]`、`node scripts/audit-spider.mjs [slug]`。
-> ⚠️ 它们**不进 `run-all.sh`**：依赖线上网络，作为 CI 判据会很脆弱（名字是 `audit-*` 不是 `verify-*`，`verify-suite-coverage` 不会管它们）。
+> **真浏览器/线上探针一律入库**（原先只在 `.diag/` 下、不入版本库，报告引用会悬空 —— 别人 clone 下来
+> 按报告里的命令跑，得到的是 "No such file"）。现均在 `scripts/`：
+>
+> | 探针 | 用法 | 测什么 |
+> |---|---|---|
+> | `audit-live.mjs` | `node scripts/audit-live.mjs [baseUrl]` | 线上响应头 / 压缩 / CDN 缓存 / TTFB（§八、§七 #11） |
+> | `audit-spider.mjs` | `node scripts/audit-spider.mjs [slug]` | 爬虫视角 SSR 正文（§爬虫） |
+> | `audit-first-paint.mjs` | `node scripts/audit-first-paint.mjs --both [--neg] [--live]` | 真浏览器 A/B：首绘增量 + CLS + 几何指纹（§三） |
+> | `audit-a11y.mjs` | `node scripts/audit-a11y.mjs [w] [h] [slug] [local]` | 键盘/焦点/滚动还原（§七 #15 #16 #19 #20） |
+> | `audit-csp.mjs` | `node scripts/audit-csp.mjs [--raw-live]` | CSP 三层验收 + 违规收集（§八 CSP） |
+>
+> ⚠️ 它们**不进 `run-all.sh`**：依赖浏览器或线上网络，作为 CI 判据会很脆弱（名字是 `audit-*` 不是 `verify-*`，`verify-suite-coverage` 不会管它们）。
+> 截图/中间产物仍写 `.diag/out/`（gitignore），**只提交脚本、不提交图片**。
+> 下文仍会提到少量 `.diag/xxx.mjs`（`cls-shift-diag`、`count-logo-requests`、`turnstile-lazy` 等）——
+> 那些是**一次性排查脚本**，它们量出的数都已写进本报告的正文，不构成必读依赖。
 
 ---
 
@@ -85,7 +97,7 @@
 它仍是唯一样式来源、仍写着外链，所以「样式只有一份真源、改样式必须改 `assets/style.css`」这条
 不变量没被破坏；内联只发生在**构建产物**里。
 
-判据全部按上面「前置验证要求」建成脚本：`.diag/first-paint-probe.mjs`（真浏览器 + 全新 profile +
+判据全部按上面「前置验证要求」建成脚本：`scripts/audit-first-paint.mjs`（真浏览器 + 全新 profile +
 CDP 限速 + 两侧 br q4 本地服务；移动视口用 `--mobile`）。
 
 | 本机受控对照（CDP 真浏览器、限速 RTT 150ms / 200KBps、两侧都 br q4） | 桌面 1440×900 | 移动 390×844 |
@@ -111,7 +123,7 @@ CDP 限速 + 两侧 br q4 本地服务；移动视口用 `--mobile`）。
 
 #### 负向自证（证明收益不是「第二次跑更快」这类顺序假象）
 
-`node .diag/first-paint-probe.mjs --both --neg`：在**临时副本**里拆掉内联那一步再跑，
+`node scripts/audit-first-paint.mjs --both --neg`：在**临时副本**里拆掉内联那一步再跑，
 收益当场消失（843 vs 881ms）、5 条断言变红、退出码 1。（`replace` 落空会 `exit 2`，
 不会把「没换成」当成「比过了」。）
 
@@ -326,19 +338,19 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 
 | # | 问题 | 核实 | 影响 |
 |---|---|---|---|
-| 8 | 登录无失败次数限制 | ✅ 仍在（`grep rate/attempt/lockout` 全后端只命中 guestbook） | **升 P1**，见 §五 |
-| 9 | PBKDF2 10 万次 | ✅ 仍在（`auth.js:28`） | **升 P1**，见 §五 |
-| 10 | 阅读量自增非原子 | ✅ 仍在 | 并发下计数偏差；改 `UPDATE … RETURNING views` 即可 |
+| 8 | 登录无失败次数限制 | ✅ 已修（新增 `_lib/loginGuard.js`，见 §十五） | **升 P1**，见 §五 |
+| 9 | PBKDF2 10 万次 | ✅ 已修（迭代数写进 hash，渐进升级，见 §十五） | **升 P1**，见 §五 |
+| 10 | 阅读量自增非原子 | ✅ 已修（`_lib/views.js` 用 `UPDATE … RETURNING`，见 §十五） | 并发下计数偏差；改 `UPDATE … RETURNING views` 即可 |
 | 11 | sitemap / feed / robots 无 `Cache-Control` | ✅ **实测确认**：三者响应头 `cache-control: —` | 每次请求都打 D1 | ✅ `d90db27`。⚠️ 当初那句「加上 `max-age` 即可」**是错的**，见本节末「把这条修错了一次」 |
-| 12 | 便签墙 2 次全表聚合 | ✅ 仍在（`DISTINCT substr(created_at,1,10)`） | 函数运算使索引失效，全表扫 |
-| 13 | 注册先查重后插入 | ✅ 仍在 | 并发冲突时依赖 UNIQUE 兜底，但抛 500 而非 409 |
+| 12 | 便签墙 2 次全表聚合 | ✅ 已修（新增 `day` 列 + 覆盖索引，见 §十五） | 函数运算使索引失效，全表扫 |
+| 13 | 注册先查重后插入 | ✅ 已修（UNIQUE 冲突返回 409，见 §十五） | 并发冲突时依赖 UNIQUE 兜底，但抛 500 而非 409 |
 | 14 | 错误响应格式不统一 | ✅ 仍在 | `{error}` 与 `{ok:false,error}` 混用 |
-| 15 | 灯箱无焦点管理 | ✅ 仍在（`role="dialog"` 零命中） | 键盘/读屏用户困在灯箱里 |
-| 16 | 无 skip link / `aria-current` | ✅ 仍在（`aria-current` 只出现在轮播圆点） | 键盘用户要 Tab 过全部导航才能到正文 |
+| 15 | 灯箱无焦点管理 | ✅ 已修（`role=dialog` + 焦点回路 + 正文图可聚焦，见 §十五） | 键盘/读屏用户困在灯箱里 |
+| 16 | 无 skip link / `aria-current` | ✅ 已修（skip link + `aria-current="page"` 同步，见 §十五） | 键盘用户要 Tab 过全部导航才能到正文 |
 | 17 | `mdToHtml` 把 `# ` 渲染成 `<h2>` | ✅ 仍在 | 影响已降低（SSR 正文能被抓到之后） |
 | 18 | 死代码 `gradFor()` | ✅ **确认**：全文件只出现 1 次（定义处），零调用 | 纯卫生 |
-| 19 | 顶部 scroll 监听未节流 | ✅ 仍在 | 每次滚动读 `scrollY` + 2 次 `classList.toggle` |
-| 20 | 返回列表不恢复滚动位置 | ✅ 仍在 | 从文章返回首页会跳回顶部（体验明显） |
+| 19 | 顶部 scroll 监听未节流 | ✅ 已修（rAF 节流，实测同任务内 0 次读 `scrollY`，见 §十五） | 每次滚动读 `scrollY` + 2 次 `classList.toggle` |
+| 20 | 返回列表不恢复滚动位置 | ✅ 已修（`showView` 统一记录/还原，见 §十五） | 从文章返回首页会跳回顶部（体验明显） |
 
 > 另外 8 项（原 #1~#7 与爬虫正文）已在 09-14/09-15 修掉，本次复测确认有效。
 
@@ -371,7 +383,7 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 
 ---
 
-## 八、🟡 P2 — 安全响应头有缺口，且 `functions/` 完全裸奔 —— ✅ 已修（`d90db27`）
+## 八、🟡 P2 — 安全响应头有缺口，且 `functions/` 完全裸奔 —— ✅ 已修（`d90db27` + 本批补齐 CSP）
 
 > 收口见 `docs/security-headers.md`。守护 `scripts/verify-security-headers.mjs`（74 项，含 4 项负向自证）。
 
@@ -504,12 +516,12 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 | 1 | §四 重复 logo 合并 | 首屏 −24.8KB、−1 请求 | 极低 | ✅ `2733ab4` |
 | 4 | §六 Turnstile 改按需 | 首页**不再付** 3 个跨境请求 / 28KB | 低 | ✅ `c191a3a` |
 | 8 | §九 仓库卫生 + §十 文档债 | 长期可维护性 | 极低 | ✅ `c191a3a` |
-| 2 | §五 登录加固（Turnstile + 失败计数） | 堵住唯一裸奔入口 | 低 | 待做。⚠️ 三件里 PBKDF2 那件**不能直接改迭代数**（会锁死所有现存密码） |
-| 3 | §三 style.css 不再阻塞 | 首绘 **−418ms**（桌面）/ **−439ms**（移动）；线上 A/B **−794ms** | 中 | ✅ `d07cd38`。判据（增量 + CLS + 几何指纹）已沉淀成 `.diag/first-paint-probe.mjs`，负向自证已跑 |
+| 2 | §五 登录加固（Turnstile + 失败计数 + PBKDF2 渐进升级） | 堵住唯一裸奔入口 | 低 | ✅ 本批（见 §十五）。⚠️ 三件里 PBKDF2 那件是**把迭代数写进 hash**，不是直接改常量 —— 直接改会锁死所有现存密码 |
+| 3 | §三 style.css 不再阻塞 | 首绘 **−418ms**（桌面）/ **−439ms**（移动）；线上 A/B **−794ms** | 中 | ✅ `d07cd38`。判据（增量 + CLS + 几何指纹）已沉淀成 `scripts/audit-first-paint.mjs`，负向自证已跑 |
 | 5 | §八 安全头统一 + §七 #11 缓存头 | 安全基线 + 三个端点不再每次打 D1 | 低 | ✅ `d90db27`。⚠️ #11 第一版按「加 max-age 即可」做，**是错的**（边缘不缓存 Functions），已改用 Cache API 重做（见 §七 末）。线上 12 条判据全绿 |
-| 5b | §八 剩下的那一半 CSP（`script-src` / `style-src`） | 真正的 XSS 收窄 | 中 | 待做。需要给 3 段内联 `<script>` + 构建期内联的 `style.css` 算 hash/nonce，见 `docs/security-headers.md` |
-| 6 | §七 #10 #12 #13 | 数据层正确性 | 低 | 待做 |
-| 7 | §七 #15 #16 #19 #20 | a11y / 体验 | 低 | 待做 |
+| 5b | §八 剩下的那一半 CSP（`script-src` / `style-src`） | 真正的 XSS 收窄 | 中 | ✅ 本批（见 §十五）。⚠️ 原判「要给 **3** 段内联 `<script>` + `style.css` 算 hash」**不准确**：实际只有 **1** 段内联 `<script>`，而 `style.css` 那一侧哈希**做不到**（构建期生成 + 19 处 style 属性），只做了来源白名单 |
+| 6 | §七 #10 #12 #13 | 数据层正确性 | 低 | ✅ 本批（见 §十五） |
+| 7 | §七 #15 #16 #19 #20 | a11y / 体验 | 低 | ✅ 本批（见 §十五） |
 | ★ | **§六 顺带查出的「注册框真实挑战拿不到 token」** | 可能是线上注册流程的问题 | — | **待定性**（需一次真机手动注册），见 §六 末尾 |
 
 ---
@@ -541,3 +553,96 @@ challenges.cloudflare.com iframe       2 个           合计 1662ms
 - ❌ 全程**没有**在真机上手动完成一次注册。所以 §六 末尾那件「注册框真实挑战 token 为 0」
   只用 A/B 排除了「本次改动引入」，**没有定性**到底是自动化环境的差异还是线上真有问题 ——
   要定性只能靠一次真人手动注册。
+
+---
+
+## 十五、2026-09-17 第二批：§五 + §七 #10/#12/#13 + a11y 四项 + CSP 下半
+
+四块一起做完。下面只记**实测出来的数**与**踩到的坑** —— 每条都配了守护，且守护本身都做了负向自证
+（详见各 `scripts/verify-*.mjs`；真浏览器探针在 `scripts/audit-a11y.mjs`、`scripts/audit-csp.mjs`）。
+
+### 15.1 §五 登录加固（commit 见 `git log`）
+
+| 件 | 做法 | 关键约束 |
+|---|---|---|
+| 人机验证 | `/api/login` 前置 `verifyTurnstile`，未配 `TURNSTILE_SECRET_KEY` 时放行（与 register 同款） | 放在**最前**：脚本连一次 PBKDF2 的 CPU 都花不到我们身上 |
+| 失败计数 | 新表 `login_attempts`（`scripts/migrate-login-attempts.sql`）+ `_lib/loginGuard.js`：15 分钟窗口内按**用户名**与**IP**两维计数，取较大者；≥5 次开始 **递增延迟** `min(400·2^(n−5), 5000)ms` | 🚫 **不做硬锁**：硬锁是给攻击者一把 DoS 真实用户的杠杆。计数刻意做在**查用户之前**，对存在/不存在的用户名一视同仁，否则它自己会变成新的枚举信号 |
+| PBKDF2 渐进升级 | 迭代数**写进 hash**：`pbkdf2$<iter>$<salt>$<hash>`；老的 `salt:hash` 按 100000 校验；校验通过后顺手用新迭代数重写 | 🚫 绝不能直接改常量（会锁死全部现存密码）。⚠️ 连**假哈希**也必须用同一个 `targetIterations(env)` —— 用老格式的假哈希会让"用户不存在"明显更快，把时序侧信道又打开 |
+
+- 守护 `scripts/verify-login-hardening.mjs`：**93 项**，含老格式密码端到端登录、UNIQUE→409、假哈希同源（负向自证：写死成字面量必须判红）。
+- ⚠️ **顺手改掉一个错判**：`verify-no-tdz.mjs` 原有一条「假哈希必须是 `salt:hash` 格式」——
+  哈希格式一升级它就变红，而代码完全正确。这是**拿代理指标当判据**，已改成"假哈希与真密码的迭代数同源"并配负向自证。
+
+### 15.2 §七 #10 / #12 / #13 数据层
+
+- **#10 阅读量原子自增**：新增 `_lib/views.js`，`UPDATE posts SET views = COALESCE(views,0)+1 WHERE slug=? RETURNING views`（读后写一次完成）。
+  降级路径：`no such column: views` → `{views:null}`；其它错误 → `UPDATE`+`SELECT` 并**留日志**（`X-Views-Atomic: 0` 供线上区分是否走到降级）。
+- **#12 便签墙连击聚合**：新增 `day` 列（`scripts/migrate-guestbook-day.sql`）+ `idx_guestbook_day(day DESC)`，
+  聚合从 `DISTINCT substr(created_at,1,10)` 改为直接读 `day`。
+  **实测（真 `node:sqlite` 跑 `EXPLAIN QUERY PLAN`）**：老写法建 **2 个 TEMP B-TREE**，新写法是**覆盖索引扫描**。
+- **#13 注册并发冲突**：INSERT 撞 UNIQUE → 返回 **409**（原来 500）；错误文案不再回显 `e.message`。
+- ⚠️ **两种「列不存在」的报错文案不同**：SELECT 是 `no such column: day`，INSERT 是 `table X has no column named day`。
+  降级判断只匹配前者的话，**写操作会 500**（第一版就是这样，被 `verify-data-layer.mjs` 抓到）。
+- 守护 `scripts/verify-data-layer.mjs`：**28 项**，用真 SQLite（`--experimental-sqlite`，脚本自己带 flag 重入）跑并发语义、降级、以及"缺列时便签墙 GET/POST 不得 500"。
+
+### 15.3 §七 a11y 四项
+
+| # | 做法 | 真浏览器实测（`scripts/audit-a11y.mjs`，1200×900 与 390×844 **各 27/27**） |
+|---|---|---|
+| 15 灯箱 | `role="dialog" aria-modal="true" aria-label`；打开时焦点移入关闭按钮、Tab/Shift+Tab 回卷、关闭时还给触发图 | 连按 8 次 Tab 逃逸 **0** 次；Escape 与点遮罩两条关闭路径焦点都回到那张 `<img>` |
+| 16 skip link | `<body>` 里第一个可聚焦元素；落点 `<main id="main-content" tabindex="-1">`；`aria-current="page"` 与 `.active` 同源同步 | 按 1 次 Tab 就落在 skip link（且真的滑进视口）；回车后焦点到 `#main-content`，下一个 Tab 仍在正文内 |
+| 19 滚动节流 | rAF 节流：本帧已排队即返回；`{passive:true}`；注册后同步首跑一次 | 10 次同步 scroll 事件在同一任务内读 `scrollY` **0** 次（对照组未节流写法读 **10** 次，证明量法不是恒 0） |
+| 20 返回列表 | `showView` 统一记录/还原 `scrollY`；`viewIndex`→`Object.create(null)`；文章视图永不还原 | 滚到 1400 → 打开文章（0）→ 返回 **1400**；切归档再切回 **1400**；第二篇文章仍从 0 开始 |
+
+- 🔴 **真浏览器抓出一个静态断言看不见的 bug**：还原那一句原写 `behavior:"auto"` —— 而 `auto` 的语义是**听 CSS**，
+  `style.css:82` 给 `html` 设了 `scroll-behavior:smooth`，于是"回到原处"变成一段横跨整个列表的滚动动画
+  （同一帧读回 `scrollY` 只有 **2**）。已改 `behavior:"instant"`，并把这个不变量钉进 `verify-a11y.mjs`。
+- ⚠️ **灯箱是"点击正文图"触发的，而 `<img>` 本来不可聚焦** ⇒ 纯键盘用户永远打不开它，前面三条全白做。
+  已给**带 alt** 的正文图加 `tabindex="0" aria-haspopup="dialog"`（alt 为空表示装饰图，不加 Tab 停靠点），
+  并在 `postDetail` 上补 Enter/空格 的键盘等价操作。⚠️ 这段模板必须与 `scripts/lib/seo-render.mjs` **逐字一致**
+  （`verify-seo-render.mjs` [12] 逐条比对两边输出）。
+- 守护 `scripts/verify-a11y.mjs`：**34 项**（22 条判据 + 9 条负向自证），已加入 `run-all.sh`。
+
+### 15.4 §八 CSP 下半（`script-src` / `style-src`）
+
+最终值（`_headers` 与 `functions/_lib/security.js` 两份拷贝，守护逐字比对）：
+
+```
+script-src 'self' 'sha256-CJjlP287d9o8os05q1pTscyxju+Buc5X14AenQ46bUY=' https://challenges.cloudflare.com;
+style-src  'self' 'unsafe-inline' https://fonts.font.im
+```
+
+- **两边走的两条路，是因为哈希在一侧真的做不到**：
+  - `script-src` 用**哈希**（严格）：全站只有 **1 段**内联 `<script>`，它是源码里的静态文本、构建期不碰 ⇒ 哈希是稳定常量。
+    ⚠️ 审计原文写的「3 段内联 `<script>`」**不准确**（把注释里提到的那些也数进去了）。
+  - `style-src` 只能是**来源白名单 + `'unsafe-inline'`**：`index.html` 有 **19 处** `style="…"` 属性（运行期还有大量 `el.style.x=…`），
+    而构建期还会把整张 `style.css` 内联成 `<style data-inlined>` —— 后者的哈希**随每次改样式而变**，写死在头里必然过期。
+    这一条的价值是**收窄来源**（挡住任意外域样式表 / `@import` 外链），不是挡住内联样式。删掉 `'unsafe-inline'` 是白屏，不是加固。
+- 🔴 **哈希必须按 LF 计算**：仓库 `core.autocrlf=true` ⇒ 工作区 CRLF、线上 LF。
+  实测同一段脚本：LF 版 `sha256-CJjlP287…`（4834 字符），CRLF 版 `sha256-i6C6OEYy…`（差 79 个 `\r`）。
+  在 CRLF 上算出来的哈希，线上就是**整段启动脚本被拒 ⇒ 白屏**。
+- 🔴 **内联事件处理器不在哈希覆盖范围内**：兜底横幅那两个按钮原本是 `onclick="…"`，
+  加了 `script-src` 之后会被拦掉 —— 而那恰好是"站点已经启动失败、只剩这个横幅能自救"的时刻。
+  已改成 `addEventListener`（绑在那段有哈希白名单的内联脚本里）。`verify-security-headers.mjs` 现在断言「标记里没有内联事件处理器」。
+- ⚠️ 断言前要**剥两层注释**：HTML 注释里会**提到** `<script>` 与 `onclick`（解释为什么不能用），
+  `<script>` 块里的 JS 注释也一样。第一版只剥了 HTML 注释，于是被自己写的解释注释判红（假故障）。
+- **验收链路（三层，`scripts/audit-csp.mjs`，17/17）**：
+  1. `[A]` 本地服务直接吐仓库里的 CSP ⇒ 页面正常启动、零违规、19 处内联 style 仍生效、兜底按钮无 `onclick`；
+  2. `[B0]` **负向对照**：拿线上此刻的旧 HTML 配新哈希 ⇒ 浏览器**确实**报 `script-src-elem` 违规，
+     并在控制台把**正确的哈希念出来**（这条比"断言失败"有用：修复线索不需要人肉猜）；
+  3. `[B]` 线上**真域名** + 新 CSP + 新版内联脚本 ⇒ 零违规、浏览器自算哈希与 CSP 一致、
+     Turnstile 的 `api.js` 仍被放行（`window.turnstile` 存在、挑战组件仍能挂载）。
+- ⚠️ **Turnstile token 为 0 的 A/B**：headless 下拿不到 token。为分清"是不是 CSP 干的"，跑了对照组 ——
+  **同 HTML + 线上现有 CSP 同样拿不到**（容器 661×72 已渲染）。⇒ 与本次 CSP 改动**无关**（沿用 §六 末尾那条未定性的旧账）。
+- `verify-inline-css.mjs` 新增一条**闭环**断言：**构建产物**里那段内联脚本的哈希也必须命中 CSP 白名单 ——
+  否则"源码对、CSP 对、构建动了字节"这种情况没人管（而且它也是第一版误红的地方，正好证明了这条的价值）。
+
+### 15.5 顺手修掉的两条**守护自身的错判**（都属"拿代理指标当判据"）
+
+| 守护 | 原判据 | 为什么会误红 | 现在的判据 |
+|---|---|---|---|
+| `verify-mobile-guards.mjs` | `/function showView[\s\S]{0,1200}?\n  \}/` | `showView` 加了 #20 的滚动还原后自然变长 > 1200 字符 ⇒ 报「未找到 showView」 | 改成**花括号配对**取函数体，不设长度上限 |
+| `verify-contrast-tokens.mjs` | 「按 `tabIndex >= 0` 过滤的候选集**恰好 2 处**」 | 加了第 3 个候选集（`lightboxFocusables`）⇒ 误红，而新候选集**确实**带了这道过滤 | 枚举所有 `*Focusables()` 逐个体检，将来的第 4 个自动被覆盖 |
+
+> 两次都是同一种病：**把"当时有几个/有多长"写进判据**。判据要盯**目标**（这件事还能不能发生），
+> 不是盯实现形态。`verify-no-tdz` 那条假哈希格式断言是第三次。
