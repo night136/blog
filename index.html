@@ -644,7 +644,12 @@
         <form id="registerForm" class="auth-form" autocomplete="on">
           <label>用户名<input name="username" type="text" autocomplete="username" placeholder="2–32 位" required /></label>
           <label>邮箱（可选）<input name="email" type="email" autocomplete="email" placeholder="用于找回账号" /></label>
-          <label>密码<input name="password" type="password" autocomplete="new-password" placeholder="至少 6 位" required /></label>
+          <label>密码<input name="password" type="password" autocomplete="new-password" placeholder="至少 6 位" minlength="6" required /></label>
+          <!-- 确认密码：**纯浏览器侧**约束，不随请求发给服务端（服务端只看 password）。
+               位置刻意紧贴密码框、且在 Turnstile 容器**之前** —— 不一致时在取 token 前就拦住，
+               否则用户每输错一次都要重新过一遍人机挑战（token 一次性）。
+               autocomplete 也用 new-password：密码管理器据此把两个框填成同值。 -->
+          <label>确认密码<input name="password2" type="password" autocomplete="new-password" placeholder="再输入一次" minlength="6" required /></label>
           <div class="auth-turnstile" id="registerTurnstile"></div>
           <button type="submit" class="btn-submit">注册并登录</button>
           <p class="form-msg" id="registerMsg" role="status" aria-live="polite"></p>

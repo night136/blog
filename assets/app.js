@@ -1350,6 +1350,7 @@
   let registerWidgetId = null;   // 注册表单 Turnstile widget 实例 id
   let loginWidgetId = null;      // 登录表单 Turnstile widget 实例 id
   let loginBusy = false;         // 登录请求进行中（防双击重复提交）
+  let registerBusy = false;      // 注册请求进行中（同上；注册还多一层代价：Turnstile token 一次性）
   let turnstileScriptPromise = null; // api.js 的注入 promise（全局只注入一次；失败会清空以便重试）
   let turnstileNeeded = false;   // 是否已有人「真的需要」人机验证（切到留言墙 / 点注册 tab）—— 见 requireTurnstile()
 
@@ -2770,7 +2771,19 @@
   }
   async function handleRegister(e) {
     e.preventDefault();
+    if (registerBusy) return; // 双击 / 回车连按不该发出两次注册请求（也会白白消耗一个一次性 token）
     const fd = new FormData(registerForm);
+    // 两次密码必须一致。⚠️ 必须在**取 Turnstile token 之前**判：token 是一次性的，
+    //    先取再校验的话，用户每输错一次都要重新过一遍人机挑战才能再提交。
+    // 服务端**不需要**知道「确认密码」——它对安全性零贡献（攻击者填两遍相同的即可），
+    //    纯粹是防手滑的浏览器侧约束，所以只在这里校验，不随请求发出。
+    if (fd.get("password") !== fd.get("password2")) {
+      registerMsg.textContent = "两次输入的密码不一致"; registerMsg.className = "form-msg err";
+      triggerState("error", 2500);
+      const p2 = registerForm.querySelector('input[name="password2"]');
+      if (p2) { p2.value = ""; p2.focus(); } // 清空并聚焦第二格：让用户直接重输，不必自己找
+      return;
+    }
     registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";
     setAuthState("loading");
     // 与登录共用同一段逻辑（等脚本 → 取 token → 分类报错），避免两处各写一遍产生偏差
@@ -2780,6 +2793,7 @@
       triggerState("error", 2500);
       return;
     }
+    registerBusy = true;
     try {
       const r = await fetch("/api/register", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: fd.get("username"), email: fd.get("email"), password: fd.get("password"), turnstileToken: tsReg.token }) });
       const d = await r.json();
@@ -2797,6 +2811,8 @@
     } catch (_) {
       registerMsg.textContent = "网络错误"; registerMsg.className = "form-msg err";
       triggerState("error", 2500);
+    } finally {
+      registerBusy = false;
     }
   }
   async function handleLogout() { try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch (_) {} setAuthUI(null); if (currentViewIsMember()) renderMember(null); }
