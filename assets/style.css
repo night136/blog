@@ -1788,3 +1788,23 @@ summary:focus-visible,
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+/* ===== 认证表单输入框的触屏适配（2026-09-17 补，先实测后修） =====
+   加「确认密码」那格时用真浏览器量出来的两处**既有遗漏**（scripts/audit-register-form.mjs）：
+   ① 触控高度实测 **43px**，差 1px 到 44 —— 12px 上下 padding + 1px 边框 ×2 + 17px 行高。
+      项目里 .remember / .share-btn / .share-link-copy / .ts-fallback-retry 都补过 44px，
+      唯独登录/注册弹窗的输入框漏了（新增的确认密码框同样继承这个尺寸）。
+   ② font-size 15px < 16px ⇒ iOS Safari 聚焦时会**放大整页**。
+      项目在 .share-link 上已经处理过同一个问题，这里也漏了。
+   ⚠️ 单开一个 coarse 块并放在**文件最末尾**，两重理由：
+      · 不碰上面那些既有断点块（它们各自有守护断言，改内容有风险）；
+      · 同优先级规则靠**后写**取胜（@media 不增加特异性），放别处会被后面的断点吃掉，
+        这是本项目踩过的坑 —— 窄屏覆盖必须在基样式之后。 */
+@media (pointer: coarse) {
+  .auth-form input[type="text"],
+  .auth-form input[type="password"],
+  .auth-form input[type="email"] {
+    min-height: 44px;   /* border-box 下即总高 44 */
+    font-size: 16px;    /* ≥16px：iOS 对更小的输入框聚焦会缩放整页 */
+  }
+}
