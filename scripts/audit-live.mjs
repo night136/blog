@@ -126,6 +126,19 @@ judge("函数响应全都有 6 个安全头（以前是 0 个 —— 唯一需�
 judge("静态资源也都有 6 个安全头（_headers 的全局块）",
   rows.every((r) => r.missing.length === 0),
   rows.filter((r) => r.missing.length).map((r) => `${r.path}: 缺 ${r.missing.join(",")}`).join(" | "));
+// ⚠️ 刚部署完几十秒内跑，可能撞上**还没换新的边缘副本**：那份副本只有原本那 2 个头
+//    （nosniff + referrer-policy），恰好缺新加的 4 个。2026-09-17 真实踩过 ——
+//    同一批 URL 隔一分钟再探就齐了。给出可辨识的签名，免得把它当成 `_headers` 写错。
+{
+  const stale = rows.filter((r) => r.missing.length === 4 &&
+    r.missing.join(",") === "x-frame-options,content-security-policy,strict-transport-security,permissions-policy" &&
+    !["/sitemap.xml", "/feed.xml", "/robots.txt", "/api/"].some((p) => r.path.startsWith(p)));
+  if (stale.length) {
+    console.log(`   ⚠️ 上面这些「刚好缺新加的 4 个、却带着原本的 nosniff+referrer-policy」`);
+    console.log(`      是**旧边缘副本**的签名（${stale.length} 个 URL），不是 _headers 写错 ——`);
+    console.log(`      隔 30 秒复测；仍缺再查配置。`);
+  }
+}
 
 // ③ 缓存头（#11）：三个端点要可缓存、带 s-maxage（没它边缘不缓存函数响应）
 const cachePaths = ["/sitemap.xml", "/feed.xml", "/robots.txt"];
