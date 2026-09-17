@@ -34,13 +34,23 @@ const PBKDF2_HASH = "SHA-256";
 const PBKDF2_LEGACY_ITERATIONS = 100000; // 老格式 "salt:hash" 的隐含迭代数（历史事实，别改）
 
 // 当前目标迭代数。可由环境变量 PBKDF2_ITERATIONS 覆盖（便于不改代码就上调/回滚）。
-// ⚠️ 取值是有实测依据的，不是抄来的数字：本机实测 100k=30ms / 210k=60ms / 600k=171ms，
-//    而线上 POST /api/login 在 100k 下的耗时已比同链路空端点（/api/config）高出约 0.2~0.4s。
-//    Pages Functions 的 CPU 预算是有限的（免费档 10ms 量级，付费档高得多），
-//    迭代数一旦超过预算，表现是**整条登录请求被平台掐断（5xx）**，而不是慢 —— 那就是锁死全站登录。
-//    所以这里默认取 210000（OWASP 对 PBKDF2-HMAC-SHA256 的建议值之一），
-//    并把「上调到 600000」写成了明确的操作步骤（docs/login-hardening.md）。
-export const PBKDF2_DEFAULT_ITERATIONS = 210000;
+//
+// 🔴 2026-09-17 事故（所以默认值退回 100000）：
+//    上一版把它从 100000 提到 210000（OWASP 建议值），当次部署后**注册稳定失败**
+//    （用户可见"注册失败，请稍后重试"）。它当时唯一的行为差异就是这个数字。
+//    为什么"只有注册坏、登录不坏"——这条差异恰好是判据：
+//      · 老用户的存储串是 `salt:hash`，校验时按串里隐含的 **100000** 算 ⇒ 登录照常；
+//      · 新注册走 makePasswordHash(targetIterations) ⇒ 按 **210000** 算 ⇒ 挂在注册这一步。
+//    而 Cloudflare 官方 limits 明确写着：
+//      · Workers/Pages Free：CPU time per HTTP request = **10 ms**（Paid 是 30s）
+//      · 超限返回 **Error 1102**（Worker exceeded resource limits），**不是**慢，是整条请求被终止
+//    本机实测 100k=30ms / 210k=60ms / 600k=171ms —— 210k 已经远超 10ms。
+//    ⚠️ 别只看"墙钟 122ms 好像还行"：墙钟含 I/O，计费与限额只看 **CPU 时间**。
+//
+//    结论：**迭代数是受边缘 CPU 预算硬约束的，不是随便调的强度旋钮。**
+//    想上调必须① 先确认账号档位的 CPU 预算，② 上限之后用真机跑一次注册+登录，
+//    ③ 用 `PBKDF2_ITERATIONS` 环境变量灰度（它比改常量安全：不用重新部署就能回滚）。
+export const PBKDF2_DEFAULT_ITERATIONS = 100000;
 const PBKDF2_MIN_ITERATIONS = 10000;   // 低于此值的存储串视为异常，拒绝校验
 const PBKDF2_MAX_ITERATIONS = 2000000; // 防御性上限：存储串被篡改成天文数字时不要试图去算
 

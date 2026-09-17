@@ -174,18 +174,30 @@ console.log("\n[3] 渐进升级判定 needsRehash");
 
 console.log("\n[4] 目标迭代数：默认值与环境变量覆盖");
 {
-  check("默认迭代数 = 210000（≥ OWASP 建议量级，且实测成本可接受）",
-    auth.PBKDF2_DEFAULT_ITERATIONS === 210000, String(auth.PBKDF2_DEFAULT_ITERATIONS));
-  check("未配置时用默认值", auth.targetIterations({}) === 210000);
-  check("可用 PBKDF2_ITERATIONS 覆盖（不改代码就能上调/回滚）",
+  // ⚠️ 这里**不要**写「默认值必须 == 某个具体数字」。
+  //    上一版正是这么写的（== 210000），于是守护把一个**错误的值**锁死了：
+  //    210000 超出 Pages Free 的 10ms CPU 预算，线上注册每一个请求都被平台终止（2026-09-17 事故）。
+  //    现在改盯**不变量**：落在合法区间，且不超过经实测确认可用的上限。
+  //    要上调这个上限，必须先真机跑通「注册 + 登录」，不能只改数字。
+  const PBKDF2_SAFE_MAX = 100000; // 实测依据：210k 被边缘终止、100k 可用（见 auth.js 顶部事故记录）
+  check("默认迭代数不超过实测可用上限（受边缘 CPU 预算硬约束）",
+    auth.PBKDF2_DEFAULT_ITERATIONS <= PBKDF2_SAFE_MAX,
+    `实际 ${auth.PBKDF2_DEFAULT_ITERATIONS}，上限 ${PBKDF2_SAFE_MAX}`);
+  check("默认迭代数不至于低到形同虚设",
+    auth.PBKDF2_DEFAULT_ITERATIONS >= 10000, String(auth.PBKDF2_DEFAULT_ITERATIONS));
+  check("未配置时用默认值", auth.targetIterations({}) === auth.PBKDF2_DEFAULT_ITERATIONS);
+  // 覆盖机制本身要保留（不改代码即可灰度/回滚），但**设成 600000 会超预算**：
+  // 这里只验「覆盖生效」，不代表该值可用。
+  check("可用 PBKDF2_ITERATIONS 覆盖（不改代码就能灰度/回滚）",
     auth.targetIterations({ PBKDF2_ITERATIONS: "600000" }) === 600000);
   const errs = [];
   const realErr = console.error;
   console.error = (...a) => errs.push(a.join(" "));
   try {
-    check("非法值回落到默认值", auth.targetIterations({ PBKDF2_ITERATIONS: "abc" }) === 210000);
+    check("非法值回落到默认值",
+      auth.targetIterations({ PBKDF2_ITERATIONS: "abc" }) === auth.PBKDF2_DEFAULT_ITERATIONS);
     check("过低的值被拒（防止把强度调到形同虚设）",
-      auth.targetIterations({ PBKDF2_ITERATIONS: "100" }) === 210000);
+      auth.targetIterations({ PBKDF2_ITERATIONS: "100" }) === auth.PBKDF2_DEFAULT_ITERATIONS);
   } finally { console.error = realErr; }
   check("回落时留痕，不静默（非法配置必须能在日志里看见）", errs.length >= 2, "error 调用 " + errs.length + " 次");
 }
@@ -475,9 +487,20 @@ console.log("\n[12] 负向自证：把加固拆掉，判据必须变红");
       fs.writeFileSync(f, s);
     });
     const a2 = await imp(broken, "functions/api/_lib/auth.js");
-    const legacy = "s:" + await a2.hashPassword("pw", "s", 100000);
-    check("故障①（忽略存储的迭代数）→ 存量密码校验失败，判据变红",
-      (await a2.verifyPassword("pw", legacy)) === false);
+    // ⚠️ 对照件必须用**不等于默认值**的迭代数，否则这条自证会恒绿（2026-09-17 实测踩到）：
+    //    上一版这里硬编码 100000，而当时默认值是 210000 ⇒ 能红；
+    //    把默认值改回 100000 之后，损坏版（一律用默认值算）与正确版的结果**完全相同**，
+    //    于是"判据变红"这条自证悄悄失效 —— 而它恰恰是"直接改迭代数会锁死存量密码"的唯一守卫。
+    //    教训：负向自证的可观测性不能依赖"默认值恰好不等于样本值"这种巧合，要**动态避开**。
+    // ⚠️ 还必须用**新格式**（pbkdf2$<iter>$…，自带迭代数）当样本：
+    //    老格式 `salt:hash` 的迭代数是**写死的 100000**，拿它配 60000 造串必然校验失败，
+    //    那样看起来"判据变红"了，其实是样本本身无效（假红）。
+    const otherIter = auth.PBKDF2_DEFAULT_ITERATIONS === 60000 ? 50000 : 60000;
+    const sample = await auth.makePasswordHash("pw", "s", otherIter);
+    check(`正向对照：未注入故障时，${otherIter} 次的密码能校验通过（样本本身有效）`,
+      (await auth.verifyPassword("pw", sample)) === true);
+    check(`故障①（忽略存储的迭代数）→ ${otherIter} 次的密码校验失败，判据变红`,
+      (await a2.verifyPassword("pw", sample)) === false);
   }
   // 故障②：登录不校验人机验证
   {

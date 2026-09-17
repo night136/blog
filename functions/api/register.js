@@ -7,7 +7,14 @@ export async function onRequestPost({ request, env }) {
     if (!env.BLOG_DB) {
       return json({ error: "服务端未配置数据库（BLOG_DB），请联系站长。" }, 500);
     }
-    const body = await request.json();
+    // ⚠️ login 早就有这一层，register 一直没有（2026-09-17 定位故障时实测发现）：
+    //    请求体不是合法 JSON 时 request.json() 会抛，被最外层 catch 兜成 **500 "注册失败，请稍后重试"** ——
+    //    把「客户端发了坏请求」说成「服务端故障」，既误导用户去重试，也让排查时看不到真因。
+    //    这类输入问题一律 400，与 login 口径一致。
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return json({ error: "请求格式错误" }, 400);
+    }
     const username = (body.username || "").trim();
     const password = body.password || "";
     const email = (body.email || "").trim();
