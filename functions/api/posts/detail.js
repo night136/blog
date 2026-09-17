@@ -3,6 +3,7 @@
 //          在部分国产浏览器（如小米浏览器）fetch 中被二次编码/损坏的问题。
 import { json, getCookie, verifyJWT, jwtSecret } from "../_lib/auth.js";
 import { readingTime } from "../../_lib/readingTime.js";
+import { bumpViews } from "../_lib/views.js";
 
 async function getUsername(request, env) {
   const token = getCookie(request, "auth");
@@ -55,14 +56,11 @@ export async function onRequestPost({ env, request }) {
       const data = await cached.json();
       const author = (data.post && data.post.author) || "";
       if (!(username && username === author)) {
-        try {
-          await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
-        } catch (_) {}
+        // 缓存只缓存正文，阅读数每次现算：一次 UPDATE…RETURNING 拿到真实值。
+        // 旧写法是「UPDATE 一次 + SELECT 一次」，这里顺带省掉一次 D1 往返。
+        const r = await bumpViews(env.BLOG_DB, slug);
+        if (r.views != null && data.post) data.post.views = r.views;
       }
-      try {
-        const fresh = await env.BLOG_DB.prepare("SELECT views FROM posts WHERE slug = ?").bind(slug).first();
-        if (data.post) data.post.views = (fresh && fresh.views) || 0;
-      } catch (_) {}
       return new Response(JSON.stringify(data), {
         status: 200,
         headers: { "Content-Type": "application/json", "X-Cache": "HIT" },
@@ -88,13 +86,12 @@ export async function onRequestPost({ env, request }) {
       } else throw e;
     }
     if (!row) return json({ error: "文章不存在" }, 404);
-    // 浏览量：非作者本人访问才 +1（避免自己看自己的文章虚增）；列不存在时静默跳过
+    // 浏览量：非作者本人访问才 +1（避免自己看自己的文章虚增）；列不存在时静默跳过（helper 内部处理）
     const author = row.author_username || "昉昕";
     if (!(username && username === author)) {
-      try {
-        await env.BLOG_DB.prepare("UPDATE posts SET views = COALESCE(views, 0) + 1 WHERE slug = ?").bind(slug).run();
-        row.views = (row.views || 0) + 1;
-      } catch (_) {}
+      const r = await bumpViews(env.BLOG_DB, slug);
+      // 自增后的**真实**值；拿不到就沿用本次读到的快照（至少不该倒退成 0）
+      if (r.views != null) row.views = r.views;
     }
     const payload = { ok: true, post: publicPost(row, username) };
     const bodyStr = JSON.stringify(payload);

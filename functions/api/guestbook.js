@@ -53,6 +53,39 @@ function nowUtc8() {
   return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
 }
 
+// 「day 列不存在」的两种报错文案 —— ⚠️ 它们**不一样**，只判一个会漏：
+//   SELECT：no such column: day            （真 SQLite 与 D1 都这么报）
+//   INSERT：table guestbook_notes has no column named day
+// 这是靠真 SQLite 跑出来的（scripts/verify-data-layer.mjs 的 [7] 段），不是猜的：
+// 只写前者时，缺列的库上「读」能自愈、「写」直接 500 —— 便签墙写不进去，而日志里什么都没有。
+const MISSING_DAY_RE = /no such column: day|has no column named day/i;
+
+// 取「有留言的日子」列表（降序），供 calcStreak 用。
+//
+// 为什么不用 `DISTINCT substr(created_at,1,10)`（audit §七 #12）：
+// 函数套在列上 ⇒ 索引帮不上忙，SQLite 必须对每一行算一次再建临时表去重排序。实测查询计划：
+//     SCAN … USING COVERING INDEX idx_guestbook_created
+//     | USE TEMP B-TREE FOR DISTINCT | USE TEMP B-TREE FOR ORDER BY
+// 用 day 列 + 索引（scripts/migrate-guestbook-day.sql）后只剩覆盖索引扫描，两个临时 B 树都没了，
+// 而且可以边扫边去重、凑够 400 天就收工。两种写法在 40 天/1000 条的样本上**结果逐项相同**。
+//
+// ⚠️ 没跑迁移时自动退回旧写法：留言墙是公开功能，绝不能因为"少一列"就读不出来。
+async function loadDistinctDays(env) {
+  try {
+    const r = await env.BLOG_DB.prepare(
+      "SELECT DISTINCT day AS d FROM guestbook_notes WHERE day IS NOT NULL ORDER BY d DESC LIMIT 400"
+    ).all();
+    return (r.results || []).map((x) => x.d).filter(Boolean);
+  } catch (e) {
+    if (!MISSING_DAY_RE.test(String((e && e.message) || ""))) throw e;
+    console.error("[guestbook] guestbook_notes.day 不存在，退回 substr 查询（执行 scripts/migrate-guestbook-day.sql 可提速）");
+    const r2 = await env.BLOG_DB.prepare(
+      "SELECT DISTINCT substr(created_at, 1, 10) AS d FROM guestbook_notes ORDER BY d DESC LIMIT 400"
+    ).all();
+    return (r2.results || []).map((x) => x.d).filter(Boolean);
+  }
+}
+
 // "YYYY-MM-DD" 加减天数
 function addDays(s, n) {
   const [y, m, d] = String(s).split("-").map(Number);
@@ -126,11 +159,12 @@ export async function onRequestGet({ env, request }) {
     try {
       const cRow = await env.BLOG_DB.prepare("SELECT COUNT(*) AS c FROM guestbook_notes").first();
       total = (cRow && Number(cRow.c)) || 0;
-      const dRes = await env.BLOG_DB.prepare(
-        "SELECT DISTINCT substr(created_at, 1, 10) AS d FROM guestbook_notes ORDER BY d DESC LIMIT 400"
-      ).all();
-      streak = calcStreak((dRes.results || []).map((r) => r.d));
-    } catch (_) { /* 统计失败不影响便签展示 */ }
+      streak = calcStreak(await loadDistinctDays(env));
+    } catch (e) {
+      // 统计失败不影响便签展示，但**不许静默**：这里历史上是 `catch (_) {}`，
+      // 一旦 SQL 写错（比如缺了 day 列又没走上兜底），线上只会看到 streak 永远为 0，日志里什么都没有。
+      console.error("[guestbook] 统计失败（便签仍会展示）：", e && e.stack ? e.stack : e);
+    }
 
     const turnstileSiteKey = env.TURNSTILE_SITE_KEY || null;
     const body = JSON.stringify({ ok: true, notes: page, canDelete, total, streak, turnstileSiteKey, hasMore, nextCursor, currentUser: username || null });
@@ -208,11 +242,24 @@ export async function onRequestPost({ request, env }) {
   }
 
   const createdAt = nowUtc8();
+  // day 与 created_at 同源（created_at 的前 10 位），写入时一并存下，
+  // 让「连续打卡」的聚合能走索引（见 loadDistinctDays 的说明）。缺列时这条 INSERT 会失败，
+  // 所以下面按「先带 day、失败再退回不带 day」两级降级，保证未迁移的库照样能留言。
+  const day = createdAt.slice(0, 10);
 
   try {
-    const { meta } = await env.BLOG_DB.prepare(
-      "INSERT INTO guestbook_notes (name, content, color, ip_hash, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).bind(name, content, color, ipHash, createdAt).run();
+    let meta;
+    try {
+      ({ meta } = await env.BLOG_DB.prepare(
+        "INSERT INTO guestbook_notes (name, content, color, ip_hash, created_at, day) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(name, content, color, ipHash, createdAt, day).run());
+    } catch (e) {
+      if (!MISSING_DAY_RE.test(String((e && e.message) || ""))) throw e;
+      console.error("[guestbook] guestbook_notes.day 不存在，按旧列集合写入（执行 scripts/migrate-guestbook-day.sql 可提速）");
+      ({ meta } = await env.BLOG_DB.prepare(
+        "INSERT INTO guestbook_notes (name, content, color, ip_hash, created_at) VALUES (?, ?, ?, ?, ?)"
+      ).bind(name, content, color, ipHash, createdAt).run());
+    }
     return json({
       ok: true,
       note: { id: meta.last_row_id, name, content, color, created_at: createdAt },
