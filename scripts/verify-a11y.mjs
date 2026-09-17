@@ -201,19 +201,40 @@ function audit({ html, js, css }) {
       p2 ? p2.slice(0, 150) : "（缺字段）");
 
     const hb = bodyOf(js, "async function handleRegister(") || "";
-    const cmpAt = hb.indexOf("password2");
-    const tsAt = hb.indexOf("takeFormTurnstileToken");
+    // ⚠️ 锚点必须落在**代码**上，不能落在"出现过某个词"上：`indexOf("password2")` 会被
+    //    注释里提到 password2 的那句话满足 —— 造一次"把校验搬到取 token 之后"的故障，
+    //    判据照样是绿的（**假绿**，负向自证当场抓出来了）。
+    //    所以先剥掉行注释，再拿只可能出现在代码里的变量名 `p2El` 当锚点。
+    const hbCode = hb.replace(/\/\/[^\n]*/g, "");
+    const cmpAt = hbCode.indexOf("p2El");
+    const tsAt = hbCode.indexOf("takeFormTurnstileToken");
     // 🔴 这条是整组里最容易被后续重构改坏的不变量：Turnstile token 是**一次性**的，
     //    若先取 token 再校验一致性，用户每输错一次都得重新过一遍人机挑战才能再提交。
     add("#21 两次密码的一致性校验发生在取 Turnstile token **之前**",
       cmpAt >= 0 && tsAt >= 0 && cmpAt < tsAt,
-      `password2@${cmpAt} takeFormTurnstileToken@${tsAt}（前者必须更小）`);
+      `p2El(代码，已剥注释)@${cmpAt} takeFormTurnstileToken@${tsAt}（前者必须更小）`);
 
     const fetchAt = hb.indexOf('fetch("/api/register"');
     const fetchSeg = fetchAt >= 0 ? hb.slice(fetchAt, fetchAt + 700) : "";
     add("#21 确认密码不随请求发往服务端（服务端只看 password）",
       fetchSeg.length > 0 && !/password2/.test(fetchSeg),
       fetchAt < 0 ? "找不到对 /api/register 的 fetch" : "fetch 的 body 里出现了 password2 —— 它对安全性零贡献，不该发出去");
+
+    // 🔴 版本错配的护栏（docs §十九）。两个资源的缓存策略差了两个数量级：
+    //      index.html   max-age=0     + swr=300   → 可陈旧 5 分钟
+    //      assets/app.js max-age=86400 + swr=604800 → 可陈旧 7 天
+    //    部署后会出现「旧 HTML（没有 password2 这个 input）+ 新 app.js」的窗口。
+    //    若判据写成 `fd.get("password") !== fd.get("password2")`，此时右边是 null、
+    //    左边是非空串 ⇒ 恒判「不一致」⇒ **注册彻底提交不了**，提示还误导。
+    //    所以判据必须锚在**字段存在性**上，而不是 FormData 取出来的值上。
+    add("#21 确认密码字段不在时放行（HTML/app.js 版本错配不得把注册挡死）",
+      /const p2El = registerForm\.querySelector\('input\[name="password2"\]'\)/.test(hb)
+      && /if \(!p2El\) \{/.test(hb) && /\} else if \(/.test(hb) && /p2El\.value/.test(hb),
+      "没有先判字段是否存在（字段缺失时 FormData 取到 null ⇒ 恒判不一致 ⇒ 注册被挡死）");
+
+    add("#21 上述放行要留可见痕迹（console.warn），不许静默跳过",
+      /if \(!p2El\) \{[\s\S]{0,240}?console\.warn\(/.test(hb),
+      "字段缺失时静默放行 —— 线上真出问题时无从定位");
 
     add("#21 注册请求有防重复提交锁（否则双击白耗一个一次性 token）",
       /if \(registerBusy\) return;/.test(hb) && /registerBusy = true;/.test(hb) && /finally/.test(hb),
@@ -320,7 +341,7 @@ console.log("\n[2] 负向自证（造故障必须让对应判据变红）");
       label: "#21 把一致性校验搬到取 token 之后",
       file: "js",
       apply: (s) => {
-        const m = s.match(/    if \(fd\.get\("password"\) !== fd\.get\("password2"\)\) \{[\s\S]*?\n    \}\n/);
+        const m = s.match(/    const p2El = registerForm\.querySelector\('input\[name="password2"\]'\);[\s\S]*?\n    \}\n/);
         if (!m) return s; // 没命中 ⇒ 交给下面「造故障这一步本身必须成功」那条断言报红
         return s
           .replace(m[0], "")
@@ -330,6 +351,21 @@ console.log("\n[2] 负向自证（造故障必须让对应判据变红）");
           );
       },
       expect: /#21 两次密码的一致性校验发生在取 Turnstile token/,
+    },
+    {
+      // 造真实回归：把「先判字段在不在」这一层删掉，退回成无条件比较。
+      // 这正是错配窗口下会把注册彻底挡死的写法。
+      label: "#21 删掉密码字段的存在性判断（错配时注册会被挡死）",
+      file: "js",
+      apply: (s) => s.replace(/    if \(!p2El\) \{[\s\S]*?\n    \} else if \(/, "    if ("),
+      expect: /#21 确认密码字段不在时放行/,
+    },
+    {
+      // 放行但静默：功能还能用，可线上真出问题时没有任何线索 —— 属于本项目点名的「静默失败」
+      label: "#21 错配时静默跳过（把 console.warn 删掉）",
+      file: "js",
+      apply: (s) => s.replace(/\n      console\.warn\("\[register\][^\n]*\n/, "\n"),
+      expect: /#21 上述放行要留可见痕迹/,
     },
     {
       label: "#21 去掉确认密码框的 required",

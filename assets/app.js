@@ -2777,11 +2777,22 @@
     //    先取再校验的话，用户每输错一次都要重新过一遍人机挑战才能再提交。
     // 服务端**不需要**知道「确认密码」——它对安全性零贡献（攻击者填两遍相同的即可），
     //    纯粹是防手滑的浏览器侧约束，所以只在这里校验，不随请求发出。
-    if (fd.get("password") !== fd.get("password2")) {
+    //
+    // ⚠️ 判据锚在「**字段在不在**」，不是「两个值等不等」—— 这两个资源的缓存策略不同：
+    //      index.html  : max-age=0     + swr=300    （可陈旧 5 分钟）
+    //      assets/app.js: max-age=86400 + swr=604800（可陈旧 7 天）
+    //    于是部署后存在错配窗口：**旧 HTML + 新 app.js**（HTML 陈旧≤5min、app.js 刚过期重取）。
+    //    那种组合下页面里根本没有 password2 这个 input，FormData 取出来是 null，
+    //    `"abc" !== null` 恒真 ⇒ 每次提交都报「两次输入的密码不一致」⇒ **注册被彻底挡死**，
+    //    而且提示还是误导性的（用户明明只填了一格密码）。
+    //    字段不在就当「这层壳还没有确认密码功能」，放行；但不许静默——留一条 warn 便于定位。
+    const p2El = registerForm.querySelector('input[name="password2"]');
+    if (!p2El) {
+      console.warn("[register] 页面缺少 password2 字段（HTML 与 app.js 版本错配？），本次跳过一致性校验");
+    } else if (fd.get("password") !== p2El.value) {
       registerMsg.textContent = "两次输入的密码不一致"; registerMsg.className = "form-msg err";
       triggerState("error", 2500);
-      const p2 = registerForm.querySelector('input[name="password2"]');
-      if (p2) { p2.value = ""; p2.focus(); } // 清空并聚焦第二格：让用户直接重输，不必自己找
+      p2El.value = ""; p2El.focus(); // 清空并聚焦第二格：让用户直接重输，不必自己找
       return;
     }
     registerMsg.textContent = "注册中…"; registerMsg.className = "form-msg";

@@ -192,7 +192,12 @@ try {
   const html5valid = await ev(`document.getElementById("registerForm").checkValidity()`);
   check("表单原生校验通过（所以下面测的是我们的 JS 校验，不是浏览器拦截）", html5valid === true);
   await ev(`document.getElementById("registerForm").requestSubmit()`);
-  await sleep(1200);
+  // 🔴 短延迟采样（120ms）：这个数字是**下面对照组的仪器**。不一致是同步判出来的，
+  //    所以 120ms 时就应该看到提示；而"错配场景"在同样的延迟下**不该**看到它。
+  //    两个场景共用同一个采样器、期望相反，才排得掉"采样器本身看不见这条提示"的可能。
+  await sleep(120);
+  const mismatchMsgShort = await ev(`(function(){ var m = document.getElementById("registerMsg"); return m ? m.textContent : "(无)"; })()`);
+  await sleep(1000);
 
   const afterSubmit = await ev(`(function(){
     var f = document.getElementById("registerForm");
@@ -240,6 +245,87 @@ try {
   check("焦点自动移到第二格", afterSubmit.activeIsP2 === true, `当前焦点：${afterSubmit.activeName}`);
   check("弹窗没有被误关（用户不用重新打开）", afterSubmit.modalStillOpen === true);
   await shot("02-mismatch.png");
+  // 对照组：同一个 120ms 采样器**确实**能看见「不一致」这条提示
+  check("对照：120ms 短采样也能看到「不一致」（证明下面的错配场景是同一把尺子）",
+    /不一致/.test(mismatchMsgShort || ""), JSON.stringify(mismatchMsgShort));
+
+  // ── 场景：HTML 与 app.js 版本错配（**构造**出来的；线上没有观测到，见 docs §十九）──
+  //    两个资源的缓存策略差两个数量级（HTML max-age=0+swr=300 / app.js max-age=86400+swr=604800），
+  //    所以部署后存在「旧 HTML（没有 password2 这一格）+ 新 app.js」的窗口。
+  //    那种组合下 `fd.get("password2")` 是 null ⇒ 老写法恒判"不一致" ⇒ 注册被彻底挡死。
+  //    这里把确认密码框从 DOM 里摘掉来复现该条件，看新版代码会不会放行。
+  const beforeSkew = reqs.length;
+  const skew = await ev(`(function(){
+    var f = document.getElementById("registerForm");
+    var p2 = f.querySelector('input[name="password2"]');
+    if (!p2) return { removed: false };
+    // ⚠️ 原位置必须在 remove() **之前**记下来：remove() 之后 p2.parentNode 就是 null 了
+    //    （第一次写的顺序反了，还原时拿到 {ok:false}）。
+    window.__skewP2 = p2;
+    window.__skewP2Parent = p2.parentNode;
+    window.__skewP2Next = p2.nextSibling;
+    p2.remove();                        // 旧版 HTML 里根本没有这一格
+    // 真挑战在本探针环境里拿不到 token（headless 一直被 Turnstile 判为可疑），
+    // 这里要看的**不是** token 对不对，而是「有没有走到发请求那一步」——
+    // 所以把 getResponse 顶替成一个假 token。顶没顶替成功要自证，否则"没发请求"会被误读成被挡死。
+    var stubbed = false;
+    try {
+      if (window.turnstile && typeof window.turnstile.getResponse === "function") {
+        window.turnstile.getResponse = function () { return "probe-fake-token"; };
+        stubbed = window.turnstile.getResponse("probe") === "probe-fake-token";
+      }
+    } catch (_) {}
+    return { removed: true, stubbed: stubbed, stillPresent: !!f.querySelector('input[name="password2"]') };
+  })()`);
+  check("构造成功：确认密码框已从 DOM 摘除（模拟旧 HTML）",
+    skew.removed === true && skew.stillPresent === false, JSON.stringify(skew));
+  console.log(`     ℹ️ Token 顶替（把 getResponse 换成假 token）：${skew.stubbed ? "已生效" : "环境不具备（turnstile 未渲染）"}`);
+
+  await ev(`(function(){
+    var f = document.getElementById("registerForm");
+    f.querySelector('input[name="username"]').value = "probe_skew_" + Date.now();
+    f.querySelector('input[name="password"]').value = "abc123456";
+    return 1;
+  })()`);
+  const skewNativeValid = await ev(`document.getElementById("registerForm").checkValidity()`);
+  check("错配场景下原生校验同样通过（没有那一格就不会被浏览器拦）", skewNativeValid === true);
+  await ev(`document.getElementById("registerForm").requestSubmit()`);
+  await sleep(120);
+  const skewMsgShort = await ev(`(function(){ var m = document.getElementById("registerMsg"); return m ? m.textContent : "(无)"; })()`);
+  await sleep(1500);
+  const skewAfter = await ev(`(function(){ var m = document.getElementById("registerMsg"); return m ? m.textContent : "(无)"; })()`);
+  const skewReqs = reqs.slice(beforeSkew);
+  const skewRegister = skewReqs.filter((u) => sameOriginApi(u) && /^\/api\/register/.test(new URL(u).pathname));
+  console.log(`     ℹ️ 错配场景消息：120ms=${JSON.stringify(skewMsgShort)}  终态=${JSON.stringify(skewAfter)}`);
+  console.log(`     ℹ️ 错配场景同源请求：${[...new Set(skewReqs.filter(sameOriginApi).map((u) => new URL(u).pathname))].join(", ") || "（无）"}`);
+  // 🔴 核心：字段不在 ⇒ 放行。绝不能出现"不一致"（那正是老写法下注册被挡死的症状）
+  check("错配场景下**不出现「不一致」提示**（注册没被挡死）",
+    !/不一致/.test(skewMsgShort || "") && !/不一致/.test(skewAfter || ""),
+    `120ms=${JSON.stringify(skewMsgShort)} 终态=${JSON.stringify(skewAfter)}`);
+  check("错配场景下确实往下走了（走到了取 token 之后的阶段，不是被前置拦住）",
+    /注册中|人机验证|网络|失败|请先完成/.test(skewMsgShort || "") || skewRegister.length > 0 || /注册中|人机验证|网络|失败|请先完成/.test(skewAfter || ""),
+    `120ms=${JSON.stringify(skewMsgShort)} 终态=${JSON.stringify(skewAfter)}`);
+  if (skew.stubbed) {
+    // 顶替成功 ⇒ 可以要一个更硬的证据：请求真的发出去了
+    check("错配场景下真的发出了 /api/register（顶替 token 后一路走到网络层）",
+      skewRegister.length >= 1, `捕获：${skewRegister.join(" , ") || "（无）"}`);
+  }
+  await shot("03-skew-no-password2.png");
+
+  // ── 还原：把确认密码框放回原处（后面的版式断言要靠它）──
+  const restored = await ev(`(function(){
+    var p2 = window.__skewP2, parent = window.__skewP2Parent;
+    if (!p2 || !parent) return { ok: false };
+    parent.insertBefore(p2, window.__skewP2Next || null);
+    return {
+      ok: true,
+      present: !!document.getElementById("registerForm").querySelector('input[name="password2"]'),
+      visible: p2.getClientRects().length > 0,
+    };
+  })()`);
+  check("场景跑完把确认密码框还原回 DOM（否则后面的版式段落量的是一堆 null）",
+    restored.ok === true && restored.present === true && restored.visible === true,
+    JSON.stringify(restored));
 
   // ── 页面上不该有 JS 报错 ──
   const realErrors = errors.filter((e) => !/turnstile|challenge|110200|Failed to load resource/i.test(e));
