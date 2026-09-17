@@ -144,9 +144,33 @@ console.log("\n[4] 触屏输入框必须 ≥16px（iOS 聚焦自动放大的根�
     /触屏输入框统一[\s\S]{0,500}@media \(max-width: 980px\)/.test(cssSrc),
     "未找到配套的媒体查询");
 
-  check("覆盖 guestbook / compose / auth / search 全部输入控件",
-    /触屏输入框统一[\s\S]{0,900}\.search-box input[\s\S]{0,900}\.guestbook-form textarea[\s\S]{0,300}font-size:\s*16px/.test(cssSrc),
-    "选择器清单不完整");
+  // ⚠️ 这条断言**原来的名字承诺了 auth，判据却没查 auth**：
+  //    它只验证块里出现过 `.search-box input` 与 `.guestbook-form textarea` 两个选择器，
+  //    于是 `.auth-form input` 到底在不在清单里，从来没有被验证过。
+  //    （实测：它其实一直在。但那属于"碰巧对"，不是"被守住"。）
+  //    改成**逐一枚举**每个必须覆盖的控件，失败时直接报出缺了哪一个。
+  const cssLF = cssSrc.replace(/\r\n/g, "\n");
+  const MUST_INPUTS = [
+    ".search-box input", ".compose-meta input", ".compose-panels input",
+    ".compose-panels textarea", ".auth-form input",
+    ".guestbook-form input", ".guestbook-form textarea",
+  ];
+  const auditInputBlock = (src) => {
+    const blk = (src.match(/触屏输入框统一[\s\S]{0,1200}?\n\}/) || [""])[0];
+    const miss = MUST_INPUTS.filter((s) => !blk.includes(s));
+    return { ok: blk.length > 0 && miss.length === 0 && /font-size:\s*16px/.test(blk), miss };
+  };
+  {
+    const r0 = auditInputBlock(cssLF);
+    check("覆盖 guestbook / compose / auth / search 全部输入控件（逐一枚举，不再只看两个）",
+      r0.ok, r0.miss.length ? "清单缺：" + r0.miss.join(" / ") : "没找到该块或块里没有 font-size:16px");
+    const mutant = cssLF.replace("  .auth-form input,\n", "");
+    check("   ↳ 负向自证：造故障这一步必须命中",
+      mutant !== cssLF, "锚点没匹配到 —— 块的选择器写法可能变了，请同步更新这条自证");
+    const r1 = auditInputBlock(mutant);
+    check("   ↳ 负向自证：清单里拿掉 .auth-form input ⇒ 判据变红",
+      mutant !== cssLF && r1.ok === false, "判据恒真");
+  }
 
   check("该块位于组件自身字号之后（靠「后来居上」生效）",
     gbRule >= 0 && touchIdx > gbRule,
@@ -227,6 +251,23 @@ console.log("\n[7] 触控目标 ≥44×44 与正文操作字号");
     /\.code-copy\s*\{[^}]*opacity:\s*1/.test(coarse), ".code-copy 未常显");
   check("便签删除按钮在触屏下常显（原来只靠 .g-card:hover 揭示）",
     /\.g-del\s*\{[^}]*opacity:\s*1/.test(coarse), ".g-del 未常显");
+
+  // 认证弹窗的输入框：实测曾是 **43px**（12+12 padding + 1+1 边框 + 17 行高），差 1px 不达标。
+  // 项目里 .remember / .share-btn / .share-link-copy / .ts-fallback-retry 都补过 44px，
+  // **唯独登录/注册弹窗的输入框漏了**（2026-09-17 补，见 docs §十八）。
+  // ⚠️ 判据写成「存在一条同时含 .auth-form input 与 min-height:44px 的规则」，
+  //    **不锁定它所在的块与位置** —— 锁位置会被一次无害搬动判红（本项目踩过"盯实现形态"的坑）。
+  {
+    const authInputHas44 = (src) => (src.replace(/\r\n/g, "\n").match(/[^{}]+\{[^}]*\}/g) || [])
+      .some((r) => /\.auth-form input/.test(r) && /min-height:\s*44px/.test(r));
+    check("认证弹窗输入框有 44px 高度下限（实测原为 43px，差 1px 不达标）",
+      authInputHas44(cssSrc), "没有一条给 .auth-form input 定 44px 下限的规则");
+    const mutant = cssSrc.replace("min-height: 44px;   /* border-box 下即总高 44 */", "");
+    check("   ↳ 负向自证：造故障这一步必须命中",
+      mutant !== cssSrc, "锚点没匹配到 —— 那条规则的注释可能被改，请同步更新这条自证");
+    check("   ↳ 负向自证：拿掉那条 44px ⇒ 判据变红",
+      mutant !== cssSrc && authInputHas44(mutant) === false, "判据恒真");
+  }
 }
 
 console.log("\n[8] 抽屉：手势 / aria-expanded / ESC 三者齐备");

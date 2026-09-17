@@ -1,6 +1,8 @@
 // 注册表单「确认密码」的真浏览器实测（audit §十八）。
-// 用法：node scripts/audit-register-form.mjs [width] [height]
+// 用法：node scripts/audit-register-form.mjs [width] [height] [--touch] [--no-touch]
 //   默认测线上 https://blog-6p3.pages.dev；截图落在 .diag/out/regform/。
+//   宽度 <600 自动进触屏模式；--touch / --no-touch 可强制开关（用来做 A/B：
+//   同一视口下「触屏 / 非触屏」会命中不同的媒体特性，(pointer: coarse) 块只在前者生效）。
 //
 // 为什么必须真浏览器：静态断言能证明"校验写在了取 token 之前"，但答不了
 //   · 点了提交之后**到底有没有发出请求**（只能从网络层看）
@@ -19,6 +21,10 @@ mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BLOG_BASE || "https://blog-6p3.pages.dev";
 const W = Number(process.argv[2] || 1200);
 const H = Number(process.argv[3] || 900);
+// 触屏模式：宽度 <600 默认开；可用 --touch / --no-touch 强制，用来做同视口 A/B
+const TOUCH = process.argv.includes("--touch") ? true
+  : process.argv.includes("--no-touch") ? false
+  : W < 600;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0, fail = 0;
@@ -93,7 +99,15 @@ try {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: W < 600 });
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: TOUCH });
+  // ⚠️ 必须单独开触摸模拟：setDeviceMetricsOverride 的 mobile 只改视口/屏幕尺寸，
+  //    **不会**让 `(pointer: coarse)` 命中。而项目里所有"触控目标 ≥44px"的规则
+  //    （.remember / .share-btn / .auth-form input …）都写在 `@media (pointer: coarse)` 里。
+  //    少了这一句，量出来的就是**桌面指针**下的尺寸，会把"移动端已修好"误判成没修
+  //    （第一次跑就踩了：明明 CSS 已上线，仍量到 43px）。
+  if (TOUCH) {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  }
 
   const ev = async (expr) => {
     const r = await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
@@ -228,8 +242,29 @@ try {
   const realErrors = errors.filter((e) => !/turnstile|challenge|110200|Failed to load resource/i.test(e));
   check("过程中没有非预期 JS 报错", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));
 
-  // ── 窄屏布局：多了一个字段之后，弹窗还能不能正常用 ──
-  if (W < 600) {
+  // ── A/B 观测点（**总是**跑）──
+  // 同一视口下开/关触摸模拟会命中不同的媒体特性：(pointer: coarse) 块只在前者生效。
+  // 把两组数字都打出来，才能证明「宽屏触屏」下那几条规则确实起了作用 ——
+  // 否则只是"加了 CSS、看到 16px"这种没有对照的观察，分不清是谁给的 16px。
+  const abProbe = await ev(`(function(){
+    var f = document.getElementById("registerForm");
+    var p2 = f.querySelector('input[name="password2"]');
+    var cs = getComputedStyle(p2);
+    var inps = Array.prototype.slice.call(f.querySelectorAll("input")).filter(function(i){
+      return i.type !== "hidden" && i.getClientRects().length > 0;
+    });
+    return {
+      pointerCoarse: window.matchMedia("(pointer: coarse)").matches,
+      maxW980: window.matchMedia("(max-width: 980px)").matches,
+      font: cs.fontSize, minH: cs.minHeight,
+      heights: inps.map(function(i){ return Math.round(i.getBoundingClientRect().height); }),
+    };
+  })()`);
+  console.log(`  ℹ️ A/B：pointer:coarse=${abProbe.pointerCoarse}  max-width:980px=${abProbe.maxW980}  `
+    + `font-size=${abProbe.font}  min-height=${abProbe.minH}  高度=${JSON.stringify(abProbe.heights)}`);
+
+  // ── 触屏布局：多了一个字段之后，弹窗还能不能正常用 ──
+  if (TOUCH) {
     const layout = await ev(`(function(){
       var f = document.getElementById("registerForm");
       var btn = f.querySelector('button[type="submit"]');
@@ -240,6 +275,12 @@ try {
         return i.type !== "hidden" && i.getClientRects().length > 0;
       });
       return {
+        // 把「断点到底命中没有」变成可观测的证据，而不是靠推测 ——
+        // 否则 43px 这个数字分不清是"CSS 没生效"还是"断点没匹配"。
+        pointerCoarse: window.matchMedia("(pointer: coarse)").matches,
+        narrow: window.matchMedia("(max-width: 640px)").matches,
+        p2FontSize: getComputedStyle(f.querySelector('input[name="password2"]')).fontSize,
+        p2MinHeight: getComputedStyle(f.querySelector('input[name="password2"]')).minHeight,
         maskScrollable: mask.scrollHeight > mask.clientHeight,
         maskScrollH: mask.scrollHeight, maskClientH: mask.clientHeight,
         inputHeights: inps.map(function(i){ return Math.round(i.getBoundingClientRect().height); }),
@@ -248,9 +289,18 @@ try {
         btnText: btn ? btn.textContent.trim() : "(无按钮)",
       };
     })()`);
+    console.log(`     ℹ️ 断点命中：pointer:coarse=${layout.pointerCoarse}  max-width:640px=${layout.narrow}`);
+    console.log(`     ℹ️ 确认密码框 computed：font-size=${layout.p2FontSize}  min-height=${layout.p2MinHeight}`);
+    check("触屏模拟生效（(pointer: coarse) 必须命中，否则下面的尺寸判据量的是桌面指针）",
+      layout.pointerCoarse === true, `pointer:coarse=${layout.pointerCoarse}`);
     check("窄屏下输入框触控高度 ≥ 44px（移动端可用性底线）",
       layout.inputHeights.length > 0 && layout.inputHeights.every((h) => h >= 44),
       JSON.stringify(layout.inputHeights));
+    // iOS 对 font-size < 16px 的输入框会在聚焦时把整页放大，收回键盘后常常不还原。
+    // ⚠️ 这条判据在**宽屏触屏**（如 iPad 横屏 1024px）下才有区分度：窄屏那边由
+    //    `@media (max-width: 980px)` 的「触屏输入框统一」块兜住，两者来源不同。
+    check("触屏下输入框字号 ≥16px（iOS 聚焦缩放的根因）",
+      parseFloat(layout.p2FontSize) >= 16, layout.p2FontSize);
     check("窄屏下输入框没有横向溢出视口", layout.inputOverflowsX === false);
     check("窄屏下弹窗是纵向可滚动的（字段变多也不会被裁掉）",
       layout.maskScrollable === true || layout.maskScrollH <= layout.maskClientH,
