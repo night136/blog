@@ -356,21 +356,24 @@ console.log("\n[10] P2 打磨：浏览器 UI 配色 / 点按反馈 / 滚动链 /
   check("便签列宽用 minmax(0,1fr)（1fr 的 min-content 下限会被长串撑破）",
     /\.g-board-inner\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(cssSrc),
     "窄屏便签列未加 minmax(0,1fr)");
-  // ⚠️ 这里**不锁死阈值数字**。它曾经是 380，2026-09-19 抬到 400（380 时 381–393px
-  //    的每列只有 148.5–155px，没兜住 iPhone 12–15 常规）。若断言写成 `=== 380`，
-  //    正确的修复反而会让守护报红 —— 那等于守护在保护旧的实现形态。
+  // ⚠️ 这里**不锁死阈值数字**。它换过三次：380 →（2026-09-19）400 →（同日）320，
+  //    每次都折过两次方向、都有实测代价记录（docs/…-09-16.md §二十三/§二十四）。
+  //    若断言写成 `=== 380` 之类，正确的调整反而会让守护报红 ——
+  //    那等于守护在保护旧的实现形态，而不是保护目标。
   //    所以静态侧只守两个真不变量：①存在这条回落规则且真的把 grid 改成单列；
   //    ②它写在 640 块之后（同特异性靠后来居上）。
   //    「阈值够不够高」是**渲染**问题，静态读 CSS 量不出来 —— 由真浏览器探针
-  //    scripts/audit-guestbook-width.mjs 盯「任何视口下便签都不窄于 150px」。
+  //    scripts/audit-guestbook-width.mjs 盯「最窄便签不破当前阈值已接受的代价」（现为 118px）。
   const DROP_RE = /@media \(max-width: (\d+)px\)\s*\{\s*\.g-board-inner\s*\{\s*grid-template-columns:\s*1fr/;
   const mDrop = cssSrc.match(DROP_RE);
   const gDrop = mDrop ? mDrop.index : -1;
   const dropPx = mDrop ? Number(mDrop[1]) : NaN;
   check("窄屏便签回落单列（存在把 .g-board-inner 改成 1fr 的 media query）",
     !!mDrop, "未找到任何把 .g-board-inner 回落单列的 media query");
-  check("回落阈值落在合理量级（320–640，不高于便签两列块自身的 640）",
-    Number.isFinite(dropPx) && dropPx >= 320 && dropPx <= 640, "解析到阈值 " + dropPx + "px");
+  // 下界放到 280（原为 320）：阈值 320 正好压在原来的下界上，下次合理微调（300）
+  // 就会假红 —— 量级带只该拦「明显写错的数量级」（3800 / 38），不该拦设计决定。
+  check("回落阈值落在合理量级（280–640，不高于便签两列块自身的 640）",
+    Number.isFinite(dropPx) && dropPx >= 280 && dropPx <= 640, "解析到阈值 " + dropPx + "px");
   const g640 = cssSrc.search(/@media \(max-width: 640px\)\s*\{[\s\S]{0,200}?\.g-board-inner/);
   check("回落块写在 640 块之后（否则不生效）",
     gDrop > g640, "640 块位置=" + g640 + "，回落块位置=" + gDrop);
