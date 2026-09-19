@@ -1512,9 +1512,14 @@ body.lightbox-open { overflow: hidden; }
   .guestbook-stats { font-size: 13px; gap: 8px; }
 }
 
-/* 超窄屏（≤380px，如 iPhone SE 一代 / 老安卓）：两列会把每列压到 ~150px 以下，
-   长标题断得很碎反而更难读 → 回落单列。放在 640 块之后才会生效。 */
-@media (max-width: 380px) {
+/* 窄屏回落单列（≤400px）：两列会把每列压到 150px 以下，长标题断得很碎反而更难读。
+   实测（scripts/audit-guestbook-width.mjs，2026-09-19）阈值 380 时：
+   381–393px 视口的每列只有 148.5–155px —— 正是本条自述「更难读」的区间，却因为
+   阈值卡在 380 而没被兜住（381 处 149px 已跌破 150）。抬到 400 后：
+   · iPhone 12–15 常规（390/393，两列时仅 153/155px）一起纳入单列，便签 309/311px；
+   · 400 以上仍在两列，每列 ≥158.5px（401px 视口），不再有跌破下限的宽度。
+   ⚠️ 放在 640 块之后才会生效（同特异性靠后来居上）。 */
+@media (max-width: 400px) {
   .g-board-inner { grid-template-columns: 1fr; }
 }
 

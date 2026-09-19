@@ -24,9 +24,12 @@ mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BLOG_BASE || "https://blog-6p3.pages.dev";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 覆盖三处断点（980 / 640 / 380）两侧 + 常见机型宽度
-const WIDTHS = [1280, 1180, 1024, 1000, 981, 980, 900, 820, 768, 700, 641, 640, 639, 600, 540, 480, 430, 414, 393, 390, 381, 380, 379, 375, 360, 320];
-const SHOT_AT = new Set([393, 381, 380, 360]);
+// 覆盖断点两侧 + 常见机型宽度。
+// ⚠️ **不硬编码「单列回落」的阈值**：阈值本身是被测对象（会随设计调整），
+//    写死它会让探针在每次改阈值时假红 —— 那是「盯实现形态」。改为自动探测
+//    列数发生变化的那一处边界（见下面的 `drop`），探针因此长期有效。
+const WIDTHS = [1280, 1180, 1024, 1000, 981, 980, 900, 820, 768, 700, 641, 640, 639, 600, 540, 480, 430, 414, 410, 404, 401, 400, 399, 393, 390, 381, 380, 379, 375, 360, 320];
+const SHOT_AT = new Set([430, 400, 360]);
 
 // 常见机型（CSS px，横屏不给）—— 用来把数字翻译成人话
 const DEVICES = [
@@ -95,9 +98,10 @@ const PROBE = `(function(){
   return {
     innerWidth: window.innerWidth,
     clientWidth: de.clientWidth,
+    // 校准只用两个**本次不动**的断点（980 收单列 / 640 便签两列）。
+    // 不拿「单列回落阈值」来校准 —— 它正是被测对象，写进校准会一改阈值就假红。
     mq980: matchMedia("(max-width: 980px)").matches,
     mq640: matchMedia("(max-width: 640px)").matches,
-    mq380: matchMedia("(max-width: 380px)").matches,
     // ⚠️ 模拟器口径：桌面档 scrollWidth 按 innerWidth 算、移动档按 clientWidth 算，
     //    两者差 8/15px 是**模拟器的读数口径**，不是真溢出。真溢出另用下面的决定性判据。
     scrollW: de.scrollWidth,
@@ -195,8 +199,8 @@ try {
   console.log(`切到留言墙：${okView ? "成功" : "找不到入口"}   线上真实渲染 ${got} 张便签`);
   console.log(`第一条内容（证明量的是线上真数据，不是我自己造的 DOM）：${JSON.stringify(provenance.slice(0, 18))}\n`);
 
-  console.log("请求宽 | CSS视口 | 断点640/380/980 | 列数 | 每列宽(track)        | 卡片W | bboxW | 真横溢");
-  console.log("-------|---------|-----------------|------|---------------------|-------|-------|------");
+  console.log("请求宽 | CSS视口 | 断点980/640 | 列数 | 每列宽(track)        | 卡片W | bboxW | 真横溢");
+  console.log("-------|---------|-------------|------|---------------------|-------|-------|------");
   for (const w of WIDTHS) {
     await setViewport(w);
     const m = await ev(PROBE);
@@ -205,7 +209,7 @@ try {
     console.log(
       String(w).padStart(6) + " | " +
       `iw${m.innerWidth}/cw${m.clientWidth}`.padStart(15) + " | " +
-      `${m.mq640 ? "Y" : "n"}/${m.mq380 ? "Y" : "n"}/${m.mq980 ? "Y" : "n"}`.padStart(15) + " | " +
+      `${m.mq980 ? "Y" : "n"}/${m.mq640 ? "Y" : "n"}`.padStart(11) + " | " +
       String(m.cols).padStart(4) + " | " +
       String(m.tracks).padEnd(19).slice(0, 19) + " | " +
       (uniq.length === 1 ? String(uniq[0]) : uniq.join("/")).padStart(5) + " | " +
@@ -223,13 +227,13 @@ try {
   // （实测关系：桌面档 mobile:false → 媒体查询看 innerWidth(=请求宽)、clientWidth 少 15px 滚动条；
   //   移动档 mobile:true → 媒体查询看 clientWidth(=请求宽)、innerWidth 多 8px。两种口径都不影响本表。）
   const badCal = rows.filter((r) => {
-    const expect640 = r.reqW <= 640, expect380 = r.reqW <= 380, expect980 = r.reqW <= 980;
-    const mqOk = r.mq640 === expect640 && r.mq380 === expect380 && r.mq980 === expect980;
+    const expect640 = r.reqW <= 640, expect980 = r.reqW <= 980;
+    const mqOk = r.mq640 === expect640 && r.mq980 === expect980;
     const regimeOk = r.reqW <= 980 ? r.clientWidth === r.reqW : r.innerWidth === r.reqW;
     return !mqOk || !regimeOk;
   });
-  ck("仪器校准：请求宽度 == 媒体查询看到的宽度（三处断点两侧都对得上）", badCal.length === 0,
-    badCal.map((r) => `${r.reqW}→iw${r.innerWidth}/cw${r.clientWidth} mq640=${r.mq640} mq380=${r.mq380} mq980=${r.mq980}`).join("；"));
+  ck("仪器校准：请求宽度 == 媒体查询看到的宽度（980/640 两侧都对得上）", badCal.length === 0,
+    badCal.map((r) => `${r.reqW}→iw${r.innerWidth}/cw${r.clientWidth} mq640=${r.mq640} mq980=${r.mq980}`).join("；"));
 
   const sameRow = (r) => new Set(r.cardW).size <= 1;
   ck("同一视口下所有便签等宽（没有哪一张被单独拉宽）", rows.every(sameRow),
@@ -245,25 +249,40 @@ try {
     overRight.map((r) => `${r.reqW}px maxRight=${r.maxRight} > clientW=${r.clientWidth}`).join("；"));
 
   const g = (w) => rows.find((r) => r.reqW === w);
-  ck("380/381 之间确实发生单列回落：>380 两列、≤380 一列",
-    g(381).cols === 2 && g(380).cols === 1 && g(360).cols === 1,
-    `381→${g(381).cols} 列，380→${g(380).cols} 列，360→${g(360).cols} 列`);
-
   const card = (w) => g(w).cardW[0];
-  // 单调性：在两个档位内部各自逐级收窄（别有的宽度卡住不动 —— 那说明有别的规则在插队）
   const asc = (a, b) => a.reqW - b.reqW;
-  const two = rows.filter((r) => r.reqW > 380 && r.reqW <= 640).sort(asc);
-  const one = rows.filter((r) => r.reqW <= 380).sort(asc);
+
+  // ── 自动探测「单列回落」的边界（不硬编码阈值）──
+  // 阈值本身是被测对象；写死它 ⇒ 每次调阈值探针都假红，等于守护在保护旧的实现形态。
+  const inSmall = rows.filter((r) => r.reqW >= 320 && r.reqW <= 640).sort(asc);
+  const edges = [];
+  for (let i = 1; i < inSmall.length; i++) {
+    if (inSmall[i].cols !== inSmall[i - 1].cols) edges.push([inSmall[i - 1], inSmall[i]]);
+  }
+  const drop = edges.find(([lo, hi]) => lo.cols < hi.cols);   // 视口变宽时 1 列 → 2 列
+  ck("320–640 之间恰好有一处「单列→两列」的边界",
+    !!drop && edges.length === 1,
+    edges.length ? edges.map(([lo, hi]) => `${lo.reqW}(${lo.cols}列)→${hi.reqW}(${hi.cols}列)`).join("；") : "一处都没找到");
+
+  const two = drop ? inSmall.filter((r) => r.reqW >= drop[1].reqW) : [];
+  const one = drop ? inSmall.filter((r) => r.reqW <= drop[0].reqW) : [];
   const mono = (arr) => arr.every((r, i) => i === 0 || arr[i - 1].cardW[0] <= r.cardW[0]);
-  ck("两列档（381–640）内便签宽随视口单调收窄", mono(two) && two[two.length - 1].cardW[0] > two[0].cardW[0],
+  ck("两列档内便签宽随视口单调收窄", two.length >= 3 && mono(two) && two[two.length - 1].cardW[0] > two[0].cardW[0],
     two.map((r) => `${r.reqW}:${r.cardW[0]}`).join(" "));
-  ck("单列档（≤380）内便签宽随视口单调收窄", mono(one) && one[one.length - 1].cardW[0] > one[0].cardW[0],
+  ck("单列档内便签宽随视口单调收窄", one.length >= 3 && mono(one) && one[one.length - 1].cardW[0] > one[0].cardW[0],
     one.map((r) => `${r.reqW}:${r.cardW[0]}`).join(" "));
 
-  ck("主流手机（390/393/414/430）的便签比桌面列更窄 —— 手机上是变窄，不是变宽",
-    card(390) < card(1280) && card(430) < card(1280), `390→${card(390)}，430→${card(430)}，桌面 1280→${card(1280)}`);
-  ck("但最窄档（≤380 单列）的便签比桌面列还宽 —— 全站最宽的便签出现在最窄的手机上",
-    card(375) > card(1280) && card(320) > 0, `375→${card(375)}，320→${card(320)}，桌面 1280→${card(1280)}`);
+  // 🔴 这条才是「单列回落」规则存在的理由本身：它自述的动机是
+  //    「两列会把每列压到 ~150px 以下，长标题断得很碎反而更难读」。
+  //    所以不变量是「任何视口下便签都不窄于 150px」—— 盯目标，不盯阈值数字。
+  //    （阈值 380 时这条会红：381px 两列只有 148.5px。它正是本次要修的缺陷。）
+  const narrow = rows.filter((r) => r.cardW[0] > 0 && r.cardW[0] < 150);
+  ck("任何视口下便签都不窄于 150px（这条规则自述的可读下限）", narrow.length === 0,
+    narrow.map((r) => `${r.reqW}px 视口只有 ${r.cardW[0]}px`).join("；"));
+
+  ck("跨过该边界确实变宽（回落规则真的生效）",
+    !!drop && drop[0].cardW[0] > drop[1].cardW[0],
+    drop ? `${drop[1].reqW}px 两列时 ${drop[1].cardW[0]}px → ${drop[0].reqW}px 单列时 ${drop[0].cardW[0]}px` : "无边界");
 
   console.log("\n机型对照（便签实际宽 × 在同一行能放几张）：");
   for (const d of DEVICES) {
@@ -271,8 +290,10 @@ try {
     if (r) console.log(`  ${d.name.padEnd(30)} ${String(d.w).padStart(4)}px 视口 → 便签 ${String(r.cardW[0]).padStart(3)}px 宽，一屏 ${r.cols} 列`);
   }
 
-  const a = g(381).cardW[0], b = g(380).cardW[0];
-  console.log(`\n  ⚠️ 380↔381 的宽度悬崖：视口只差 1px，便签从 ${a}px 跳到 ${b}px（×${(b / a).toFixed(2)}）—— 单列回落规则在这里生效`);
+  if (drop) {
+    const a = drop[1].cardW[0], b = drop[0].cardW[0];
+    console.log(`\n  ⚠️ ${drop[1].reqW}↔${drop[0].reqW} 的宽度悬崖：视口只差 ${drop[1].reqW - drop[0].reqW}px，便签从 ${a}px 跳到 ${b}px（×${(b / a).toFixed(2)}）—— 单列回落规则在 ≤${drop[0].reqW} 生效`);
+  }
   const rot = g(1280);
   console.log(`  ℹ️ 卡片带 rotate()（手贴感）：1280px 下布局宽 ${rot.cardW[0]}，视觉包围盒 ${rot.bboxW}（多 ${rot.bboxW - rot.cardW[0]}px）`);
   console.log(`  ℹ️ 容器链 @390：layout=${g(390).layout.w} content=${g(390).content.w} view=${g(390).view.w} board=${g(390).board.w} inner=${g(390).inner.w}（board 的 6px 边框×2 + padding 14×2 都在这里被吃掉）`);
